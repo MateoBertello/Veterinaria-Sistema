@@ -1,0 +1,21 @@
+{
+  "name": "veterinaria-leo",
+  "private": true,
+  "version": "0.0.1",
+  "scripts": {
+    "test": "vitest run tests/unit",
+    "test:watch": "vitest",
+    "test:unit": "vitest run tests/unit",
+    "test:integration": "vitest run tests/integration",
+    "typecheck": "tsc -p supabase/functions/api/tsconfig.json --noEmit && tsc -p web/tsconfig.json --noEmit",
+    "lint": "eslint supabase/functions/api/src web/src"
+  },
+  "devDependencies": {
+    "@supabase/supabase-js": "^2.108.1",
+    "@types/node": "^20.19.43",
+    "hono": "^4.12.25",
+    "typescript": "^5.9.3",
+    "vitest": "^1.6.1",
+    "zod": "^4.4.3"
+  }
+}
