@@ -3,15 +3,21 @@
     "target": "ES2022",
     "module": "ESNext",
     "moduleResolution": "bundler",
+    "lib": ["ES2022", "DOM"],
+    "types": ["node"],
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
-    "outDir": "dist",
-    "baseUrl": "."
+    "noEmit": true,
+    "allowImportingTsExtensions": true
   },
   "include": [
-    "supabase/functions/api/src/**/*",
-    "tests/**/*"
+    "tests/**/*",
+    "supabase/functions/api/src/shared/**/*"
   ],
-  "exclude": ["node_modules", "web"]
+  "exclude": [
+    "node_modules",
+    "web",
+    "supabase/functions/api/src/index.ts"
+  ]
 }
