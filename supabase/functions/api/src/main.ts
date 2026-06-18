@@ -6,6 +6,8 @@ import { ok } from "./shared/envelope.ts";
 import { getTenantContext } from "./middleware/tenantContext.ts";
 import { authRouter } from "./modules/auth/auth.controller.ts";
 import { usuariosRouter } from "./modules/usuarios/usuarios.controller.ts";
+import { tenantsRouter } from "./modules/admin/tenants.controller.ts";
+import { requireActiveTenant } from "./middleware/requireActiveTenant.ts";
 
 const app = new Hono().basePath("/api/v1");
 
@@ -17,7 +19,8 @@ app.get("/health", (c) => {
 });
 
 // ─── Módulos habilitados del tenant autenticado ────────────────────────────
-app.get("/modulos-habilitados", tenantContext, async (c) => {
+// requireActiveTenant bloquea tenants suspendidos (RN-SA3) antes de servir datos.
+app.get("/modulos-habilitados", tenantContext, requireActiveTenant, async (c) => {
   const { tenantId } = getTenantContext(c);
   const authHeader = c.req.header("Authorization") ?? "";
   const db = getDb(authHeader);
@@ -40,5 +43,9 @@ app.route("/auth", authRouter);
 
 // ─── Módulo Usuarios ──────────────────────────────────────────────────────────
 app.route("/usuarios", usuariosRouter);
+
+// ─── Consola Super Admin (fuera de tenant) ──────────────────────────────────────
+// Montado en /api/v1/admin/tenants; el router NO repite el segmento /tenants.
+app.route("/admin/tenants", tenantsRouter);
 
 export default app;

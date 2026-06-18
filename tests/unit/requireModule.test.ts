@@ -41,7 +41,7 @@ function buildApp(modulo: "historial_clinico" | "turnos" | "guarderia") {
   return app;
 }
 
-function mockDb(opts: { activo: boolean; habilitado: boolean }) {
+function mockDb(opts: { habilitado: boolean }) {
   const db = {
     from: vi.fn().mockReturnThis(),
     select: vi.fn().mockReturnThis(),
@@ -49,14 +49,12 @@ function mockDb(opts: { activo: boolean; habilitado: boolean }) {
     single: vi.fn(),
   };
 
-  // Primera llamada: query de tenants
-  // Segunda llamada: query de modulos_contratados
-  db.single
-    .mockResolvedValueOnce({ data: { activo: opts.activo }, error: null })
-    .mockResolvedValueOnce({
-      data: opts.habilitado ? { habilitado: true } : null,
-      error: opts.habilitado ? null : { message: "not found" },
-    });
+  // requireModule ya no consulta tenants (la suspensión la cubre requireActiveTenant):
+  // única llamada → query de modulos_contratados.
+  db.single.mockResolvedValueOnce({
+    data: opts.habilitado ? { habilitado: true } : null,
+    error: opts.habilitado ? null : { message: "not found" },
+  });
 
   mockGetDb.mockReturnValue(db as never);
   return db;
@@ -76,14 +74,14 @@ describe("requireModule middleware", () => {
   });
 
   it("permite el acceso cuando el módulo está habilitado", async () => {
-    mockDb({ activo: true, habilitado: true });
+    mockDb({ habilitado: true });
     const app = buildApp("historial_clinico");
     const res = await sendReq(app);
     expect(res.status).toBe(200);
   });
 
   it("rechaza con 403 MODULE_NOT_LICENSED cuando el módulo no está habilitado", async () => {
-    mockDb({ activo: true, habilitado: false });
+    mockDb({ habilitado: false });
     const app = buildApp("turnos");
     const res = await sendReq(app);
     expect(res.status).toBe(403);
@@ -92,17 +90,8 @@ describe("requireModule middleware", () => {
     expect(body.error.code).toBe("MODULE_NOT_LICENSED");
   });
 
-  it("rechaza con 403 cuando el tenant está suspendido (activo=false)", async () => {
-    mockDb({ activo: false, habilitado: true });
-    const app = buildApp("guarderia");
-    const res = await sendReq(app);
-    expect(res.status).toBe(403);
-    const body = await res.json();
-    expect(body.error.code).toBe("MODULE_NOT_LICENSED");
-  });
-
   it("usa la caché en la segunda llamada (sin re-consultar DB)", async () => {
-    mockDb({ activo: true, habilitado: true });
+    mockDb({ habilitado: true });
     const app = buildApp("historial_clinico");
 
     // Primera llamada → hit DB
@@ -118,14 +107,14 @@ describe("requireModule middleware", () => {
 
   it("re-consulta DB después de invalidar la caché", async () => {
     // Setup: módulo habilitado, cachear
-    mockDb({ activo: true, habilitado: true });
+    mockDb({ habilitado: true });
     const app = buildApp("historial_clinico");
     await sendReq(app);
 
     // Invalidar e intentar de nuevo con módulo deshabilitado
     invalidateModuleCache(TENANT_ID, "historial_clinico");
     vi.clearAllMocks();
-    mockDb({ activo: true, habilitado: false });
+    mockDb({ habilitado: false });
 
     const res = await sendReq(app);
     expect(res.status).toBe(403);
@@ -133,7 +122,7 @@ describe("requireModule middleware", () => {
   });
 
   it("re-consulta DB después de que el TTL expira", async () => {
-    mockDb({ activo: true, habilitado: true });
+    mockDb({ habilitado: true });
     const app = buildApp("historial_clinico");
     await sendReq(app);
 
@@ -142,7 +131,7 @@ describe("requireModule middleware", () => {
     vi.spyOn(Date, "now").mockReturnValue(realNow() + 61_000);
 
     vi.clearAllMocks();
-    mockDb({ activo: true, habilitado: false });
+    mockDb({ habilitado: false });
 
     const res = await sendReq(app);
     expect(mockGetDb).toHaveBeenCalled(); // re-consultó DB

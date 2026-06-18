@@ -6,6 +6,7 @@ export enum ErrorCode {
   // ── Super Admin / Plataforma ──────────────────────────────────────
   TENANT_NOT_FOUND       = "TENANT_NOT_FOUND",
   TENANT_DUPLICATE_TAXID = "TENANT_DUPLICATE_TAXID",
+  TENANT_SUSPENDED       = "TENANT_SUSPENDED",
   MODULE_UNKNOWN         = "MODULE_UNKNOWN",
   MODULE_NOT_LICENSED    = "MODULE_NOT_LICENSED",
 

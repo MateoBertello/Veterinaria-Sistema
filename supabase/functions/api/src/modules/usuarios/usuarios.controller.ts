@@ -8,12 +8,13 @@ import {
 import { DomainError, ErrorCode } from "../../shared/errors.ts";
 import { ok } from "../../shared/envelope.ts";
 import { tenantContext, getTenantContext } from "../../middleware/tenantContext.ts";
+import { requireActiveTenant } from "../../middleware/requireActiveTenant.ts";
 import { requirePermission } from "../../middleware/requirePermission.ts";
 
 export const usuariosRouter = new Hono();
 
-// Todas las rutas requieren autenticación + permiso manage_users (RN-S2)
-usuariosRouter.use("/*", tenantContext, requirePermission("manage_users"));
+// Autenticación → tenant activo (RN-SA3) → permiso manage_users (RN-S2).
+usuariosRouter.use("/*", tenantContext, requireActiveTenant, requirePermission("manage_users"));
 
 // ── GET /usuarios ─────────────────────────────────────────────────────────────
 usuariosRouter.get("/", async (c) => {
