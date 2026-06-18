@@ -141,7 +141,7 @@ export const AuthService = {
       .eq("id", usuario.id);
 
     // 5. Extraer permisos del rol
-    const rol = usuario.roles as {
+    const rol = usuario.roles as unknown as {
       id: string;
       name: string;
       display_name: string;
@@ -214,7 +214,7 @@ export const AuthService = {
       throw new DomainError(ErrorCode.UNAUTHORIZED, 401, "Usuario no encontrado");
     }
 
-    const rol = data.roles as {
+    const rol = data.roles as unknown as {
       name: string;
       display_name: string;
       rol_permiso: Array<{ permisos: { name: string } }>;

@@ -366,6 +366,6 @@ export const UsuariosService = {
       throw new DomainError(ErrorCode.INTERNAL_ERROR, 500, error.message);
     }
 
-    return (data as unknown[]) ?? [];
+    return (data as object[]) ?? [];
   },
 };
