@@ -4,6 +4,8 @@ import { tenantContext } from "./middleware/tenantContext.ts";
 import { getDb } from "./shared/db.ts";
 import { ok } from "./shared/envelope.ts";
 import { getTenantContext } from "./middleware/tenantContext.ts";
+import { authRouter } from "./modules/auth/auth.controller.ts";
+import { usuariosRouter } from "./modules/usuarios/usuarios.controller.ts";
 
 const app = new Hono().basePath("/api/v1");
 
@@ -32,5 +34,11 @@ app.get("/modulos-habilitados", tenantContext, async (c) => {
 
   return c.json(ok(data ?? []));
 });
+
+// ─── Módulo Auth ──────────────────────────────────────────────────────────────
+app.route("/auth", authRouter);
+
+// ─── Módulo Usuarios ──────────────────────────────────────────────────────────
+app.route("/usuarios", usuariosRouter);
 
 export default app;

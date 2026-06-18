@@ -8,10 +8,15 @@
  *
  * Para correr: npx vitest run tests/integration
  */
+
+
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+
+
+globalThis.WebSocket = class FakeWebSocket {} as any;
 
 // ─── Cargar .env ─────────────────────────────────────────────────────────────
 function loadEnv(): void {

@@ -13,6 +13,8 @@
   "devDependencies": {
     "@supabase/supabase-js": "^2.108.1",
     "@types/node": "^20.19.43",
+    "@types/ws": "^8.18.1",
+    "dotenv": "^17.4.2",
     "hono": "^4.12.25",
     "typescript": "^5.9.3",
     "vitest": "^1.6.1",

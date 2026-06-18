@@ -1,4 +1,8 @@
 import { defineConfig } from "vitest/config";
+import dotenv from "dotenv";
+
+// Cargar las variables de entorno del archivo .env
+dotenv.config();
 
 export default defineConfig({
   test: {
@@ -6,11 +10,9 @@ export default defineConfig({
     environment: "node",
     include: ["tests/**/*.test.ts"],
     setupFiles: ["tests/setup.ts"],
-    // Excluir tests de integración del run unitario por defecto
-    exclude: ["tests/integration/**"],
+    // exclude: ["tests/integration/**"],
   },
   resolve: {
-    // Permite imports con extensión .ts explícita (estilo Deno/ESM)
     extensions: [".ts", ".js"],
   },
 });
