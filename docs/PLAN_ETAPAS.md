@@ -172,7 +172,7 @@
 | Etapa | Estado | RNs con test | Fecha de cierre | Notas |
 | :---- | :---- | :---- | :---- | :---- |
 | 1 — Fundaciones | Pendiente | — | — | |
-| 2 — Auth + Super Admin | Pendiente | — | — | |
+| 2 — Auth + Super Admin | ✅ Cerrada | RN-S1..S3, RN-SA1..SA5, RN-SM1..SM4 | 2026-06-19 | Auth+Usuarios, Super Admin/Tenants, Módulos Contratados + sidebar dinámico (lógica). Endpoint `/modulos-habilitados` en camelCase. |
 | 3 — Core | Pendiente | — | — | |
 | 4 — Transversales | Pendiente | — | — | |
 | 5 — Historial Clínico | Pendiente | — | — | |

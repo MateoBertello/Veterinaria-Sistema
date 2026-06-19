@@ -65,5 +65,5 @@ export type ModuloVendible = "historial_clinico" | "turnos" | "guarderia";
 export interface ModuloContratado {
   modulo:     ModuloVendible;
   habilitado: boolean;
-  fecha_alta: string | null;
+  fechaAlta:  string | null;
 }
