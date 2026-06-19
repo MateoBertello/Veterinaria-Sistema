@@ -212,6 +212,149 @@ describe("Mascotas: aislamiento por tenant (RLS, bloqueante)", () => {
   });
 });
 
+// ─── Cambiar Dueño de Mascota (RN-CD1..CD5) ────────────────────────────────────
+
+/** Crea una mascota de un tenant y devuelve su id. */
+async function crearMascota(jwt: string, clienteId: string, name = "Transferible"): Promise<string> {
+  const res = await callApp("/mascotas", {
+    method: "POST", jwt,
+    body: { name, clientId: clienteId, especieId, sex: "Macho", tamano: "Mediano" },
+  });
+  const body = await res.json() as { data: { id: string } };
+  return body.data.id;
+}
+
+describe("Cambiar Dueño de Mascota (RN-CD)", () => {
+  it("RN-CD2: transfiere atómicamente y deja trazabilidad consultable", async () => {
+    if (skipIfNoCredentials() || !tenantA.jwt) return;
+
+    // Segundo cliente del tenant A (destino de la transferencia).
+    const { data: nuevoDueno } = await serviceDb
+      .from("clientes")
+      .insert({ tenant_id: tenantA.tenantId, full_name: "Nuevo Dueño A", phone: "1100009999" })
+      .select("id").single();
+    const newClientId = nuevoDueno?.id as string;
+
+    const petId = await crearMascota(tenantA.jwt, tenantA.clienteId);
+
+    const res = await callApp(`/mascotas/${petId}/cambio-dueno`, {
+      method: "POST", jwt: tenantA.jwt,
+      body: { newClientId, reason: "Adopción", notes: "Acordado por escrito" },
+    });
+    const body = await res.json() as { success: boolean; data: { newClientName: string } };
+    expect(res.status).toBe(200);
+    expect(body.success).toBe(true);
+    expect(body.data.newClientName).toBe("Nuevo Dueño A");
+
+    // (a) la mascota quedó con el nuevo dueño.
+    const det = await callApp(`/mascotas/${petId}`, { jwt: tenantA.jwt });
+    const detBody = await det.json() as { data: { clientId: string } };
+    expect(detBody.data.clientId).toBe(newClientId);
+
+    // (b) la trazabilidad es consultable (RN-CD2).
+    const hist = await callApp(`/mascotas/${petId}/cambios-dueno`, { jwt: tenantA.jwt });
+    const histBody = await hist.json() as { data: Array<{ previousClientName: string; newClientName: string }> };
+    expect(histBody.data.length).toBeGreaterThanOrEqual(1);
+    expect(histBody.data[0].newClientName).toBe("Nuevo Dueño A");
+  });
+
+  it("RN-CD1: nuevo dueño = dueño actual → 422 SAME_OWNER", async () => {
+    if (skipIfNoCredentials() || !tenantA.jwt) return;
+
+    const petId = await crearMascota(tenantA.jwt, tenantA.clienteId, "MismoDueno");
+    const res = await callApp(`/mascotas/${petId}/cambio-dueno`, {
+      method: "POST", jwt: tenantA.jwt,
+      body: { newClientId: tenantA.clienteId },
+    });
+    const body = await res.json() as { error: { code: string } };
+    expect(res.status).toBe(422);
+    expect(body.error.code).toBe("SAME_OWNER");
+  });
+
+  it("aislamiento: B no puede cambiar el dueño de una mascota de A → 404", async () => {
+    if (skipIfNoCredentials() || !tenantA.jwt || !tenantB.jwt) return;
+
+    const petId = await crearMascota(tenantA.jwt, tenantA.clienteId, "AjenaA");
+    const res = await callApp(`/mascotas/${petId}/cambio-dueno`, {
+      method: "POST", jwt: tenantB.jwt,
+      body: { newClientId: tenantB.clienteId },
+    });
+    const body = await res.json() as { error: { code: string } };
+    expect(res.status).toBe(404);
+    expect(body.error.code).toBe("MASCOTA_NOT_FOUND");
+  });
+
+  it("aislamiento: no se transfiere a un cliente de otro tenant → 403 FORBIDDEN", async () => {
+    if (skipIfNoCredentials() || !tenantA.jwt) return;
+
+    const petId = await crearMascota(tenantA.jwt, tenantA.clienteId, "DestinoAjeno");
+    const res = await callApp(`/mascotas/${petId}/cambio-dueno`, {
+      method: "POST", jwt: tenantA.jwt,
+      body: { newClientId: tenantB.clienteId },
+    });
+    const body = await res.json() as { error: { code: string } };
+    expect(res.status).toBe(403);
+    expect(body.error.code).toBe("FORBIDDEN");
+  });
+});
+
+// ─── Marcar Mascota como Fallecida — manual (RN-MF1..MF5) ───────────────────────
+
+describe("Marcar Mascota como Fallecida (RN-MF)", () => {
+  it("marca estado 'Fallecida' con fecha y motivo (RN-MF4)", async () => {
+    if (skipIfNoCredentials() || !tenantA.jwt) return;
+
+    const petId = await crearMascota(tenantA.jwt, tenantA.clienteId, "ParaBaja");
+    const res = await callApp(`/mascotas/${petId}/fallecimiento`, {
+      method: "POST", jwt: tenantA.jwt,
+      body: { deceasedReason: "Insuficiencia renal", deceasedDate: "2026-06-10" },
+    });
+    const body = await res.json() as { success: boolean; data: { estado: string; deceasedReason: string } };
+    expect(res.status).toBe(200);
+    expect(body.data.estado).toBe("Fallecida");
+    expect(body.data.deceasedReason).toBe("Insuficiencia renal");
+  });
+
+  it("RN-MF1: sin motivo → 422 VALIDATION_ERROR", async () => {
+    if (skipIfNoCredentials() || !tenantA.jwt) return;
+
+    const petId = await crearMascota(tenantA.jwt, tenantA.clienteId, "SinMotivo");
+    const res = await callApp(`/mascotas/${petId}/fallecimiento`, {
+      method: "POST", jwt: tenantA.jwt, body: { deceasedReason: "" },
+    });
+    const body = await res.json() as { error: { code: string } };
+    expect(res.status).toBe(422);
+    expect(body.error.code).toBe("VALIDATION_ERROR");
+  });
+
+  it("RN-MF2: re-marcar una mascota ya fallecida → 422 PET_DECEASED", async () => {
+    if (skipIfNoCredentials() || !tenantA.jwt) return;
+
+    const petId = await crearMascota(tenantA.jwt, tenantA.clienteId, "DobleBaja");
+    await callApp(`/mascotas/${petId}/fallecimiento`, {
+      method: "POST", jwt: tenantA.jwt, body: { deceasedReason: "Causa 1" },
+    });
+    const res = await callApp(`/mascotas/${petId}/fallecimiento`, {
+      method: "POST", jwt: tenantA.jwt, body: { deceasedReason: "Causa 2" },
+    });
+    const body = await res.json() as { error: { code: string } };
+    expect(res.status).toBe(422);
+    expect(body.error.code).toBe("PET_DECEASED");
+  });
+
+  it("aislamiento: B no puede marcar fallecida una mascota de A → 404", async () => {
+    if (skipIfNoCredentials() || !tenantA.jwt || !tenantB.jwt) return;
+
+    const petId = await crearMascota(tenantA.jwt, tenantA.clienteId, "AjenaBaja");
+    const res = await callApp(`/mascotas/${petId}/fallecimiento`, {
+      method: "POST", jwt: tenantB.jwt, body: { deceasedReason: "Intruso" },
+    });
+    const body = await res.json() as { error: { code: string } };
+    expect(res.status).toBe(404);
+    expect(body.error.code).toBe("MASCOTA_NOT_FOUND");
+  });
+});
+
 // ─── Catálogos globales por PostgREST directo ──────────────────────────────────
 
 describe("Catálogos globales (PostgREST directo, sin endpoints Hono)", () => {

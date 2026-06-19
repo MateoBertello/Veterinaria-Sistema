@@ -35,6 +35,24 @@ export const ListarMascotasQuerySchema = z.object({
   limit:    z.coerce.number().int().min(1).max(100).default(20),
 });
 
+// RN-CD1..CD5: Cambiar Dueño de Mascota. El dueño distinto (RN-CD1) se valida
+// en la transacción (RPC); aquí sólo se exige un UUID y metadatos opcionales.
+export const CambiarDuenoSchema = z.object({
+  newClientId: z.string().uuid("newClientId debe ser un UUID válido"),
+  reason:      z.string().max(500, "El motivo admite hasta 500 caracteres").nullish(),
+  notes:       z.string().max(1000, "Las notas admiten hasta 1000 caracteres").nullish(),
+});
+
+// RN-MF1..MF5: Marcar Mascota como Fallecida (manual). El motivo es obligatorio
+// (RN-MF1); la fecha por defecto es hoy (se resuelve en el Service).
+export const MarcarFallecidaSchema = z.object({
+  deceasedReason: z.string().trim().min(1, "El motivo del fallecimiento es requerido").max(500),
+  deceasedDate:   z.string().date("deceasedDate debe ser una fecha ISO (YYYY-MM-DD)").nullish(),
+  deceasedNotes:  z.string().max(1000, "Las notas admiten hasta 1000 caracteres").nullish(),
+});
+
 export type CrearMascotaDto        = z.infer<typeof CrearMascotaSchema>;
 export type EditarMascotaDto       = z.infer<typeof EditarMascotaSchema>;
 export type ListarMascotasQueryDto = z.infer<typeof ListarMascotasQuerySchema>;
+export type CambiarDuenoDto        = z.infer<typeof CambiarDuenoSchema>;
+export type MarcarFallecidaDto     = z.infer<typeof MarcarFallecidaSchema>;

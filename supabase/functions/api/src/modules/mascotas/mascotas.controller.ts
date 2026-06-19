@@ -4,6 +4,8 @@ import {
   CrearMascotaSchema,
   EditarMascotaSchema,
   ListarMascotasQuerySchema,
+  CambiarDuenoSchema,
+  MarcarFallecidaSchema,
 } from "./mascotas.schemas.ts";
 import { DomainError, ErrorCode } from "../../shared/errors.ts";
 import { ok } from "../../shared/envelope.ts";
@@ -80,4 +82,39 @@ mascotasRouter.put("/:id", async (c) => {
 mascotasRouter.delete("/:id", async (c) => {
   const resultado = await MascotasService.eliminar(c.req.param("id"), callerContext(c));
   return c.json(ok(resultado), 200);
+});
+
+// ── POST /mascotas/:id/cambio-dueno ───────────────────────────────────────────
+// Cambiar Dueño de Mascota (RN-CD1..CD5).
+mascotasRouter.post("/:id/cambio-dueno", async (c) => {
+  const body   = await c.req.json().catch(() => ({}));
+  const parsed = CambiarDuenoSchema.safeParse(body);
+  if (!parsed.success) {
+    throw new DomainError(ErrorCode.VALIDATION_ERROR, 422, "Datos de cambio de dueño inválidos", parsed.error.issues ?? []);
+  }
+
+  const resultado = await MascotasService.cambiarDueno(c.req.param("id"), parsed.data, callerContext(c));
+  return c.json(ok(resultado), 200);
+});
+
+// ── GET /mascotas/:id/cambios-dueno ───────────────────────────────────────────
+// Historial de cambios de dueño (RN-CD2, trazabilidad consultable).
+mascotasRouter.get("/:id/cambios-dueno", async (c) => {
+  const { tenantId } = getTenantContext(c);
+  const cambios = await MascotasService.listarCambiosDueno(c.req.param("id"), tenantId);
+  return c.json(ok(cambios), 200);
+});
+
+// ── POST /mascotas/:id/fallecimiento ──────────────────────────────────────────
+// Marcar Mascota como Fallecida — flujo MANUAL (RN-MF1..MF5). NO es eutanasia
+// (Etapa 5) y NO existe acción de reversión de 'Fallecida' (regla 8 CLAUDE.md).
+mascotasRouter.post("/:id/fallecimiento", async (c) => {
+  const body   = await c.req.json().catch(() => ({}));
+  const parsed = MarcarFallecidaSchema.safeParse(body);
+  if (!parsed.success) {
+    throw new DomainError(ErrorCode.VALIDATION_ERROR, 422, "Datos de fallecimiento inválidos", parsed.error.issues ?? []);
+  }
+
+  const mascota = await MascotasService.marcarFallecida(c.req.param("id"), parsed.data, callerContext(c));
+  return c.json(ok(mascota), 200);
 });

@@ -91,7 +91,9 @@ function buildMockDb(opts: MockOpts = {}) {
     opts.rangeResult ?? { data: [], error: null, count: 0 },
   );
 
-  const db = { from: vi.fn(() => builder), builder };
+  // rpc() devuelve el mismo builder encadenable; .single()/.maybeSingle()
+  // toman de la misma cola singleResults (igual que un SELECT).
+  const db = { from: vi.fn(() => builder), rpc: vi.fn(() => builder), builder };
   return db;
 }
 
@@ -321,5 +323,301 @@ describe("Listado de mascotas", () => {
     // El dueño se resuelve en la misma consulta (embed), no por fila.
     const selectArg = (db.builder["select"] as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
     expect(selectArg).toContain("cliente:clientes");
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Cambiar Dueño de Mascota (RN-CD1..CD5)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const NEW_CLIENT_ID = "77777777-7777-4777-8777-777777777777";
+
+const cambioDuenoDto = {
+  newClientId: NEW_CLIENT_ID,
+  reason:      "Adopción",
+  notes:       "Transferencia acordada por escrito",
+};
+
+/** Fila que devuelve el RPC cambiar_dueno_mascota (snake_case). */
+const rpcRow = (over: Record<string, unknown> = {}) => ({
+  pet_id:               PET_ID,
+  previous_client_id:   CLIENT_ID,
+  previous_client_name: "Carlos Fernández",
+  new_client_id:        NEW_CLIENT_ID,
+  new_client_name:      "Ana Martínez",
+  change_date:          "2026-06-19T12:00:00Z",
+  ...over,
+});
+
+describe("RN-CD1: Cliente distinto (SAME_OWNER)", () => {
+  it("RN-CD1: nuevo dueño = dueño actual → SAME_OWNER", async () => {
+    const db = buildMockDb({
+      singleResults: [{ data: null, error: { message: "SAME_OWNER" } }],
+    });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    await expect(
+      MascotasService.cambiarDueno(PET_ID, cambioDuenoDto, ctx),
+    ).rejects.toMatchObject({ code: ErrorCode.SAME_OWNER, statusCode: 422 });
+  });
+});
+
+describe("RN-CD2: Trazabilidad del cambio", () => {
+  it("RN-CD2: invoca el RPC transaccional con tenant/pet/nuevo dueño/motivo/notas/responsable", async () => {
+    const db = buildMockDb({
+      singleResults: [{ data: rpcRow(), error: null }],
+    });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    const res = await MascotasService.cambiarDueno(PET_ID, cambioDuenoDto, ctx);
+
+    expect(db.rpc).toHaveBeenCalledWith(
+      "cambiar_dueno_mascota",
+      expect.objectContaining({
+        p_tenant_id:     TENANT_ID,
+        p_pet_id:        PET_ID,
+        p_new_client_id: NEW_CLIENT_ID,
+        p_recorded_by:   CALLER_USER_ID,
+        p_reason:        "Adopción",
+        p_notes:         "Transferencia acordada por escrito",
+      }),
+    );
+    expect(res).toMatchObject({
+      petId:              PET_ID,
+      previousClientName: "Carlos Fernández",
+      newClientName:      "Ana Martínez",
+    });
+  });
+});
+
+describe("RN-CD3: Preservación de la propiedad histórica", () => {
+  it("RN-CD3: cambiar dueño nunca escribe en historial_clinico", async () => {
+    const db = buildMockDb({
+      singleResults: [{ data: rpcRow(), error: null }],
+    });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    await MascotasService.cambiarDueno(PET_ID, cambioDuenoDto, ctx);
+
+    // La preservación clínica es automática (snapshots inmutables): el Service
+    // no toca historial_clinico al transferir.
+    const tablasTocadas = (db.from as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]);
+    expect(tablasTocadas).not.toContain("historial_clinico");
+  });
+});
+
+describe("RN-CD4: Sólo mascota activa", () => {
+  it("RN-CD4: transferir una mascota fallecida → PET_DECEASED", async () => {
+    const db = buildMockDb({
+      singleResults: [{ data: null, error: { message: "PET_DECEASED" } }],
+    });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    await expect(
+      MascotasService.cambiarDueno(PET_ID, cambioDuenoDto, ctx),
+    ).rejects.toMatchObject({ code: ErrorCode.PET_DECEASED, statusCode: 422 });
+  });
+
+  it("RN-CD4: mascota inexistente en el tenant → MASCOTA_NOT_FOUND", async () => {
+    const db = buildMockDb({
+      singleResults: [{ data: null, error: { message: "MASCOTA_NOT_FOUND" } }],
+    });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    await expect(
+      MascotasService.cambiarDueno(PET_ID, cambioDuenoDto, ctx),
+    ).rejects.toMatchObject({ code: ErrorCode.MASCOTA_NOT_FOUND, statusCode: 404 });
+  });
+});
+
+describe("RN-CD5: Auditoría del cambio (módulo pets)", () => {
+  it("RN-CD5: registra UPDATE en pets con dueño previo y nuevo", async () => {
+    const db = buildMockDb({
+      singleResults: [{ data: rpcRow(), error: null }],
+    });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    await MascotasService.cambiarDueno(PET_ID, cambioDuenoDto, ctx);
+
+    expect(mockRecordAudit).toHaveBeenCalledOnce();
+    const audit = mockRecordAudit.mock.calls[0][1];
+    expect(audit.action).toBe("UPDATE");
+    expect(audit.module).toBe("pets");
+    expect(audit.entityId).toBe(PET_ID);
+    expect(audit.oldValues).toMatchObject({ client_id: CLIENT_ID });
+    expect(audit.newValues).toMatchObject({ client_id: NEW_CLIENT_ID });
+  });
+});
+
+describe("Cambiar dueño: aislamiento de tenant", () => {
+  it("usa siempre ctx.tenantId en el RPC (nunca un tenant del body)", async () => {
+    const db = buildMockDb({
+      singleResults: [{ data: rpcRow(), error: null }],
+    });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    await MascotasService.cambiarDueno(
+      PET_ID,
+      { ...cambioDuenoDto, tenantId: "99999999-9999-4999-8999-999999999999" } as never,
+      ctx,
+    );
+
+    const params = (db.rpc as ReturnType<typeof vi.fn>).mock.calls[0][1] as Record<string, unknown>;
+    expect(params.p_tenant_id).toBe(TENANT_ID);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Marcar Mascota como Fallecida — manual (RN-MF1..MF5)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const fallecidaDto = {
+  deceasedReason: "Insuficiencia renal",
+  deceasedDate:   "2026-06-10",
+  deceasedNotes:  "Tratamiento paliativo previo",
+};
+
+describe("RN-MF1: Motivo obligatorio", () => {
+  it("RN-MF1: deceasedReason vacío → VALIDATION_ERROR", async () => {
+    const db = buildMockDb();
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    await expect(
+      MascotasService.marcarFallecida(PET_ID, { deceasedReason: "  " } as never, ctx),
+    ).rejects.toMatchObject({ code: ErrorCode.VALIDATION_ERROR, statusCode: 422 });
+    expect(db.builder["update"]).not.toHaveBeenCalled();
+  });
+});
+
+describe("RN-MF2: Bloqueo clínico (PET_DECEASED)", () => {
+  it("RN-MF2: assertMascotaActiva sobre una mascota fallecida → PET_DECEASED", async () => {
+    const db = buildMockDb({
+      singleResults: [{ data: { id: PET_ID, estado: "Fallecida", deleted: false }, error: null }],
+    });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    await expect(
+      MascotasService.assertMascotaActiva(db as never, PET_ID, TENANT_ID),
+    ).rejects.toMatchObject({ code: ErrorCode.PET_DECEASED, statusCode: 422 });
+  });
+
+  it("RN-MF2: assertMascotaActiva sobre mascota inexistente → MASCOTA_NOT_FOUND", async () => {
+    const db = buildMockDb({
+      singleResults: [{ data: null, error: null }],
+    });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    await expect(
+      MascotasService.assertMascotaActiva(db as never, PET_ID, TENANT_ID),
+    ).rejects.toMatchObject({ code: ErrorCode.MASCOTA_NOT_FOUND, statusCode: 404 });
+  });
+
+  it("RN-MF2: re-marcar como fallecida una ya fallecida → PET_DECEASED", async () => {
+    const db = buildMockDb({
+      singleResults: [{ data: { id: PET_ID, estado: "Fallecida", deleted: false }, error: null }],
+    });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    await expect(
+      MascotasService.marcarFallecida(PET_ID, fallecidaDto, ctx),
+    ).rejects.toMatchObject({ code: ErrorCode.PET_DECEASED });
+    expect(db.builder["update"]).not.toHaveBeenCalled();
+  });
+});
+
+describe("Marcar fallecida: persistencia", () => {
+  it("persiste estado='Fallecida' con deceased_date y deceased_reason", async () => {
+    const db = buildMockDb({
+      singleResults: [
+        { data: { id: PET_ID, estado: "Activa", deleted: false }, error: null }, // assertMascotaActiva
+        { data: dbRow({ estado: "Fallecida", deceased_date: "2026-06-10", deceased_reason: "Insuficiencia renal" }), error: null }, // update+select
+      ],
+    });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    const mascota = await MascotasService.marcarFallecida(PET_ID, fallecidaDto, ctx);
+
+    const payload = (db.builder["update"] as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(payload).toMatchObject({
+      estado:          "Fallecida",
+      deceased_date:   "2026-06-10",
+      deceased_reason: "Insuficiencia renal",
+    });
+    expect(mascota.estado).toBe("Fallecida");
+  });
+
+  it("sin deceasedDate usa la fecha de hoy", async () => {
+    const db = buildMockDb({
+      singleResults: [
+        { data: { id: PET_ID, estado: "Activa", deleted: false }, error: null },
+        { data: dbRow({ estado: "Fallecida", deceased_date: "2026-06-19" }), error: null },
+      ],
+    });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    const { deceasedDate: _omit, ...sinFecha } = fallecidaDto;
+    await MascotasService.marcarFallecida(PET_ID, sinFecha as typeof fallecidaDto, ctx);
+
+    const payload = (db.builder["update"] as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(payload.deceased_date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+});
+
+describe("RN-MF5: Auditoría del fallecimiento (módulo pets)", () => {
+  it("RN-MF5: registra UPDATE en pets con marca de fallecimiento", async () => {
+    const db = buildMockDb({
+      singleResults: [
+        { data: { id: PET_ID, estado: "Activa", deleted: false }, error: null },
+        { data: dbRow({ estado: "Fallecida" }), error: null },
+      ],
+    });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    await MascotasService.marcarFallecida(PET_ID, fallecidaDto, ctx);
+
+    expect(mockRecordAudit).toHaveBeenCalledOnce();
+    const audit = mockRecordAudit.mock.calls[0][1];
+    expect(audit.action).toBe("UPDATE");
+    expect(audit.module).toBe("pets");
+    expect(audit.entityId).toBe(PET_ID);
+    expect(audit.newValues).toMatchObject({ estado: "Fallecida" });
+  });
+});
+
+// ─── Listar cambios de dueño (trazabilidad consultable, sin N+1) ───────────────
+
+describe("Listar cambios de dueño", () => {
+  it("resuelve dueño anterior y nuevo con embed en una sola consulta", async () => {
+    const cambioRow = {
+      id:                 "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      pet_id:             PET_ID,
+      previous_client_id: CLIENT_ID,
+      new_client_id:      NEW_CLIENT_ID,
+      change_date:        "2026-06-19T12:00:00Z",
+      reason:             "Adopción",
+      notes:              null,
+      previous:           { full_name: "Carlos Fernández" },
+      new:                { full_name: "Ana Martínez" },
+    };
+    const db = buildMockDb({
+      singleResults: [{ data: { id: PET_ID }, error: null }], // mascota del tenant
+      rangeResult:   { data: [cambioRow], error: null, count: 1 },
+    });
+    // listarCambiosDueno no pagina con range; usamos order() que resuelve a array.
+    db.builder["order"] = vi.fn().mockResolvedValue({ data: [cambioRow], error: null });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    const cambios = await MascotasService.listarCambiosDueno(PET_ID, TENANT_ID);
+
+    expect(cambios).toHaveLength(1);
+    expect(cambios[0]).toMatchObject({
+      previousClientName: "Carlos Fernández",
+      newClientName:      "Ana Martínez",
+      reason:             "Adopción",
+    });
+
+    const selectArg = (db.builder["select"] as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[0] as string;
+    expect(selectArg).toContain("clientes!previous_client_id");
+    expect(selectArg).toContain("clientes!new_client_id");
   });
 });
