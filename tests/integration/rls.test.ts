@@ -52,6 +52,7 @@ let userAId:   string;
 let userBId:   string;
 let jwtA:      string;
 let jwtB:      string;
+let clienteAId = "";
 
 /** Cliente con el JWT de un usuario (RLS activo) */
 function userClient(jwt: string): SupabaseClient {
@@ -191,12 +192,13 @@ beforeAll(async () => {
     });
   }
 
-  // Insertar cliente en tenant A
-  await serviceDb.from("clientes").insert({
+  // Insertar cliente en tenant A (se captura el id para los tests de escritura)
+  const { data: clienteA } = await serviceDb.from("clientes").insert({
     tenant_id: tenantAId,
     full_name: "Cliente de A",
     phone: "1111111111",
-  });
+  }).select("id").single();
+  clienteAId = clienteA?.id ?? "";
 
   // Insertar servicio en tenant A
   await serviceDb.from("servicios").insert({
@@ -254,6 +256,38 @@ describe("RLS-1: Aislamiento de clientes", () => {
       .select("id")
       .eq("tenant_id", tenantAId);
     expect((data ?? []).length).toBeGreaterThan(0);
+  });
+
+  it("el usuario B no puede MODIFICAR clientes del tenant A (RLS write)", async () => {
+    if (skipIfNoCredentials()) return;
+    const db = userClient(jwtB);
+
+    // La política USING oculta la fila de A para B → el UPDATE afecta 0 filas.
+    const { data: updated } = await db
+      .from("clientes")
+      .update({ full_name: "Hackeado por B" })
+      .eq("id", clienteAId)
+      .select("id");
+    expect(updated ?? []).toHaveLength(0);
+
+    // Verificación con service role: el dato original se conserva intacto.
+    const { data: intacto } = await serviceDb
+      .from("clientes")
+      .select("full_name")
+      .eq("id", clienteAId)
+      .single();
+    expect(intacto?.full_name).toBe("Cliente de A");
+  });
+
+  it("el usuario B no puede INSERTAR clientes con tenant_id ajeno (WITH CHECK)", async () => {
+    if (skipIfNoCredentials()) return;
+    const db = userClient(jwtB);
+
+    // WITH CHECK exige tenant_id = current_tenant_id() (el de B) → rechaza el de A.
+    const { error } = await db
+      .from("clientes")
+      .insert({ tenant_id: tenantAId, full_name: "Inyectado por B", phone: "9999" });
+    expect(error).not.toBeNull();
   });
 });
 
