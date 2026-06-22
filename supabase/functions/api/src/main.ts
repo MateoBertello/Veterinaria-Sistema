@@ -7,6 +7,7 @@ import { clientesRouter } from "./modules/clientes/clientes.controller.ts";
 import { mascotasRouter } from "./modules/mascotas/mascotas.controller.ts";
 import { tenantsRouter } from "./modules/admin/tenants.controller.ts";
 import { modulosRouter } from "./modules/modulos/modulos.controller.ts";
+import { serviciosRouter } from "./modules/servicios/servicios.controller.ts";
 
 const app = new Hono().basePath("/api/v1");
 
@@ -31,6 +32,9 @@ app.route("/clientes", clientesRouter);
 
 // ─── Módulo Mascotas (Core Cliente-Mascota) ────────────────────────────────────
 app.route("/mascotas", mascotasRouter);
+
+// ─── Módulo Servicios (Transversal — Etapa 4) ──────────────────────────────────
+app.route("/servicios", serviciosRouter);
 
 // ─── Consola Super Admin (fuera de tenant) ──────────────────────────────────────
 // Montado en /api/v1/admin/tenants; el router NO repite el segmento /tenants.
