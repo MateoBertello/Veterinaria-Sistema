@@ -68,10 +68,13 @@ export interface CambioDuenoResultado {
 }
 
 export interface ListarOpts {
-  page:      number;
-  limit:     number;
-  search?:   string;
-  clientId?: string;
+  page:       number;
+  limit:      number;
+  search?:    string;
+  clientId?:  string;
+  especieId?: string;
+  estado?:    "Activa" | "Fallecida";
+  edadCat?:   "cachorro" | "adulto" | "senior";
 }
 
 // RN-MA9: fallback de dieta cuando no se informa.
@@ -331,6 +334,32 @@ export const MascotasService = {
 
     if (opts.clientId) {
       query = query.eq("client_id", opts.clientId);
+    }
+
+    if (opts.especieId) {
+      query = query.eq("especie_id", opts.especieId);
+    }
+
+    if (opts.estado) {
+      query = query.eq("estado", opts.estado);
+    }
+
+    if (opts.edadCat) {
+      // Convención de presentación UI — no es una RN del Documento Maestro v1.0/v1.1.
+      // Cortes: cachorro < 1 año | adulto 1–7 años | senior > 7 años.
+      // Mascotas sin birthDate quedan excluidas de este filtro (comportamiento correcto).
+      const hoy   = new Date();
+      const y1ago = new Date(hoy); y1ago.setFullYear(hoy.getFullYear() - 1);
+      const y7ago = new Date(hoy); y7ago.setFullYear(hoy.getFullYear() - 7);
+      if (opts.edadCat === "cachorro") {
+        query = query.gte("birth_date", y1ago.toISOString().slice(0, 10));
+      } else if (opts.edadCat === "adulto") {
+        query = query
+          .lt("birth_date",  y1ago.toISOString().slice(0, 10))
+          .gte("birth_date", y7ago.toISOString().slice(0, 10));
+      } else {
+        query = query.lt("birth_date", y7ago.toISOString().slice(0, 10));
+      }
     }
 
     if (opts.search) {

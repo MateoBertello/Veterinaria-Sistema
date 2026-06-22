@@ -30,16 +30,19 @@ mascotasRouter.get("/", async (c) => {
   const { tenantId } = getTenantContext(c);
 
   const parsed = ListarMascotasQuerySchema.safeParse({
-    search:   c.req.query("search"),
-    clientId: c.req.query("clientId"),
-    page:     c.req.query("page"),
-    limit:    c.req.query("limit"),
+    search:    c.req.query("search"),
+    clientId:  c.req.query("clientId"),
+    especieId: c.req.query("especieId"),
+    estado:    c.req.query("estado"),
+    edadCat:   c.req.query("edadCat"),
+    page:      c.req.query("page"),
+    limit:     c.req.query("limit"),
   });
-  const { page, limit, search, clientId } = parsed.success
+  const { page, limit, search, clientId, especieId, estado, edadCat } = parsed.success
     ? parsed.data
-    : { page: 1, limit: 20, search: undefined, clientId: undefined };
+    : { page: 1, limit: 20, search: undefined, clientId: undefined, especieId: undefined, estado: undefined, edadCat: undefined };
 
-  const { items, total } = await MascotasService.listar(tenantId, { page, limit, search, clientId });
+  const { items, total } = await MascotasService.listar(tenantId, { page, limit, search, clientId, especieId, estado, edadCat });
   return c.json(ok(items, { page, limit, total }), 200);
 });
 

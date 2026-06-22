@@ -4,6 +4,7 @@ import { PawPrint } from "lucide-react";
 import { buildNavItems, type NavItem } from "./lib/navigation.ts";
 import { fetchModulosHabilitados } from "./api/modulos.ts";
 import { ClientesPage } from "./pages/ClientesPage.tsx";
+import { MascotasPage } from "./pages/MascotasPage.tsx";
 import { cn } from "./components/ui/utils.ts";
 
 /** Sidebar mínimo del shell: ítems base + módulos vendibles habilitados (RN-G2). */
@@ -62,6 +63,7 @@ export function App() {
         <Routes>
           <Route path="/" element={<Navigate to="/clientes" replace />} />
           <Route path="/clientes" element={<ClientesPage />} />
+          <Route path="/mascotas" element={<MascotasPage />} />
           <Route path="*" element={<Navigate to="/clientes" replace />} />
         </Routes>
       </main>

@@ -11,6 +11,7 @@ export interface NavItem {
 export const BASE_NAV: NavItem[] = [
   { key: "inicio",   label: "Inicio",   href: "/" },
   { key: "clientes", label: "Clientes", href: "/clientes" },
+  { key: "mascotas", label: "Mascotas", href: "/mascotas" },
 ];
 
 // Metadatos de navegación de cada módulo vendible.

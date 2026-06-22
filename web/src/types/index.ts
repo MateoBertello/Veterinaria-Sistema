@@ -51,6 +51,7 @@ export const ErrorCode = {
   CLIENT_HAS_PETS:     "CLIENT_HAS_PETS",
   MASCOTA_NOT_FOUND:   "MASCOTA_NOT_FOUND",
   PET_DECEASED:        "PET_DECEASED",
+  SAME_OWNER:          "SAME_OWNER",
   SERVICE_NOT_FOUND:   "SERVICE_NOT_FOUND",
   TURNO_SOLAPADO:      "TURNO_SOLAPADO",
   STAY_OVERLAP:        "STAY_OVERLAP",
@@ -82,6 +83,84 @@ export interface ClienteInput {
   address:       string;
   email?:        string;
   observations?: string;
+}
+
+// ─── Mascotas ───────────────────────────────────────────────────────────────
+
+export type EstadoMascota = "Activa" | "Fallecida";
+export type SexoMascota   = "Macho" | "Hembra" | "Desconocido";
+export type TamanoMascota = "Pequeño" | "Mediano" | "Grande";
+export type EdadCat       = "cachorro" | "adulto" | "senior";
+
+export interface Mascota {
+  id:             string;
+  name:           string;
+  clientId:       string;
+  ownerName:      string | null;
+  especieId:      string;
+  especieName:    string | null;
+  razaId:         string | null;
+  razaName:       string | null;
+  sex:            SexoMascota;
+  tamano:         TamanoMascota;
+  alimentoDieta:  string | null;
+  birthDate:      string | null;
+  color:          string | null;
+  observations:   string | null;
+  estado:         EstadoMascota;
+  deceasedDate:   string | null;
+  deceasedReason: string | null;
+  ultimoPeso:     number | null;
+  createdAt:      string;
+}
+
+export interface MascotaInput {
+  name:           string;
+  clientId:       string;
+  especieId:      string;
+  razaId?:        string | null;
+  sex:            SexoMascota;
+  tamano:         TamanoMascota;
+  alimentoDieta?: string | null;
+  birthDate?:     string | null;
+  color?:         string | null;
+  observations?:  string | null;
+}
+
+export interface EditarMascotaInput {
+  name?:          string;
+  especieId?:     string;
+  razaId?:        string | null;
+  sex?:           SexoMascota;
+  tamano?:        TamanoMascota;
+  alimentoDieta?: string | null;
+  color?:         string | null;
+  observations?:  string | null;
+}
+
+export interface CambiarDuenoInput {
+  newClientId: string;
+  reason?:     string | null;
+  notes?:      string | null;
+}
+
+export interface MarcarFallecidaInput {
+  deceasedReason: string;
+  deceasedDate?:  string | null;
+  deceasedNotes?: string | null;
+}
+
+// ─── Catálogos globales ─────────────────────────────────────────────────────
+
+export interface Especie {
+  id:   string;
+  name: string;
+}
+
+export interface Raza {
+  id:         string;
+  name:       string;
+  especie_id: string;
 }
 
 // ─── Módulos vendibles ─────────────────────────────────────────────────────

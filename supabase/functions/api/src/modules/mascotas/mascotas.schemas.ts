@@ -28,11 +28,16 @@ export const EditarMascotaSchema = CrearMascotaSchema
   .omit({ birthDate: true, clientId: true })
   .partial();
 
+export const EDAD_CAT_VALUES = ["cachorro", "adulto", "senior"] as const;
+
 export const ListarMascotasQuerySchema = z.object({
-  search:   z.string().trim().min(1).optional(),
-  clientId: z.string().uuid().optional(),
-  page:     z.coerce.number().int().min(1).default(1),
-  limit:    z.coerce.number().int().min(1).max(100).default(20),
+  search:    z.string().trim().min(1).optional(),
+  clientId:  z.string().uuid().optional(),
+  especieId: z.string().uuid().optional(),
+  estado:    z.enum(["Activa", "Fallecida"]).optional(),
+  edadCat:   z.enum(EDAD_CAT_VALUES).optional(),
+  page:      z.coerce.number().int().min(1).default(1),
+  limit:     z.coerce.number().int().min(1).max(100).default(20),
 });
 
 // RN-CD1..CD5: Cambiar Dueño de Mascota. El dueño distinto (RN-CD1) se valida
