@@ -173,7 +173,7 @@
 | :---- | :---- | :---- | :---- | :---- |
 | 1 — Fundaciones | Pendiente | — | — | |
 | 2 — Auth + Super Admin | ✅ Cerrada | RN-S1..S3, RN-SA1..SA5, RN-SM1..SM4 | 2026-06-19 | Auth+Usuarios, Super Admin/Tenants, Módulos Contratados + sidebar dinámico (lógica). Endpoint `/modulos-habilitados` en camelCase. |
-| 3 — Core | Pendiente | — | — | |
+| 3 — Core | ✅ Cerrada | RN-CL1..CL9, RN-MA1..MA10, RN-CD1..CD5, RN-MF1..MF5 | 2026-06-22 | Backend (4 bloques) + pantallas Clientes y Mascotas. Catálogos por PostgREST directo vía proxy. Filtros edadCat son convención de UI. |
 | 4 — Transversales | Pendiente | — | — | |
 | 5 — Historial Clínico | Pendiente | — | — | |
 | 6 — Turnos | Pendiente | — | — | |
