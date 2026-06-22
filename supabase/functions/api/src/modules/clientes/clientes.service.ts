@@ -28,6 +28,10 @@ export interface ClientePublico {
   observations: string | null;
   createdAt:    string;
   createdBy:    string | null;
+  // RN-CL8: cantidad de mascotas vivas (deleted=false AND estado='Activa').
+  // Habilita pre-deshabilitar "Eliminar" en la UI. Solo viene poblado en el
+  // listado (vía embed); en alta/edición/detalle es 0 al no embeber mascotas.
+  livePetCount: number;
 }
 
 export interface ListarOpts {
@@ -38,6 +42,17 @@ export interface ListarOpts {
 
 // Columnas públicas del cliente (sin flags de baja lógica).
 const COLS = "id, full_name, dni_cuit, phone, address, email, observations, created_at, created_by";
+
+// Columnas del listado + conteo embebido de mascotas vivas (sin N+1). El conteo
+// se filtra con la MISMA definición que el bloqueo RN-CL8 del DELETE
+// (deleted=false AND estado='Activa'); los filtros se aplican en listar().
+const COLS_LISTAR = `${COLS}, mascotas:mascotas!client_id(count)`;
+
+/** Lee el conteo embebido de mascotas vivas de una fila del listado. */
+function livePetCountOf(row: Record<string, unknown>): number {
+  const embed = row["mascotas"] as Array<{ count?: number }> | undefined;
+  return embed?.[0]?.count ?? 0;
+}
 
 // ─── Helpers internos ─────────────────────────────────────────────────────────
 
@@ -53,6 +68,7 @@ function toPublic(row: Record<string, unknown>): ClientePublico {
     observations: (row["observations"] as string | null) ?? null,
     createdAt:    row["created_at"] as string,
     createdBy:    (row["created_by"] as string | null) ?? null,
+    livePetCount: livePetCountOf(row),
   };
 }
 
@@ -228,9 +244,13 @@ export const ClientesService = {
 
     let query = db
       .from("clientes")
-      .select(COLS, { count: "exact" })
+      .select(COLS_LISTAR, { count: "exact" })
       .eq("tenant_id", tenantId)
-      .eq("deleted", false);
+      .eq("deleted", false)
+      // Filtros embebidos del conteo: SOLO mascotas vivas (RN-CL8). Es un LEFT
+      // JOIN, así que los clientes sin mascotas vivas siguen apareciendo (count 0).
+      .eq("mascotas.deleted", false)
+      .eq("mascotas.estado", "Activa");
 
     // Búsqueda por nombre, DNI/CUIT o teléfono.
     if (opts.search) {

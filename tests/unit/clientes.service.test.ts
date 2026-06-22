@@ -281,3 +281,59 @@ describe("Listado de clientes", () => {
     expect(db.builder["eq"]).toHaveBeenCalledWith("deleted", false);
   });
 });
+
+// ─── RN-CL8: conteo de mascotas vivas en el listado (mismo criterio que el DELETE) ──
+
+describe("RN-CL8: livePetCount en el listado", () => {
+  it("el conteo se filtra con la MISMA definición del DELETE: deleted=false AND estado='Activa'", async () => {
+    const db = buildMockDb({
+      rangeResult: { data: [dbRow({ mascotas: [{ count: 2 }] })], error: null, count: 1 },
+    });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    await ClientesService.listar(TENANT_ID, { page: 1, limit: 20 });
+
+    // El embed cuenta solo mascotas vivas, igual que el bloqueo RN-CL8 del eliminar.
+    expect(db.builder["eq"]).toHaveBeenCalledWith("mascotas.deleted", false);
+    expect(db.builder["eq"]).toHaveBeenCalledWith("mascotas.estado", "Activa");
+  });
+
+  it("cliente con mascota viva → livePetCount ≥ 1", async () => {
+    const db = buildMockDb({
+      rangeResult: { data: [dbRow({ mascotas: [{ count: 3 }] })], error: null, count: 1 },
+    });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    const { items } = await ClientesService.listar(TENANT_ID, { page: 1, limit: 20 });
+
+    expect(items[0].livePetCount).toBe(3);
+    expect(items[0].livePetCount).toBeGreaterThanOrEqual(1);
+  });
+
+  it("cliente solo con mascotas fallecidas/eliminadas → livePetCount 0 (excluidas por el filtro)", async () => {
+    // El filtro embebido excluye fallecidas/eliminadas, así que el conteo llega en 0.
+    const db = buildMockDb({
+      rangeResult: { data: [dbRow({ mascotas: [{ count: 0 }] })], error: null, count: 1 },
+    });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    const { items } = await ClientesService.listar(TENANT_ID, { page: 1, limit: 20 });
+
+    expect(items[0].livePetCount).toBe(0);
+  });
+
+  it("cliente sin mascotas → APARECE igual en el listado con livePetCount 0 (left join, no lo descarta)", async () => {
+    // Embed vacío = sin filas relacionadas; la fila del cliente debe seguir presente.
+    const db = buildMockDb({
+      rangeResult: { data: [dbRow({ mascotas: [] })], error: null, count: 1 },
+    });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    const { items, total } = await ClientesService.listar(TENANT_ID, { page: 1, limit: 20 });
+
+    expect(total).toBe(1);
+    expect(items).toHaveLength(1);
+    expect(items[0].id).toBe(CLIENT_ID);
+    expect(items[0].livePetCount).toBe(0);
+  });
+});
