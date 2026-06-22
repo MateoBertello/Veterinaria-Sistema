@@ -9,7 +9,8 @@ export interface NavItem {
 
 // Ítems siempre visibles, independientes del licenciamiento de módulos vendibles.
 export const BASE_NAV: NavItem[] = [
-  { key: "inicio", label: "Inicio", href: "/" },
+  { key: "inicio",   label: "Inicio",   href: "/" },
+  { key: "clientes", label: "Clientes", href: "/clientes" },
 ];
 
 // Metadatos de navegación de cada módulo vendible.

@@ -1,4 +1,4 @@
-import type { ApiResponse } from "../types/index.ts";
+import type { ApiMeta, ApiResponse, ApiSuccessResponse } from "../types/index.ts";
 import { ApiError } from "../types/index.ts";
 
 const API_BASE = import.meta.env["VITE_API_URL"] ?? "/api/v1";
@@ -10,15 +10,13 @@ async function getToken(): Promise<string | null> {
 }
 
 /**
- * Helper de fetch que:
- * 1. Agrega Authorization header con el JWT del usuario.
- * 2. Desempaqueta el envelope estándar: devuelve `data` en éxito.
- * 3. Lanza ApiError en caso de error de negocio o de red.
+ * Realiza el fetch, agrega el JWT, parsea el envelope estándar y lanza ApiError
+ * (negocio o red). Devuelve el envelope de éxito completo (data + meta).
  */
-export async function apiClient<T>(
+async function request<T>(
   path: string,
   options: RequestInit = {},
-): Promise<T> {
+): Promise<ApiSuccessResponse<T>> {
   const token = await getToken();
 
   const headers: Record<string, string> = {
@@ -45,7 +43,7 @@ export async function apiClient<T>(
   const body = await response.json() as ApiResponse<T>;
 
   if (body.success) {
-    return body.data;
+    return body;
   }
 
   throw new ApiError(
@@ -54,4 +52,26 @@ export async function apiClient<T>(
     body.error.message,
     body.error.details,
   );
+}
+
+/** Desempaqueta el envelope estándar: devuelve `data` en éxito. */
+export async function apiClient<T>(
+  path: string,
+  options: RequestInit = {},
+): Promise<T> {
+  const body = await request<T>(path, options);
+  return body.data;
+}
+
+/**
+ * Variante para listados: devuelve `data` junto con `meta` (paginación). El
+ * `apiClient` descarta `meta`, por eso los listados paginados usan este helper.
+ */
+export async function apiClientList<T>(
+  path: string,
+  options: RequestInit = {},
+): Promise<{ items: T[]; meta: ApiMeta }> {
+  const body = await request<T[]>(path, options);
+  const meta = body.meta ?? { page: 1, limit: body.data.length, total: body.data.length };
+  return { items: body.data, meta };
 }

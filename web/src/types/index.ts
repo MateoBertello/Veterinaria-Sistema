@@ -58,6 +58,32 @@ export const ErrorCode = {
 
 export type ErrorCodeValue = (typeof ErrorCode)[keyof typeof ErrorCode];
 
+// ─── Clientes ───────────────────────────────────────────────────────────────
+
+export interface Cliente {
+  id:           string;
+  fullName:     string;
+  dniCuit:      string | null;
+  phone:        string | null;
+  address:      string | null;
+  email:        string | null;
+  observations: string | null;
+  createdAt:    string;
+  createdBy:    string | null;
+  // RN-CL8: mascotas vivas (deleted=false AND estado='Activa'). Si > 0, no se
+  // puede eliminar el cliente (botón deshabilitado + tooltip).
+  livePetCount: number;
+}
+
+export interface ClienteInput {
+  fullName:      string;
+  dniCuit:       string;
+  phone:         string;
+  address:       string;
+  email?:        string;
+  observations?: string;
+}
+
 // ─── Módulos vendibles ─────────────────────────────────────────────────────
 
 export type ModuloVendible = "historial_clinico" | "turnos" | "guarderia";
