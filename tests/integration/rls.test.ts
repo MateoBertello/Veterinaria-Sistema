@@ -53,6 +53,7 @@ let userBId:   string;
 let jwtA:      string;
 let jwtB:      string;
 let clienteAId = "";
+let doctorAId  = "";
 
 /** Cliente con el JWT de un usuario (RLS activo) */
 function userClient(jwt: string): SupabaseClient {
@@ -207,6 +208,27 @@ beforeAll(async () => {
     duracion_minutos: 30,
     tipo: "clinica",
   });
+
+  // Insertar doctor en tenant A (+ una franja horaria) para los tests de aislamiento
+  const { data: doctorA } = await serviceDb.from("doctores").insert({
+    tenant_id: tenantAId,
+    user_id: userAId || null,
+    name: "Dr. de A",
+    specialty: "Clínica general",
+    available: true,
+  }).select("id").single();
+  doctorAId = doctorA?.id ?? "";
+
+  if (doctorAId) {
+    await serviceDb.from("horarios_doctor").insert({
+      tenant_id: tenantAId,
+      doctor_id: doctorAId,
+      day_of_week: 1,
+      start_time: "09:00",
+      end_time: "13:00",
+      active: true,
+    });
+  }
 }, 30_000);
 
 afterAll(async () => {
@@ -348,6 +370,74 @@ describe("RLS-6: Aislamiento de historial_clinico", () => {
       .select("id, tenant_id")
       .eq("tenant_id", tenantAId);
     expect(data ?? []).toHaveLength(0);
+  });
+});
+
+describe("RLS-6b: Aislamiento de doctores (Etapa 4)", () => {
+  it("el usuario B no ve doctores del tenant A", async () => {
+    if (skipIfNoCredentials()) return;
+    const db = userClient(jwtB);
+    const { data } = await db
+      .from("doctores")
+      .select("id, tenant_id")
+      .eq("tenant_id", tenantAId);
+    expect(data ?? []).toHaveLength(0);
+  });
+
+  it("el usuario A sí ve sus propios doctores", async () => {
+    if (skipIfNoCredentials()) return;
+    const db = userClient(jwtA);
+    const { data } = await db
+      .from("doctores")
+      .select("id")
+      .eq("tenant_id", tenantAId);
+    expect((data ?? []).length).toBeGreaterThan(0);
+  });
+
+  it("el usuario B no puede MODIFICAR doctores del tenant A (RLS write)", async () => {
+    if (skipIfNoCredentials()) return;
+    const db = userClient(jwtB);
+    const { data: updated } = await db
+      .from("doctores")
+      .update({ specialty: "Hackeado por B" })
+      .eq("id", doctorAId)
+      .select("id");
+    expect(updated ?? []).toHaveLength(0);
+
+    const { data: intacto } = await serviceDb
+      .from("doctores")
+      .select("specialty")
+      .eq("id", doctorAId)
+      .single();
+    expect(intacto?.specialty).toBe("Clínica general");
+  });
+});
+
+describe("RLS-6c: Aislamiento de horarios_doctor (Etapa 4)", () => {
+  it("el usuario B no ve franjas horarias del tenant A", async () => {
+    if (skipIfNoCredentials()) return;
+    const db = userClient(jwtB);
+    const { data } = await db
+      .from("horarios_doctor")
+      .select("id, tenant_id")
+      .eq("tenant_id", tenantAId);
+    expect(data ?? []).toHaveLength(0);
+  });
+
+  it("el usuario B no puede INSERTAR franjas con tenant_id ajeno (WITH CHECK)", async () => {
+    if (skipIfNoCredentials()) return;
+    const db = userClient(jwtB);
+    const { error } = await db
+      .from("horarios_doctor")
+      .insert({
+        tenant_id: tenantAId,
+        doctor_id: doctorAId,
+        day_of_week: 2,
+        start_time: "10:00",
+        end_time: "12:00",
+        active: true,
+      });
+    expect(error).not.toBeNull();
   });
 });
 
