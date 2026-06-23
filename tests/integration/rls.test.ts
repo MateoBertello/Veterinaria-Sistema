@@ -650,3 +650,62 @@ describe("RLS-13: on_tenant_created — módulos plan premium", () => {
     expect(map["guarderia"]).toBe(true);
   });
 });
+
+// ─── RLS-auditoria ───────────────────────────────────────────────────────────
+// BLOQUEANTE — Etapa 4: un tenant solo ve SUS registros de auditoría (RN-AUD3).
+
+describe("RLS-auditoria: registros_auditoria — aislamiento por tenant", () => {
+  let registroAId = "";
+
+  it("setup: insertar registro de auditoría para tenant A con service role", async () => {
+    if (skipIfNoCredentials()) return;
+    const { data, error } = await serviceDb
+      .from("registros_auditoria")
+      .insert({
+        tenant_id: tenantAId,
+        user_id:   userAId,
+        user_name: "Admin A",
+        user_role: "admin",
+        action:    "CREATE",
+        module:    "clients",
+        entity_id: "ent-audit-001",
+        details:   "registro de prueba RLS",
+      })
+      .select("id")
+      .single();
+    expect(error).toBeNull();
+    registroAId = (data as { id: string } | null)?.id ?? "";
+    expect(registroAId).not.toBe("");
+  });
+
+  it("el usuario B no ve registros de auditoría del tenant A (READ isolation)", async () => {
+    if (skipIfNoCredentials()) return;
+    const { data } = await userClient(jwtB)
+      .from("registros_auditoria")
+      .select("id")
+      .eq("tenant_id", tenantAId);
+    expect((data ?? []).length).toBe(0);
+  });
+
+  it("el usuario A sí ve sus propios registros de auditoría", async () => {
+    if (skipIfNoCredentials()) return;
+    const { data } = await userClient(jwtA)
+      .from("registros_auditoria")
+      .select("id")
+      .eq("id", registroAId);
+    expect((data ?? []).length).toBe(1);
+  });
+
+  it("el usuario B no puede insertar registros con tenant_id del tenant A (WITH CHECK)", async () => {
+    if (skipIfNoCredentials()) return;
+    const { data: inserted } = await userClient(jwtB)
+      .from("registros_auditoria")
+      .insert({
+        tenant_id: tenantAId,
+        action:    "VIEW",
+        module:    "clients",
+      })
+      .select("id");
+    expect((inserted ?? []).length).toBe(0);
+  });
+});

@@ -14,6 +14,7 @@ import {
   horariosDoctorRouter,
   horariosRouter,
 } from "./modules/horarios/horarios.controller.ts";
+import { auditoriaRouter } from "./modules/auditoria/auditoria.controller.ts";
 
 const app = new Hono().basePath("/api/v1");
 
@@ -53,6 +54,9 @@ app.route("/configuracion", configuracionRouter);
 app.route("/doctores", horariosDoctorRouter);
 app.route("/doctores", doctoresRouter);
 app.route("/horarios", horariosRouter);
+
+// ─── Auditoría (Transversal — Etapa 4) ────────────────────────────────────────
+app.route("/auditoria", auditoriaRouter);
 
 // ─── Consola Super Admin (fuera de tenant) ──────────────────────────────────────
 // Montado en /api/v1/admin/tenants; el router NO repite el segmento /tenants.
