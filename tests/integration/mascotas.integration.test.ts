@@ -12,29 +12,8 @@ globalThis.WebSocket = class FakeWebSocket {} as never;
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 import app from "../../supabase/functions/api/src/main.ts";
-
-function loadEnv(): void {
-  try {
-    const content = readFileSync(resolve(process.cwd(), ".env"), "utf-8");
-    for (const line of content.split("\n")) {
-      const trimmed = line.trim();
-      if (!trimmed || trimmed.startsWith("#")) continue;
-      const eqIdx = trimmed.indexOf("=");
-      if (eqIdx < 0) continue;
-      const key = trimmed.slice(0, eqIdx).trim();
-      const val = trimmed.slice(eqIdx + 1).trim();
-      if (!process.env[key]) process.env[key] = val;
-    }
-  } catch { /* .env opcional */ }
-}
-loadEnv();
-
-const SUPABASE_URL      = process.env["SUPABASE_URL"]              ?? "";
-const SUPABASE_ANON_KEY = process.env["SUPABASE_ANON_KEY"]         ?? "";
-const SERVICE_ROLE_KEY  = process.env["SUPABASE_SERVICE_ROLE_KEY"] ?? "";
+import { SUPABASE_URL, SUPABASE_ANON_KEY, SERVICE_ROLE_KEY, describeIntegration } from "./_env.ts";
 
 function skipIfNoCredentials(): boolean {
   if (!SUPABASE_URL || !SERVICE_ROLE_KEY || !SUPABASE_ANON_KEY) {
@@ -149,7 +128,7 @@ afterAll(async () => {
 
 // ─── Alta y aislamiento ───────────────────────────────────────────────────────
 
-describe("Mascotas: alta vía API", () => {
+describeIntegration("Mascotas: alta vía API", () => {
   it("POST /mascotas crea la mascota del tenant con estado 'Activa' (RN-MA10)", async () => {
     if (skipIfNoCredentials() || !tenantA.jwt) return;
 
@@ -195,7 +174,7 @@ describe("Mascotas: alta vía API", () => {
   });
 });
 
-describe("Mascotas: aislamiento por tenant (RLS, bloqueante)", () => {
+describeIntegration("Mascotas: aislamiento por tenant (RLS, bloqueante)", () => {
   it("el listado de B no contiene mascotas de A", async () => {
     if (skipIfNoCredentials() || !tenantA.jwt || !tenantB.jwt) return;
 
@@ -224,7 +203,7 @@ async function crearMascota(jwt: string, clienteId: string, name = "Transferible
   return body.data.id;
 }
 
-describe("Cambiar Dueño de Mascota (RN-CD)", () => {
+describeIntegration("Cambiar Dueño de Mascota (RN-CD)", () => {
   it("RN-CD2: transfiere atómicamente y deja trazabilidad consultable", async () => {
     if (skipIfNoCredentials() || !tenantA.jwt) return;
 
@@ -300,7 +279,7 @@ describe("Cambiar Dueño de Mascota (RN-CD)", () => {
 
 // ─── Marcar Mascota como Fallecida — manual (RN-MF1..MF5) ───────────────────────
 
-describe("Marcar Mascota como Fallecida (RN-MF)", () => {
+describeIntegration("Marcar Mascota como Fallecida (RN-MF)", () => {
   it("marca estado 'Fallecida' con fecha y motivo (RN-MF4)", async () => {
     if (skipIfNoCredentials() || !tenantA.jwt) return;
 
@@ -357,7 +336,7 @@ describe("Marcar Mascota como Fallecida (RN-MF)", () => {
 
 // ─── Catálogos globales por PostgREST directo ──────────────────────────────────
 
-describe("Catálogos globales (PostgREST directo, sin endpoints Hono)", () => {
+describeIntegration("Catálogos globales (PostgREST directo, sin endpoints Hono)", () => {
   it("cualquier tenant autenticado lee especies y razas", async () => {
     if (skipIfNoCredentials() || !tenantB.jwt) return;
 

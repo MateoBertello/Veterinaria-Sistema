@@ -48,7 +48,10 @@ export enum ErrorCode {
 
   // ── Historial Clínico ─────────────────────────────────────────────
   EMPTY_HISTORY                    = "EMPTY_HISTORY",
+  HISTORIAL_NOT_FOUND              = "HISTORIAL_NOT_FOUND",
   EUTHANASIA_CONFIRMATION_REQUIRED = "EUTHANASIA_CONFIRMATION_REQUIRED",
+  INVALID_FILE_TYPE                = "INVALID_FILE_TYPE",
+  FILE_TOO_LARGE                   = "FILE_TOO_LARGE",
 
   // ── Plan de Vacunación ────────────────────────────────────────────
   VACCINE_TYPE_NOT_FOUND       = "VACCINE_TYPE_NOT_FOUND",

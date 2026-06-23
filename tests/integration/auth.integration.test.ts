@@ -15,34 +15,8 @@ globalThis.WebSocket = class FakeWebSocket {} as never;
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 import app from "../../supabase/functions/api/src/main.ts";
-
-// ─── Cargar .env ──────────────────────────────────────────────────────────────
-function loadEnv(): void {
-  try {
-    const envPath = resolve(process.cwd(), ".env");
-    const content = readFileSync(envPath, "utf-8");
-    for (const line of content.split("\n")) {
-      const trimmed = line.trim();
-      if (!trimmed || trimmed.startsWith("#")) continue;
-      const eqIdx = trimmed.indexOf("=");
-      if (eqIdx < 0) continue;
-      const key = trimmed.slice(0, eqIdx).trim();
-      const val = trimmed.slice(eqIdx + 1).trim();
-      if (!process.env[key]) process.env[key] = val;
-    }
-  } catch {
-    // .env no existe — se espera que las vars estén en el entorno
-  }
-}
-
-loadEnv();
-
-const SUPABASE_URL      = process.env["SUPABASE_URL"]              ?? "";
-const SUPABASE_ANON_KEY = process.env["SUPABASE_ANON_KEY"]         ?? "";
-const SERVICE_ROLE_KEY  = process.env["SUPABASE_SERVICE_ROLE_KEY"] ?? "";
+import { SUPABASE_URL, SUPABASE_ANON_KEY, SERVICE_ROLE_KEY, describeIntegration } from "./_env.ts";
 
 function skipIfNoCredentials() {
   if (!SUPABASE_URL || !SERVICE_ROLE_KEY || !SUPABASE_ANON_KEY) {
@@ -223,7 +197,7 @@ async function callApp(path: string, opts: {
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
-describe("JWT real → app_metadata.tenant_id", () => {
+describeIntegration("JWT real → app_metadata.tenant_id", () => {
   it("el JWT emitido por Supabase Auth contiene app_metadata.tenant_id correcto", () => {
     if (skipIfNoCredentials() || !jwtActivo) return;
 
@@ -233,7 +207,7 @@ describe("JWT real → app_metadata.tenant_id", () => {
   });
 });
 
-describe("tenantContext con JWT real de Supabase", () => {
+describeIntegration("tenantContext con JWT real de Supabase", () => {
   it("GET /modulos-habilitados con JWT válido → 200 con módulos del tenant", async () => {
     if (skipIfNoCredentials() || !jwtActivo) return;
 
@@ -269,7 +243,7 @@ describe("tenantContext con JWT real de Supabase", () => {
   });
 });
 
-describe("RN-AUT1: login vía POST /auth/login", () => {
+describeIntegration("RN-AUT1: login vía POST /auth/login", () => {
   it("RN-AUT1: credenciales correctas → 200 con token, rol y permisos", async () => {
     if (skipIfNoCredentials()) return;
 
@@ -321,7 +295,7 @@ describe("RN-AUT1: login vía POST /auth/login", () => {
   });
 });
 
-describe("RN-AUT4: auditoría de logout", () => {
+describeIntegration("RN-AUT4: auditoría de logout", () => {
   it("RN-AUT4: logout registra fila en registros_auditoria con action=LOGOUT", async () => {
     if (skipIfNoCredentials() || !jwtActivo) return;
 

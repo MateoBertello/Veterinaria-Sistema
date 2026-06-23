@@ -12,35 +12,10 @@
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { SUPABASE_URL, SUPABASE_ANON_KEY, SERVICE_ROLE_KEY, describeIntegration } from "./_env.ts";
 
 
 globalThis.WebSocket = class FakeWebSocket {} as any;
-
-// ─── Cargar .env ─────────────────────────────────────────────────────────────
-function loadEnv(): void {
-  try {
-    const envPath = resolve(process.cwd(), ".env");
-    const content = readFileSync(envPath, "utf-8");
-    for (const line of content.split("\n")) {
-      const trimmed = line.trim();
-      if (!trimmed || trimmed.startsWith("#")) continue;
-      const eqIdx = trimmed.indexOf("=");
-      if (eqIdx < 0) continue;
-      const key = trimmed.slice(0, eqIdx).trim();
-      const val = trimmed.slice(eqIdx + 1).trim();
-      if (!process.env[key]) process.env[key] = val;
-    }
-  } catch {
-    // .env no existe — se espera que las vars estén en el entorno
-  }
-}
-
-loadEnv();
-
-const SUPABASE_URL      = process.env["TEST_SUPABASE_URL"]              ?? process.env["SUPABASE_URL"]              ?? "";
-const SERVICE_ROLE_KEY  = process.env["TEST_SUPABASE_SERVICE_ROLE_KEY"] ?? process.env["SUPABASE_SERVICE_ROLE_KEY"] ?? "";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -57,7 +32,7 @@ let doctorAId  = "";
 
 /** Cliente con el JWT de un usuario (RLS activo) */
 function userClient(jwt: string): SupabaseClient {
-  return createClient(SUPABASE_URL, process.env["SUPABASE_ANON_KEY"] ?? "", {
+  return createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
     global: { headers: { Authorization: `Bearer ${jwt}` } },
     auth:   { persistSession: false },
   });
@@ -140,7 +115,7 @@ beforeAll(async () => {
   // Obtener JWTs de los usuarios (sign-in)
   const signInA = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=password`, {
     method: "POST",
-    headers: { "Content-Type": "application/json", "apikey": process.env["SUPABASE_ANON_KEY"] ?? "" },
+    headers: { "Content-Type": "application/json", "apikey": SUPABASE_ANON_KEY },
     body: JSON.stringify({ email: "usera@test.com", password: "Password123!" }),
   });
   const tokenA = await signInA.json() as { access_token?: string };
@@ -148,7 +123,7 @@ beforeAll(async () => {
 
   const signInB = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=password`, {
     method: "POST",
-    headers: { "Content-Type": "application/json", "apikey": process.env["SUPABASE_ANON_KEY"] ?? "" },
+    headers: { "Content-Type": "application/json", "apikey": SUPABASE_ANON_KEY },
     body: JSON.stringify({ email: "userb@test.com", password: "Password123!" }),
   });
   const tokenB = await signInB.json() as { access_token?: string };
@@ -259,7 +234,7 @@ function skipIfNoCredentials() {
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
 
-describe("RLS-1: Aislamiento de clientes", () => {
+describeIntegration("RLS-1: Aislamiento de clientes", () => {
   it("el usuario B no ve clientes del tenant A", async () => {
     if (skipIfNoCredentials()) return;
     const db = userClient(jwtB);
@@ -313,7 +288,7 @@ describe("RLS-1: Aislamiento de clientes", () => {
   });
 });
 
-describe("RLS-2: Aislamiento de mascotas", () => {
+describeIntegration("RLS-2: Aislamiento de mascotas", () => {
   it("el usuario B no ve mascotas del tenant A", async () => {
     if (skipIfNoCredentials()) return;
     const db = userClient(jwtB);
@@ -325,7 +300,7 @@ describe("RLS-2: Aislamiento de mascotas", () => {
   });
 });
 
-describe("RLS-3: Aislamiento de servicios", () => {
+describeIntegration("RLS-3: Aislamiento de servicios", () => {
   it("el usuario B no ve servicios del tenant A", async () => {
     if (skipIfNoCredentials()) return;
     const db = userClient(jwtB);
@@ -337,7 +312,7 @@ describe("RLS-3: Aislamiento de servicios", () => {
   });
 });
 
-describe("RLS-4: Aislamiento de turnos", () => {
+describeIntegration("RLS-4: Aislamiento de turnos", () => {
   it("el usuario B no ve turnos del tenant A", async () => {
     if (skipIfNoCredentials()) return;
     const db = userClient(jwtB);
@@ -349,7 +324,7 @@ describe("RLS-4: Aislamiento de turnos", () => {
   });
 });
 
-describe("RLS-5: Aislamiento de estadias", () => {
+describeIntegration("RLS-5: Aislamiento de estadias", () => {
   it("el usuario B no ve estadias del tenant A", async () => {
     if (skipIfNoCredentials()) return;
     const db = userClient(jwtB);
@@ -361,7 +336,7 @@ describe("RLS-5: Aislamiento de estadias", () => {
   });
 });
 
-describe("RLS-6: Aislamiento de historial_clinico", () => {
+describeIntegration("RLS-6: Aislamiento de historial_clinico", () => {
   it("el usuario B no ve historial del tenant A", async () => {
     if (skipIfNoCredentials()) return;
     const db = userClient(jwtB);
@@ -373,7 +348,7 @@ describe("RLS-6: Aislamiento de historial_clinico", () => {
   });
 });
 
-describe("RLS-6b: Aislamiento de doctores (Etapa 4)", () => {
+describeIntegration("RLS-6b: Aislamiento de doctores (Etapa 4)", () => {
   it("el usuario B no ve doctores del tenant A", async () => {
     if (skipIfNoCredentials()) return;
     const db = userClient(jwtB);
@@ -413,7 +388,7 @@ describe("RLS-6b: Aislamiento de doctores (Etapa 4)", () => {
   });
 });
 
-describe("RLS-6c: Aislamiento de horarios_doctor (Etapa 4)", () => {
+describeIntegration("RLS-6c: Aislamiento de horarios_doctor (Etapa 4)", () => {
   it("el usuario B no ve franjas horarias del tenant A", async () => {
     if (skipIfNoCredentials()) return;
     const db = userClient(jwtB);
@@ -441,7 +416,7 @@ describe("RLS-6c: Aislamiento de horarios_doctor (Etapa 4)", () => {
   });
 });
 
-describe("RLS-7: Catálogos globales accesibles por ambos tenants", () => {
+describeIntegration("RLS-7: Catálogos globales accesibles por ambos tenants", () => {
   it("usuario A puede leer especies", async () => {
     if (skipIfNoCredentials()) return;
     const db = userClient(jwtA);
@@ -475,7 +450,7 @@ describe("RLS-7: Catálogos globales accesibles por ambos tenants", () => {
   });
 });
 
-describe("RLS-8: Tablas de plataforma solo accesibles por super admin", () => {
+describeIntegration("RLS-8: Tablas de plataforma solo accesibles por super admin", () => {
   it("usuario regular A no puede leer tenants de otros", async () => {
     if (skipIfNoCredentials()) return;
     const db = userClient(jwtA);
@@ -499,7 +474,7 @@ describe("RLS-8: Tablas de plataforma solo accesibles por super admin", () => {
   });
 });
 
-describe("RLS-9: Idempotencia de seed_global", () => {
+describeIntegration("RLS-9: Idempotencia de seed_global", () => {
   it("ejecutar seed_global dos veces no duplica permisos", async () => {
     if (skipIfNoCredentials()) return;
 
@@ -540,7 +515,7 @@ describe("RLS-9: Idempotencia de seed_global", () => {
   });
 });
 
-describe("RLS-10: on_tenant_created — roles correctos", () => {
+describeIntegration("RLS-10: on_tenant_created — roles correctos", () => {
   it("crea exactamente 3 roles con is_system=true", async () => {
     if (skipIfNoCredentials()) return;
     const { data } = await serviceDb
@@ -604,7 +579,7 @@ describe("RLS-10: on_tenant_created — roles correctos", () => {
   });
 });
 
-describe("RLS-11: on_tenant_created — configuración default", () => {
+describeIntegration("RLS-11: on_tenant_created — configuración default", () => {
   it("crea configuracion_tenant con cupo=10 y dias_aviso=7", async () => {
     if (skipIfNoCredentials()) return;
     const { data } = await serviceDb
@@ -617,7 +592,7 @@ describe("RLS-11: on_tenant_created — configuración default", () => {
   });
 });
 
-describe("RLS-12: on_tenant_created — módulos plan básico", () => {
+describeIntegration("RLS-12: on_tenant_created — módulos plan básico", () => {
   it("solo historial_clinico habilitado para plan basico", async () => {
     if (skipIfNoCredentials()) return;
     const { data } = await serviceDb
@@ -634,7 +609,7 @@ describe("RLS-12: on_tenant_created — módulos plan básico", () => {
   });
 });
 
-describe("RLS-13: on_tenant_created — módulos plan premium", () => {
+describeIntegration("RLS-13: on_tenant_created — módulos plan premium", () => {
   it("los 3 módulos habilitados para plan premium", async () => {
     if (skipIfNoCredentials()) return;
     const { data } = await serviceDb
@@ -654,7 +629,7 @@ describe("RLS-13: on_tenant_created — módulos plan premium", () => {
 // ─── RLS-auditoria ───────────────────────────────────────────────────────────
 // BLOQUEANTE — Etapa 4: un tenant solo ve SUS registros de auditoría (RN-AUD3).
 
-describe("RLS-auditoria: registros_auditoria — aislamiento por tenant", () => {
+describeIntegration("RLS-auditoria: registros_auditoria — aislamiento por tenant", () => {
   let registroAId = "";
 
   it("setup: insertar registro de auditoría para tenant A con service role", async () => {

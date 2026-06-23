@@ -15,6 +15,11 @@ import {
   horariosRouter,
 } from "./modules/horarios/horarios.controller.ts";
 import { auditoriaRouter } from "./modules/auditoria/auditoria.controller.ts";
+import {
+  historialRouter,
+  historialMascotaRouter,
+  adjuntosRouter,
+} from "./modules/historial/historial.controller.ts";
 
 const app = new Hono().basePath("/api/v1");
 
@@ -57,6 +62,11 @@ app.route("/horarios", horariosRouter);
 
 // ─── Auditoría (Transversal — Etapa 4) ────────────────────────────────────────
 app.route("/auditoria", auditoriaRouter);
+
+// ─── Historial Clínico (módulo vendible — Etapa 5) ───────────────────────────
+app.route("/historial", historialRouter);
+app.route("/mascotas", historialMascotaRouter); // aditivo: /:petId/historial y /:petId/resumen-clinico
+app.route("/adjuntos", adjuntosRouter);          // descarga de adjuntos por signed URL
 
 // ─── Consola Super Admin (fuera de tenant) ──────────────────────────────────────
 // Montado en /api/v1/admin/tenants; el router NO repite el segmento /tenants.

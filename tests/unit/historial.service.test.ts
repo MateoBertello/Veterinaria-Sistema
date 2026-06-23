@@ -1,0 +1,507 @@
+import { describe, it, expect, vi, beforeEach } from "vitest";
+
+vi.mock("../../supabase/functions/api/src/shared/db.ts", () => ({
+  getDb:        vi.fn(),
+  getServiceDb: vi.fn(),
+}));
+
+vi.mock("../../supabase/functions/api/src/shared/audit.ts", () => ({
+  recordAudit: vi.fn().mockResolvedValue(undefined),
+}));
+
+import { getServiceDb } from "../../supabase/functions/api/src/shared/db.ts";
+import { HistorialService } from "../../supabase/functions/api/src/modules/historial/historial.service.ts";
+import { ErrorCode } from "../../supabase/functions/api/src/shared/errors.ts";
+
+const mockGetServiceDb = vi.mocked(getServiceDb);
+
+const TENANT_ID  = "11111111-1111-4111-8111-111111111111";
+const PET_ID     = "22222222-2222-4222-8222-222222222222";
+const EVENT_ID   = "33333333-3333-4333-8333-333333333333";
+const CLIENT_A   = "44444444-4444-4444-8444-444444444444";
+const CLIENT_B   = "55555555-5555-4555-8555-555555555555";
+const PROF_ID    = "66666666-6666-4666-8666-666666666666";
+
+// ─── Mock builder ─────────────────────────────────────────────────────────────
+
+type MockOpts = {
+  singleResults?:   Array<{ data: unknown; error: unknown }>;
+  rangeResult?:     { data: unknown[]; error: unknown; count: number };
+  uploadResult?:    { data: unknown; error: unknown };
+  signedUrlResult?: { data: unknown; error: unknown };
+};
+
+function buildMockDb(opts: MockOpts = {}) {
+  const singleQueue = [...(opts.singleResults ?? [])];
+  const next = () => singleQueue.shift() ?? { data: null, error: null };
+
+  const builder: Record<string, unknown> = {};
+  const chain = () => builder;
+  for (const m of [
+    "select", "insert", "update", "delete",
+    "eq", "neq", "or", "ilike", "not", "is", "filter",
+    "order", "limit",
+  ]) {
+    builder[m] = vi.fn(chain);
+  }
+  builder["single"]      = vi.fn().mockImplementation(async () => next());
+  builder["maybeSingle"] = vi.fn().mockImplementation(async () => next());
+  builder["range"]       = vi.fn().mockResolvedValue(
+    opts.rangeResult ?? { data: [], error: null, count: 0 },
+  );
+
+  // Supabase Storage stub
+  const storageUpload        = vi.fn().mockResolvedValue(opts.uploadResult ?? { data: { path: "x" }, error: null });
+  const storageCreateSigned  = vi.fn().mockResolvedValue(
+    opts.signedUrlResult ?? { data: { signedUrl: "https://signed.example/x" }, error: null },
+  );
+  const storageRemove        = vi.fn().mockResolvedValue({ data: [], error: null });
+  const storageFrom          = vi.fn(() => ({
+    upload:        storageUpload,
+    createSignedUrl: storageCreateSigned,
+    remove:        storageRemove,
+  }));
+
+  const db = {
+    from: vi.fn(() => builder),
+    rpc:  vi.fn(() => builder),
+    storage: { from: storageFrom },
+    builder,
+    storageUpload,
+    storageCreateSigned,
+    storageRemove,
+    storageFrom,
+  };
+  return db;
+}
+
+beforeEach(() => vi.clearAllMocks());
+
+// ─── Fixtures ─────────────────────────────────────────────────────────────────
+
+const mascotaExistente = { id: PET_ID };
+
+const mascotaResumen = {
+  id: PET_ID,
+  name: "Firulais",
+  estado: "Activa",
+  cliente:  { full_name: "Juan Pérez" },
+  especie:  { name: "Perro" },
+  raza:     { name: "Labrador" },
+};
+
+function eventRow(over: Record<string, unknown> = {}) {
+  return {
+    id: EVENT_ID,
+    date: "2026-06-01",
+    event_type: "Consulta",
+    weight_kg: 4.5,
+    temperature_c: 38.2,
+    diagnosis: "Control sin hallazgos",
+    description: "Revisión anual",
+    client_name_at_time: "Juan Pérez",
+    client_id_at_time: CLIENT_A,
+    mascota:    { client_id: CLIENT_A },
+    profesional: { full_name: "Dra. García" },
+    adjuntos:   [{ count: 0 }],
+    ...over,
+  };
+}
+
+function eventDetailRow(over: Record<string, unknown> = {}) {
+  return {
+    id: EVENT_ID,
+    pet_id: PET_ID,
+    date: "2026-06-01",
+    event_type: "Consulta",
+    weight_kg: 4.5,
+    temperature_c: 38.2,
+    description: "Revisión anual",
+    diagnosis: "Control sin hallazgos",
+    treatment: null,
+    medication: null,
+    notes: null,
+    client_name_at_time: "Juan Pérez",
+    created_at: "2026-06-01T10:00:00Z",
+    profesional: { full_name: "Dra. García" },
+    adjuntos: [],
+    ...over,
+  };
+}
+
+// ─── listarHistorial ──────────────────────────────────────────────────────────
+
+describe("listarHistorial", () => {
+  it("RN-HC1: listarHistorial devuelve eventos en orden descendente", async () => {
+    const db = buildMockDb({
+      singleResults: [{ data: mascotaExistente, error: null }],
+      rangeResult: { data: [eventRow()], error: null, count: 1 },
+    });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    await HistorialService.listarHistorial(PET_ID, TENANT_ID, { page: 1, limit: 20 });
+
+    expect(db.builder["order"]).toHaveBeenCalledWith("date", { ascending: false });
+  });
+
+  it("RN-HC3: clientNameAtTime marca isPreviousOwner si dueño actual difiere", async () => {
+    const row = eventRow({ client_id_at_time: CLIENT_A, mascota: { client_id: CLIENT_B } });
+    const db  = buildMockDb({
+      singleResults: [{ data: mascotaExistente, error: null }],
+      rangeResult: { data: [row], error: null, count: 1 },
+    });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    const { items } = await HistorialService.listarHistorial(PET_ID, TENANT_ID, { page: 1, limit: 20 });
+    expect(items[0].isPreviousOwner).toBe(true);
+    expect(items[0].clientNameAtTime).toBe("Juan Pérez");
+  });
+
+  it("RN-HC3: isPreviousOwner es false cuando dueño es el mismo", async () => {
+    const row = eventRow({ client_id_at_time: CLIENT_A, mascota: { client_id: CLIENT_A } });
+    const db  = buildMockDb({
+      singleResults: [{ data: mascotaExistente, error: null }],
+      rangeResult: { data: [row], error: null, count: 1 },
+    });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    const { items } = await HistorialService.listarHistorial(PET_ID, TENANT_ID, { page: 1, limit: 20 });
+    expect(items[0].isPreviousOwner).toBe(false);
+  });
+
+  it("RN-HC4: mascota no encontrada en el tenant lanza MASCOTA_NOT_FOUND", async () => {
+    const db = buildMockDb({
+      singleResults: [{ data: null, error: null }],
+    });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    await expect(
+      HistorialService.listarHistorial(PET_ID, TENANT_ID, { page: 1, limit: 20 }),
+    ).rejects.toMatchObject({ code: ErrorCode.MASCOTA_NOT_FOUND, statusCode: 404 });
+  });
+
+  it("listarHistorial: paginacion calcula range correcto para page=2 limit=10", async () => {
+    const db = buildMockDb({
+      singleResults: [{ data: mascotaExistente, error: null }],
+      rangeResult: { data: [], error: null, count: 0 },
+    });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    await HistorialService.listarHistorial(PET_ID, TENANT_ID, { page: 2, limit: 10 });
+
+    expect(db.builder["range"]).toHaveBeenCalledWith(10, 19);
+  });
+
+  it("listarHistorial: hasAttachments es true cuando adjuntos count > 0", async () => {
+    const row = eventRow({ adjuntos: [{ count: 3 }] });
+    const db  = buildMockDb({
+      singleResults: [{ data: mascotaExistente, error: null }],
+      rangeResult: { data: [row], error: null, count: 1 },
+    });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    const { items } = await HistorialService.listarHistorial(PET_ID, TENANT_ID, { page: 1, limit: 20 });
+    expect(items[0].hasAttachments).toBe(true);
+  });
+
+  it("listarHistorial: hasAttachments es false cuando adjuntos count es 0", async () => {
+    const db = buildMockDb({
+      singleResults: [{ data: mascotaExistente, error: null }],
+      rangeResult: { data: [eventRow()], error: null, count: 1 },
+    });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    const { items } = await HistorialService.listarHistorial(PET_ID, TENANT_ID, { page: 1, limit: 20 });
+    expect(items[0].hasAttachments).toBe(false);
+  });
+});
+
+// ─── obtenerEventoPorId ───────────────────────────────────────────────────────
+
+describe("obtenerEventoPorId", () => {
+  it("obtenerEventoPorId: evento no encontrado lanza HISTORIAL_NOT_FOUND", async () => {
+    const db = buildMockDb({
+      singleResults: [{ data: null, error: null }],
+    });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    await expect(
+      HistorialService.obtenerEventoPorId(EVENT_ID, TENANT_ID),
+    ).rejects.toMatchObject({ code: ErrorCode.HISTORIAL_NOT_FOUND, statusCode: 404 });
+  });
+
+  it("obtenerEventoPorId: devuelve detalle mapeado correctamente", async () => {
+    const db = buildMockDb({
+      singleResults: [{ data: eventDetailRow(), error: null }],
+    });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    const detalle = await HistorialService.obtenerEventoPorId(EVENT_ID, TENANT_ID);
+    expect(detalle.id).toBe(EVENT_ID);
+    expect(detalle.petId).toBe(PET_ID);
+    expect(detalle.professionalName).toBe("Dra. García");
+    expect(detalle.adjuntos).toEqual([]);
+  });
+});
+
+// ─── resumenClinico ───────────────────────────────────────────────────────────
+
+describe("resumenClinico", () => {
+  it("RN-HC2: resumenClinico deriva ultimo peso del evento mas reciente con peso", async () => {
+    const db = buildMockDb({
+      singleResults: [
+        { data: mascotaResumen, error: null },
+        { data: { weight_kg: 4.5 }, error: null },
+      ],
+    });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    const resumen = await HistorialService.resumenClinico(PET_ID, TENANT_ID);
+    expect(resumen.ultimoPeso).toBe(4.5);
+  });
+
+  it("RN-HC2: ultimoPeso es null cuando no hay eventos con peso registrado", async () => {
+    const db = buildMockDb({
+      singleResults: [
+        { data: mascotaResumen, error: null },
+        { data: null, error: null },
+      ],
+    });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    const resumen = await HistorialService.resumenClinico(PET_ID, TENANT_ID);
+    expect(resumen.ultimoPeso).toBeNull();
+  });
+
+  it("resumenClinico: mascota no encontrada lanza MASCOTA_NOT_FOUND", async () => {
+    const db = buildMockDb({
+      singleResults: [{ data: null, error: null }],
+    });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    await expect(
+      HistorialService.resumenClinico(PET_ID, TENANT_ID),
+    ).rejects.toMatchObject({ code: ErrorCode.MASCOTA_NOT_FOUND, statusCode: 404 });
+  });
+
+  it("resumenClinico: devuelve datos de mascota mapeados correctamente", async () => {
+    const db = buildMockDb({
+      singleResults: [
+        { data: mascotaResumen, error: null },
+        { data: { weight_kg: 30.1 }, error: null },
+      ],
+    });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    const resumen = await HistorialService.resumenClinico(PET_ID, TENANT_ID);
+    expect(resumen.name).toBe("Firulais");
+    expect(resumen.estado).toBe("Activa");
+    expect(resumen.ownerName).toBe("Juan Pérez");
+    expect(resumen.especieName).toBe("Perro");
+    expect(resumen.razaName).toBe("Labrador");
+    expect(resumen.ultimoPeso).toBe(30.1);
+  });
+});
+
+// ─── crearRegistro ──────────────────────────────────────────────────────────────
+
+const CTX = {
+  tenantId:     TENANT_ID,
+  callerUserId: PROF_ID,
+  callerName:   "Dra. García",
+  callerRole:   "veterinario",
+};
+
+function dtoBase(over: Record<string, unknown> = {}) {
+  return {
+    date:           "2026-06-04",
+    eventType:      "Consulta",
+    professionalId: PROF_ID,
+    description:    "Control anual, buen estado general",
+    ...over,
+  };
+}
+
+const mascotaViva = {
+  id:        PET_ID,
+  estado:    "Activa",
+  client_id: CLIENT_A,
+  cliente:   { full_name: "Juan Pérez", email: "juan@example.com" },
+};
+
+describe("crearRegistro", () => {
+  it("RN-EC1: falta un campo obligatorio (description) → VALIDATION_ERROR", async () => {
+    mockGetServiceDb.mockReturnValue(buildMockDb() as never);
+    await expect(
+      HistorialService.crearRegistro(PET_ID, dtoBase({ description: "" }) as never, CTX),
+    ).rejects.toMatchObject({ code: ErrorCode.VALIDATION_ERROR, statusCode: 422 });
+  });
+
+  it("RN-EC3: mascota fallecida → PET_DECEASED", async () => {
+    const db = buildMockDb({
+      singleResults: [{ data: { ...mascotaViva, estado: "Fallecida" }, error: null }],
+    });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    await expect(
+      HistorialService.crearRegistro(PET_ID, dtoBase() as never, CTX),
+    ).rejects.toMatchObject({ code: ErrorCode.PET_DECEASED, statusCode: 422 });
+  });
+
+  it("crearRegistro: mascota inexistente en el tenant → MASCOTA_NOT_FOUND", async () => {
+    const db = buildMockDb({ singleResults: [{ data: null, error: null }] });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    await expect(
+      HistorialService.crearRegistro(PET_ID, dtoBase() as never, CTX),
+    ).rejects.toMatchObject({ code: ErrorCode.MASCOTA_NOT_FOUND, statusCode: 404 });
+  });
+
+  it("RN-EC5: persiste clientIdAtTime/clientNameAtTime del dueño vigente", async () => {
+    const db = buildMockDb({
+      singleResults: [
+        { data: mascotaViva, error: null },
+        { data: { id: EVENT_ID, date: "2026-06-04", event_type: "Consulta" }, error: null },
+      ],
+    });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    const evento = await HistorialService.crearRegistro(PET_ID, dtoBase() as never, CTX);
+
+    expect(db.builder["insert"]).toHaveBeenCalledWith(
+      expect.objectContaining({
+        client_id_at_time:   CLIENT_A,
+        client_name_at_time: "Juan Pérez",
+        tenant_id:           TENANT_ID,
+        pet_id:              PET_ID,
+      }),
+    );
+    expect(evento.clientNameAtTime).toBe("Juan Pérez");
+    expect(evento.attachmentsCount).toBe(0);
+  });
+
+  it("RN-EC6: peso fuera de rango (>200) → VALIDATION_ERROR", async () => {
+    mockGetServiceDb.mockReturnValue(buildMockDb() as never);
+    await expect(
+      HistorialService.crearRegistro(PET_ID, dtoBase({ weightKg: 300 }) as never, CTX),
+    ).rejects.toMatchObject({ code: ErrorCode.VALIDATION_ERROR, statusCode: 422 });
+  });
+
+  it("Eutanasia diferida: eventType='Eutanasia' → VALIDATION_ERROR (fuera de alcance)", async () => {
+    mockGetServiceDb.mockReturnValue(buildMockDb() as never);
+    await expect(
+      HistorialService.crearRegistro(PET_ID, dtoBase({ eventType: "Eutanasia" }) as never, CTX),
+    ).rejects.toMatchObject({ code: ErrorCode.VALIDATION_ERROR, statusCode: 422 });
+  });
+
+  it("RN-EC9: emailSent true si se solicita y el cliente tiene email", async () => {
+    const db = buildMockDb({
+      singleResults: [
+        { data: mascotaViva, error: null },
+        { data: { id: EVENT_ID, date: "2026-06-04", event_type: "Consulta" }, error: null },
+      ],
+    });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    const evento = await HistorialService.crearRegistro(
+      PET_ID, dtoBase({ sendEmailToClient: true }) as never, CTX,
+    );
+    expect(evento.emailSent).toBe(true);
+  });
+
+  it("RN-EC9: emailSent false si se solicita pero el cliente no tiene email", async () => {
+    const db = buildMockDb({
+      singleResults: [
+        { data: { ...mascotaViva, cliente: { full_name: "Juan Pérez", email: null } }, error: null },
+        { data: { id: EVENT_ID, date: "2026-06-04", event_type: "Consulta" }, error: null },
+      ],
+    });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    const evento = await HistorialService.crearRegistro(
+      PET_ID, dtoBase({ sendEmailToClient: true }) as never, CTX,
+    );
+    expect(evento.emailSent).toBe(false);
+  });
+});
+
+// ─── adjuntarArchivo ──────────────────────────────────────────────────────────
+
+describe("adjuntarArchivo", () => {
+  it("RN-EC4: tipo de archivo no permitido → INVALID_FILE_TYPE", async () => {
+    mockGetServiceDb.mockReturnValue(buildMockDb() as never);
+    const file = new File(["hola"], "nota.txt", { type: "text/plain" });
+
+    await expect(
+      HistorialService.adjuntarArchivo(EVENT_ID, file, CTX),
+    ).rejects.toMatchObject({ code: ErrorCode.INVALID_FILE_TYPE, statusCode: 422 });
+  });
+
+  it("RN-EC4: archivo > 10 MB → FILE_TOO_LARGE", async () => {
+    mockGetServiceDb.mockReturnValue(buildMockDb() as never);
+    const tooBig = new File([new Uint8Array(10 * 1024 * 1024 + 1)], "big.pdf", { type: "application/pdf" });
+
+    await expect(
+      HistorialService.adjuntarArchivo(EVENT_ID, tooBig, CTX),
+    ).rejects.toMatchObject({ code: ErrorCode.FILE_TOO_LARGE, statusCode: 422 });
+  });
+
+  it("adjuntarArchivo: registro de otro tenant → HISTORIAL_NOT_FOUND", async () => {
+    const db = buildMockDb({ singleResults: [{ data: null, error: null }] });
+    mockGetServiceDb.mockReturnValue(db as never);
+    const file = new File(["x"], "rx.pdf", { type: "application/pdf" });
+
+    await expect(
+      HistorialService.adjuntarArchivo(EVENT_ID, file, CTX),
+    ).rejects.toMatchObject({ code: ErrorCode.HISTORIAL_NOT_FOUND, statusCode: 404 });
+  });
+
+  it("adjuntarArchivo: sube con path por tenant y devuelve metadata", async () => {
+    const db = buildMockDb({
+      singleResults: [
+        { data: { id: EVENT_ID }, error: null },
+        { data: { id: "adj-1", file_name: "rx.pdf", file_type: "application/pdf", file_size: 4 }, error: null },
+      ],
+    });
+    mockGetServiceDb.mockReturnValue(db as never);
+    const file = new File(["data"], "rx.pdf", { type: "application/pdf" });
+
+    const meta = await HistorialService.adjuntarArchivo(EVENT_ID, file, CTX);
+
+    expect(db.storageFrom).toHaveBeenCalledWith("adjuntos-clinicos");
+    const uploadedPath = db.storageUpload.mock.calls[0][0] as string;
+    expect(uploadedPath.startsWith(`${TENANT_ID}/${EVENT_ID}/`)).toBe(true);
+    expect(uploadedPath.endsWith(".pdf")).toBe(true);
+    expect(meta).toEqual({ id: "adj-1", fileName: "rx.pdf", fileType: "application/pdf", fileSize: 4 });
+  });
+});
+
+// ─── generarSignedUrlAdjunto ──────────────────────────────────────────────────
+
+describe("generarSignedUrlAdjunto", () => {
+  it("generarSignedUrlAdjunto: adjunto de otro tenant → HISTORIAL_NOT_FOUND", async () => {
+    const db = buildMockDb({ singleResults: [{ data: null, error: null }] });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    await expect(
+      HistorialService.generarSignedUrlAdjunto("adj-1", CTX),
+    ).rejects.toMatchObject({ code: ErrorCode.HISTORIAL_NOT_FOUND, statusCode: 404 });
+  });
+
+  it("generarSignedUrlAdjunto: devuelve la signed URL del bucket privado", async () => {
+    const db = buildMockDb({
+      singleResults: [{
+        data: { storage_path: `${TENANT_ID}/${EVENT_ID}/abc.pdf`, file_name: "rx.pdf", file_type: "application/pdf", file_size: 4 },
+        error: null,
+      }],
+      signedUrlResult: { data: { signedUrl: "https://signed.example/abc.pdf" }, error: null },
+    });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    const firmado = await HistorialService.generarSignedUrlAdjunto("adj-1", CTX);
+
+    expect(db.storageFrom).toHaveBeenCalledWith("adjuntos-clinicos");
+    expect(firmado.url).toBe("https://signed.example/abc.pdf");
+    expect(firmado.fileName).toBe("rx.pdf");
+  });
+});

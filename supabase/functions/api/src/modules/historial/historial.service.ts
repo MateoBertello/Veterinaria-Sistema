@@ -1,0 +1,534 @@
+import { DomainError, ErrorCode } from "../../shared/errors.ts";
+import { recordAudit } from "../../shared/audit.ts";
+import { getServiceDb } from "../../shared/db.ts";
+import { CrearEventoClinicoSchema, type CrearEventoClinicoDto } from "./historial.schemas.ts";
+
+// ─── DTOs públicos ────────────────────────────────────────────────────────────
+
+export interface HistorialItem {
+  id:               string;
+  date:             string;
+  eventType:        string;
+  professionalName: string | null;
+  weightKg:         number | null;
+  temperatureC:     number | null;
+  diagnosis:        string | null;
+  clientNameAtTime: string;
+  isPreviousOwner:  boolean;
+  hasAttachments:   boolean;
+}
+
+export interface AdjuntoMeta {
+  id:       string;
+  fileName: string;
+  fileType: string;
+  fileSize: number;
+}
+
+export interface HistorialDetalle {
+  id:               string;
+  petId:            string;
+  date:             string;
+  eventType:        string;
+  professionalName: string | null;
+  weightKg:         number | null;
+  temperatureC:     number | null;
+  description:      string;
+  diagnosis:        string | null;
+  treatment:        string | null;
+  medication:       string | null;
+  notes:            string | null;
+  clientNameAtTime: string;
+  createdAt:        string;
+  adjuntos:         AdjuntoMeta[];
+}
+
+export interface ResumenClinico {
+  id:          string;
+  name:        string;
+  estado:      string;
+  ownerName:   string | null;
+  especieName: string | null;
+  razaName:    string | null;
+  ultimoPeso:  number | null;
+}
+
+/** Contexto del usuario autenticado (mismo shape que servicios.service). */
+export interface CallerContext {
+  tenantId:     string;
+  callerUserId: string;
+  callerName:   string;
+  callerRole:   string;
+}
+
+export interface EventoCreado {
+  id:               string;
+  petId:            string;
+  date:             string;
+  eventType:        string;
+  clientNameAtTime: string;
+  attachmentsCount: number;
+  emailSent:        boolean;
+}
+
+export interface AdjuntoFirmado {
+  url:      string;
+  fileName: string;
+  fileType: string;
+  fileSize: number;
+}
+
+// ─── Adjuntos: tipos permitidos (RN-EC4) ────────────────────────────────────────
+
+const BUCKET_ADJUNTOS = "adjuntos-clinicos";
+const MAX_FILE_SIZE   = 10 * 1024 * 1024; // 10 MB
+const SIGNED_URL_TTL  = 300;              // 5 min
+const ALLOWED_FILE_TYPES: Record<string, string> = {
+  "image/jpeg":      "jpg",
+  "image/png":       "png",
+  "image/gif":       "gif",
+  "application/pdf": "pdf",
+};
+
+// ─── Service ──────────────────────────────────────────────────────────────────
+
+export class HistorialService {
+  /**
+   * RN-HC1: eventos ordenados por fecha descendente.
+   * RN-HC3: isPreviousOwner derivado comparando client_id_at_time con dueño actual.
+   * Sin N+1: una sola query con embeds de profesional, mascota (client_id) y count de adjuntos.
+   */
+  static async listarHistorial(
+    petId:    string,
+    tenantId: string,
+    opts:     { page: number; limit: number },
+  ): Promise<{ items: HistorialItem[]; total: number }> {
+    const db = getServiceDb();
+
+    const { data: mascota } = await db
+      .from("mascotas")
+      .select("id")
+      .eq("id", petId)
+      .eq("tenant_id", tenantId)
+      .maybeSingle();
+
+    if (!mascota) {
+      throw new DomainError(ErrorCode.MASCOTA_NOT_FOUND, 404, "Mascota no encontrada");
+    }
+
+    const from = (opts.page - 1) * opts.limit;
+    const to   = from + opts.limit - 1;
+
+    const { data, error, count } = await db
+      .from("historial_clinico")
+      .select(
+        `id, date, event_type, weight_kg, temperature_c,
+         diagnosis, description, client_name_at_time, client_id_at_time,
+         profesional:usuarios!professional_id(full_name),
+         mascota:mascotas!pet_id(client_id),
+         adjuntos:adjuntos_medicos(count)`,
+        { count: "exact" },
+      )
+      .eq("tenant_id", tenantId)
+      .eq("pet_id", petId)
+      .eq("deleted", false)
+      .order("date", { ascending: false })
+      .range(from, to);
+
+    if (error) {
+      throw new DomainError(ErrorCode.INTERNAL_ERROR, 500, "Error al consultar historial");
+    }
+
+    // deno-lint-ignore no-explicit-any
+    const items: HistorialItem[] = (data ?? []).map((row: any) => ({
+      id:               row.id,
+      date:             row.date,
+      eventType:        row.event_type,
+      professionalName: row.profesional?.full_name ?? null,
+      weightKg:         row.weight_kg ?? null,
+      temperatureC:     row.temperature_c ?? null,
+      diagnosis:        row.diagnosis ?? null,
+      clientNameAtTime: row.client_name_at_time,
+      isPreviousOwner:  row.client_id_at_time !== row.mascota?.client_id,
+      hasAttachments:   (row.adjuntos?.[0]?.count ?? 0) > 0,
+    }));
+
+    return { items, total: count ?? 0 };
+  }
+
+  /**
+   * Devuelve el detalle completo de un evento clínico.
+   * El aislamiento de tenant se garantiza via filtro explícito (getServiceDb bypasea RLS).
+   */
+  static async obtenerEventoPorId(
+    id:       string,
+    tenantId: string,
+  ): Promise<HistorialDetalle> {
+    const db = getServiceDb();
+
+    const { data, error } = await db
+      .from("historial_clinico")
+      .select(
+        `id, pet_id, date, event_type, weight_kg, temperature_c,
+         description, diagnosis, treatment, medication, notes,
+         client_name_at_time, created_at,
+         profesional:usuarios!professional_id(full_name),
+         adjuntos:adjuntos_medicos(id, file_name, file_type, file_size)`,
+      )
+      .eq("id", id)
+      .eq("tenant_id", tenantId)
+      .eq("deleted", false)
+      .maybeSingle();
+
+    if (error) {
+      throw new DomainError(ErrorCode.INTERNAL_ERROR, 500, "Error al consultar evento clínico");
+    }
+    if (!data) {
+      throw new DomainError(ErrorCode.HISTORIAL_NOT_FOUND, 404, "Registro clínico no encontrado");
+    }
+
+    // deno-lint-ignore no-explicit-any
+    return {
+      id:               data.id,
+      petId:            data.pet_id,
+      date:             data.date,
+      eventType:        data.event_type,
+      professionalName: (data as any).profesional?.full_name ?? null,
+      weightKg:         data.weight_kg ?? null,
+      temperatureC:     data.temperature_c ?? null,
+      description:      data.description,
+      diagnosis:        data.diagnosis ?? null,
+      treatment:        data.treatment ?? null,
+      medication:       data.medication ?? null,
+      notes:            data.notes ?? null,
+      clientNameAtTime: data.client_name_at_time,
+      createdAt:        data.created_at,
+      // deno-lint-ignore no-explicit-any
+      adjuntos: ((data as any).adjuntos ?? []).map((a: any) => ({
+        id:       a.id,
+        fileName: a.file_name,
+        fileType: a.file_type,
+        fileSize: a.file_size,
+      })),
+    };
+  }
+
+  /**
+   * RN-HC2: ultimoPeso derivado del evento más reciente que tenga weight_kg.
+   * Usa 2 queries escalares (no N+1): mascota + último peso.
+   */
+  static async resumenClinico(
+    petId:    string,
+    tenantId: string,
+  ): Promise<ResumenClinico> {
+    const db = getServiceDb();
+
+    const { data: mascota } = await db
+      .from("mascotas")
+      .select(
+        `id, name, estado,
+         cliente:clientes!client_id(full_name),
+         especie:especies!especie_id(name),
+         raza:razas!raza_id(name)`,
+      )
+      .eq("id", petId)
+      .eq("tenant_id", tenantId)
+      .maybeSingle();
+
+    if (!mascota) {
+      throw new DomainError(ErrorCode.MASCOTA_NOT_FOUND, 404, "Mascota no encontrada");
+    }
+
+    // RN-HC2: último registro clínico con peso registrado
+    const { data: lastWeightRow } = await db
+      .from("historial_clinico")
+      .select("weight_kg")
+      .eq("pet_id", petId)
+      .eq("tenant_id", tenantId)
+      .eq("deleted", false)
+      .not("weight_kg", "is", null)
+      .order("date", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    // deno-lint-ignore no-explicit-any
+    const m = mascota as any;
+    return {
+      id:          m.id,
+      name:        m.name,
+      estado:      m.estado,
+      ownerName:   m.cliente?.full_name ?? null,
+      especieName: m.especie?.name ?? null,
+      razaName:    m.raza?.name ?? null,
+      // deno-lint-ignore no-explicit-any
+      ultimoPeso:  (lastWeightRow as any)?.weight_kg ?? null,
+    };
+  }
+
+  /**
+   * Registrar Evento Clínico (RN-EC1, RN-EC3, RN-EC5, RN-EC6, RN-EC8, RN-EC9).
+   * Eutanasia y proximaDosis quedan fuera de esta sesión (ver schema).
+   */
+  static async crearRegistro(
+    petId: string,
+    dto:   CrearEventoClinicoDto,
+    ctx:   CallerContext,
+  ): Promise<EventoCreado> {
+    // RN-EC1/RN-EC6: defense-in-depth (el Controller ya validó con Zod).
+    const parsed = CrearEventoClinicoSchema.safeParse(dto);
+    if (!parsed.success) {
+      throw new DomainError(
+        ErrorCode.VALIDATION_ERROR,
+        422,
+        "Datos del evento clínico inválidos",
+        parsed.error.issues,
+      );
+    }
+    const data = parsed.data;
+
+    const db = getServiceDb();
+
+    // Una sola query: mascota del tenant + dueño actual (RN-EC5, sin N+1).
+    const { data: mascota } = await db
+      .from("mascotas")
+      .select("id, estado, client_id, cliente:clientes!client_id(full_name, email)")
+      .eq("id", petId)
+      .eq("tenant_id", ctx.tenantId)
+      .maybeSingle();
+
+    if (!mascota) {
+      throw new DomainError(ErrorCode.MASCOTA_NOT_FOUND, 404, "Mascota no encontrada");
+    }
+
+    // deno-lint-ignore no-explicit-any
+    const m = mascota as any;
+
+    // RN-EC3: no se permiten registros en mascotas fallecidas.
+    if (m.estado === "Fallecida") {
+      throw new DomainError(
+        ErrorCode.PET_DECEASED,
+        422,
+        "No se pueden agregar eventos clínicos a una mascota fallecida",
+      );
+    }
+
+    const clientNameAtTime = m.cliente?.full_name ?? null;
+    if (!m.client_id || !clientNameAtTime) {
+      throw new DomainError(
+        ErrorCode.INTERNAL_ERROR,
+        500,
+        "La mascota no tiene un dueño vigente para registrar el evento",
+      );
+    }
+
+    const payload = {
+      tenant_id:           ctx.tenantId,
+      pet_id:              petId,
+      professional_id:     data.professionalId,
+      date:                data.date,
+      event_type:          data.eventType,
+      description:         data.description,
+      weight_kg:           data.weightKg     ?? null,
+      temperature_c:       data.temperatureC ?? null,
+      diagnosis:           data.diagnosis    ?? null,
+      treatment:           data.treatment    ?? null,
+      medication:          data.medication   ?? null,
+      notes:               data.notes        ?? null,
+      client_id_at_time:   m.client_id,        // RN-EC5
+      client_name_at_time: clientNameAtTime,   // RN-EC5
+    };
+
+    const { data: row, error } = await db
+      .from("historial_clinico")
+      .insert(payload)
+      .select("id, date, event_type")
+      .single();
+
+    if (error || !row) {
+      throw new DomainError(
+        ErrorCode.INTERNAL_ERROR,
+        500,
+        `No se pudo registrar el evento clínico: ${error?.message ?? ""}`,
+      );
+    }
+
+    // deno-lint-ignore no-explicit-any
+    const created = row as any;
+
+    // RN-EC8: auditoría CREATE en módulo medical_records.
+    await recordAudit(db as never, {
+      tenantId:  ctx.tenantId,
+      userId:    ctx.callerUserId,
+      userName:  ctx.callerName,
+      userRole:  ctx.callerRole,
+      action:    "CREATE",
+      module:    "medical_records",
+      entityId:  created.id,
+      newValues: payload as Record<string, unknown>,
+    });
+
+    // RN-EC9: solo se "envía" si se solicitó y el cliente tiene email.
+    // (La entrega real de email se difiere; aquí se resuelve el flag.)
+    const emailSent = data.sendEmailToClient === true && !!m.cliente?.email;
+
+    return {
+      id:               created.id,
+      petId,
+      date:             created.date,
+      eventType:        created.event_type,
+      clientNameAtTime,
+      attachmentsCount: 0,
+      emailSent,
+    };
+  }
+
+  /**
+   * Adjuntar archivo a un evento clínico (RN-EC4).
+   * Sube a Supabase Storage (bucket privado) con path por tenant y registra el
+   * metadato en `adjuntos_medicos`.
+   */
+  static async adjuntarArchivo(
+    recordId: string,
+    file:     File,
+    ctx:      CallerContext,
+  ): Promise<AdjuntoMeta> {
+    // RN-EC4: tipo permitido.
+    const ext = ALLOWED_FILE_TYPES[file.type];
+    if (!ext) {
+      throw new DomainError(
+        ErrorCode.INVALID_FILE_TYPE,
+        422,
+        "Tipo de archivo no permitido. Solo JPG, PNG, GIF o PDF",
+      );
+    }
+    // RN-EC4: tamaño máximo 10 MB.
+    if (file.size > MAX_FILE_SIZE) {
+      throw new DomainError(
+        ErrorCode.FILE_TOO_LARGE,
+        422,
+        "El archivo supera el tamaño máximo permitido de 10 MB",
+      );
+    }
+
+    const db = getServiceDb();
+
+    // El registro debe existir y pertenecer al tenant (aislamiento).
+    const { data: evento } = await db
+      .from("historial_clinico")
+      .select("id")
+      .eq("id", recordId)
+      .eq("tenant_id", ctx.tenantId)
+      .eq("deleted", false)
+      .maybeSingle();
+
+    if (!evento) {
+      throw new DomainError(ErrorCode.HISTORIAL_NOT_FOUND, 404, "Registro clínico no encontrado");
+    }
+
+    // Path con prefijo de tenant: lo exigen las policies de storage.objects.
+    const storagePath = `${ctx.tenantId}/${recordId}/${crypto.randomUUID()}.${ext}`;
+
+    const { error: uploadError } = await db.storage
+      .from(BUCKET_ADJUNTOS)
+      .upload(storagePath, file, { contentType: file.type, upsert: false });
+
+    if (uploadError) {
+      throw new DomainError(
+        ErrorCode.INTERNAL_ERROR,
+        500,
+        `No se pudo subir el adjunto: ${uploadError.message}`,
+      );
+    }
+
+    const adjuntoPayload = {
+      tenant_id:         ctx.tenantId,
+      medical_record_id: recordId,
+      file_name:         file.name,
+      file_type:         file.type,
+      file_size:         file.size,
+      storage_path:      storagePath,
+    };
+
+    const { data: row, error } = await db
+      .from("adjuntos_medicos")
+      .insert(adjuntoPayload)
+      .select("id, file_name, file_type, file_size")
+      .single();
+
+    if (error || !row) {
+      // Limpieza best-effort: si falla el insert, borrar el objeto subido.
+      await db.storage.from(BUCKET_ADJUNTOS).remove([storagePath]);
+      throw new DomainError(
+        ErrorCode.INTERNAL_ERROR,
+        500,
+        `No se pudo registrar el adjunto: ${error?.message ?? ""}`,
+      );
+    }
+
+    // deno-lint-ignore no-explicit-any
+    const a = row as any;
+
+    await recordAudit(db as never, {
+      tenantId:  ctx.tenantId,
+      userId:    ctx.callerUserId,
+      userName:  ctx.callerName,
+      userRole:  ctx.callerRole,
+      action:    "CREATE",
+      module:    "medical_records",
+      entityId:  a.id,
+      newValues: adjuntoPayload as Record<string, unknown>,
+    });
+
+    return {
+      id:       a.id,
+      fileName: a.file_name,
+      fileType: a.file_type,
+      fileSize: a.file_size,
+    };
+  }
+
+  /**
+   * Genera una signed URL para descargar un adjunto (RN-EC4: bucket privado).
+   * Verifica que el adjunto pertenezca al tenant antes de firmar (aislamiento).
+   */
+  static async generarSignedUrlAdjunto(
+    adjuntoId: string,
+    ctx:       CallerContext,
+  ): Promise<AdjuntoFirmado> {
+    const db = getServiceDb();
+
+    const { data: adjunto } = await db
+      .from("adjuntos_medicos")
+      .select("storage_path, file_name, file_type, file_size")
+      .eq("id", adjuntoId)
+      .eq("tenant_id", ctx.tenantId)
+      .eq("deleted", false)
+      .maybeSingle();
+
+    if (!adjunto) {
+      throw new DomainError(ErrorCode.HISTORIAL_NOT_FOUND, 404, "Adjunto no encontrado");
+    }
+
+    // deno-lint-ignore no-explicit-any
+    const a = adjunto as any;
+
+    const { data: signed, error } = await db.storage
+      .from(BUCKET_ADJUNTOS)
+      .createSignedUrl(a.storage_path, SIGNED_URL_TTL);
+
+    if (error || !signed?.signedUrl) {
+      throw new DomainError(
+        ErrorCode.INTERNAL_ERROR,
+        500,
+        `No se pudo generar la URL del adjunto: ${error?.message ?? ""}`,
+      );
+    }
+
+    return {
+      url:      signed.signedUrl,
+      fileName: a.file_name,
+      fileType: a.file_type,
+      fileSize: a.file_size,
+    };
+  }
+}

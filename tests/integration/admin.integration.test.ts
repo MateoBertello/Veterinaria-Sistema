@@ -13,29 +13,8 @@ globalThis.WebSocket = class FakeWebSocket {} as never;
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 import app from "../../supabase/functions/api/src/main.ts";
-
-function loadEnv(): void {
-  try {
-    const content = readFileSync(resolve(process.cwd(), ".env"), "utf-8");
-    for (const line of content.split("\n")) {
-      const trimmed = line.trim();
-      if (!trimmed || trimmed.startsWith("#")) continue;
-      const eqIdx = trimmed.indexOf("=");
-      if (eqIdx < 0) continue;
-      const key = trimmed.slice(0, eqIdx).trim();
-      const val = trimmed.slice(eqIdx + 1).trim();
-      if (!process.env[key]) process.env[key] = val;
-    }
-  } catch { /* .env opcional */ }
-}
-loadEnv();
-
-const SUPABASE_URL      = process.env["SUPABASE_URL"]              ?? "";
-const SUPABASE_ANON_KEY = process.env["SUPABASE_ANON_KEY"]         ?? "";
-const SERVICE_ROLE_KEY  = process.env["SUPABASE_SERVICE_ROLE_KEY"] ?? "";
+import { SUPABASE_URL, SUPABASE_ANON_KEY, SERVICE_ROLE_KEY, describeIntegration } from "./_env.ts";
 
 function skipIfNoCredentials(): boolean {
   if (!SUPABASE_URL || !SERVICE_ROLE_KEY || !SUPABASE_ANON_KEY) {
@@ -140,7 +119,7 @@ afterAll(async () => {
 
 // ─── Aislamiento ────────────────────────────────────────────────────────────
 
-describe("Aislamiento /admin/*", () => {
+describeIntegration("Aislamiento /admin/*", () => {
   it("JWT sin platform_role → 403 FORBIDDEN antes del service", async () => {
     if (skipIfNoCredentials() || !jwtTenantNormal) return;
     const res = await callApp("/admin/tenants", { jwt: jwtTenantNormal });
@@ -158,7 +137,7 @@ describe("Aislamiento /admin/*", () => {
 
 // ─── RN-SA1 / RN-SA2 ──────────────────────────────────────────────────────────
 
-describe("RN-SA1 / RN-SA2: alta de tenant", () => {
+describeIntegration("RN-SA1 / RN-SA2: alta de tenant", () => {
   it("RN-SA2: POST /admin/tenants crea el tenant y lo aprovisiona (roles + config + módulos)", async () => {
     if (skipIfNoCredentials() || !jwtSuperAdmin) return;
 
@@ -195,7 +174,7 @@ describe("RN-SA1 / RN-SA2: alta de tenant", () => {
 
 // ─── RN-SA3 ───────────────────────────────────────────────────────────────────
 
-describe("RN-SA3: suspensión efectiva", () => {
+describeIntegration("RN-SA3: suspensión efectiva", () => {
   it("RN-SA3: tenant suspendido → 403 TENANT_SUSPENDED en datos del tenant; login sigue disponible", async () => {
     if (skipIfNoCredentials() || !jwtSuperAdmin || !jwtTenantNormal) return;
 
@@ -226,7 +205,7 @@ describe("RN-SA3: suspensión efectiva", () => {
 
 // ─── RN-SA4 ───────────────────────────────────────────────────────────────────
 
-describe("RN-SA4: aislamiento de datos de negocio", () => {
+describeIntegration("RN-SA4: aislamiento de datos de negocio", () => {
   it("RN-SA4: el listado expone solo metadatos comerciales", async () => {
     if (skipIfNoCredentials() || !jwtSuperAdmin) return;
 
