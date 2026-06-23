@@ -7,3 +7,7 @@ dist/
 *.log
 .supabase/
 coverage/
+
+# Artefactos locales de la CLI de Supabase (estado del stack, no versionar)
+supabase/.temp/
+supabase/.branches/
