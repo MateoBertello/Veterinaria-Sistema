@@ -30,3 +30,23 @@ export const CrearEventoClinicoSchema = z.object({
 });
 
 export type CrearEventoClinicoDto = z.infer<typeof CrearEventoClinicoSchema>;
+
+// ─── Registrar Eutanasia (RN-EC10, RN-EC11) ─────────────────────────────────────
+// Ruta dedicada (POST /mascotas/:petId/eutanasia), separada del Registrar Evento
+// genérico: la única operación irreversible (CLAUDE.md regla 8) no se dispara por
+// la ruta común. eventType es implícito ('Eutanasia'), por eso no está en el schema.
+// `euthanasiaConfirmed` queda OPCIONAL aquí a propósito: la confirmación (RN-EC10)
+// la valida el Service para devolver EUTHANASIA_CONFIRMATION_REQUIRED y no un
+// VALIDATION_ERROR genérico. La UI igualmente envía euthanasiaConfirmed:true.
+export const RegistrarEutanasiaSchema = z.object({
+  date:               z.string().date(),
+  professionalId:     z.string().uuid(),
+  description:        z.string().min(1).max(2000),
+  weightKg:           z.number().min(0).max(200).optional(),   // RN-EC6
+  temperatureC:       z.number().min(30).max(45).optional(),   // RN-EC6
+  diagnosis:          z.string().max(2000).optional(),
+  notes:              z.string().max(2000).optional(),
+  euthanasiaConfirmed: z.boolean().optional(),                 // RN-EC10 (lo exige el Service)
+});
+
+export type RegistrarEutanasiaDto = z.infer<typeof RegistrarEutanasiaSchema>;

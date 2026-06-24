@@ -1,6 +1,10 @@
 import { Hono, type Context } from "hono";
 import { HistorialService, type CallerContext } from "./historial.service.ts";
-import { ListarHistorialQuerySchema, CrearEventoClinicoSchema } from "./historial.schemas.ts";
+import {
+  ListarHistorialQuerySchema,
+  CrearEventoClinicoSchema,
+  RegistrarEutanasiaSchema,
+} from "./historial.schemas.ts";
 import { DomainError, ErrorCode } from "../../shared/errors.ts";
 import { ok } from "../../shared/envelope.ts";
 import { tenantContext, getTenantContext } from "../../middleware/tenantContext.ts";
@@ -98,6 +102,21 @@ historialMascotaRouter.post("/:petId/historial", manageMedicalHistory, async (c)
 
   const evento = await HistorialService.crearRegistro(petId, parsed.data, callerCtx(c));
   return c.json(ok(evento), 201);
+});
+
+// POST /mascotas/:petId/eutanasia — Registrar Eutanasia (RN-EC10..EC12, RN-PV4).
+// Ruta DEDICADA: la única operación irreversible (CLAUDE.md regla 8) no se dispara
+// por el endpoint genérico de evento clínico (que sigue rechazando 'Eutanasia').
+historialMascotaRouter.post("/:petId/eutanasia", manageMedicalHistory, async (c) => {
+  const petId = c.req.param("petId")!;
+
+  const parsed = RegistrarEutanasiaSchema.safeParse(await c.req.json().catch(() => ({})));
+  if (!parsed.success) {
+    throw new DomainError(ErrorCode.VALIDATION_ERROR, 422, "Datos de eutanasia inválidos", parsed.error.issues);
+  }
+
+  const resultado = await HistorialService.registrarEutanasia(petId, parsed.data, callerCtx(c));
+  return c.json(ok(resultado), 201);
 });
 
 // ─── /adjuntos/:adjuntoId  (descarga por signed URL) ─────────────────────────

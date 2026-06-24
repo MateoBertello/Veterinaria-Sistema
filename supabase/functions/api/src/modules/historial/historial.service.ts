@@ -1,7 +1,12 @@
 import { DomainError, ErrorCode } from "../../shared/errors.ts";
 import { recordAudit } from "../../shared/audit.ts";
 import { getServiceDb } from "../../shared/db.ts";
-import { CrearEventoClinicoSchema, type CrearEventoClinicoDto } from "./historial.schemas.ts";
+import {
+  CrearEventoClinicoSchema,
+  RegistrarEutanasiaSchema,
+  type CrearEventoClinicoDto,
+  type RegistrarEutanasiaDto,
+} from "./historial.schemas.ts";
 
 // ─── DTOs públicos ────────────────────────────────────────────────────────────
 
@@ -78,6 +83,31 @@ export interface AdjuntoFirmado {
   fileSize: number;
 }
 
+// ─── Eutanasia: forma de respuesta { evento, mascota } (Addendum v1.1) ──────────
+
+export interface EventoEutanasia {
+  id:               string;
+  petId:            string;
+  date:             string;
+  eventType:        string;        // siempre 'Eutanasia'
+  professionalName: string | null;
+  clientNameAtTime: string;
+}
+
+export interface MascotaFallecida {
+  id:             string;
+  name:           string;
+  estado:         string;          // siempre 'Fallecida'
+  deceasedDate:   string;
+  deceasedReason: string;          // siempre 'Eutanasia'
+}
+
+export interface EutanasiaResultado {
+  evento:         EventoEutanasia;
+  mascota:        MascotaFallecida;
+  cancelledDoses: number;          // RN-PV4: dosis pendientes canceladas en la transacción
+}
+
 // ─── Adjuntos: tipos permitidos (RN-EC4) ────────────────────────────────────────
 
 const BUCKET_ADJUNTOS = "adjuntos-clinicos";
@@ -89,6 +119,23 @@ const ALLOWED_FILE_TYPES: Record<string, string> = {
   "image/gif":       "gif",
   "application/pdf": "pdf",
 };
+
+/**
+ * Mapea el error de un RPC de eutanasia a DomainError. El RPC lanza
+ * `RAISE EXCEPTION` con el MESSAGE igual al código de ErrorCode.
+ */
+function mapEutanasiaRpcError(error: { message?: string }): DomainError {
+  const msg = error.message ?? "";
+  if (msg.includes("EUTHANASIA_CONFIRMATION_REQUIRED"))
+    return new DomainError(ErrorCode.EUTHANASIA_CONFIRMATION_REQUIRED, 422, "Se requiere confirmación explícita de la eutanasia");
+  if (msg.includes("PET_DECEASED"))
+    return new DomainError(ErrorCode.PET_DECEASED, 422, "La mascota ya está marcada como Fallecida");
+  if (msg.includes("MASCOTA_NOT_FOUND"))
+    return new DomainError(ErrorCode.MASCOTA_NOT_FOUND, 404, "Mascota no encontrada en este tenant");
+  if (msg.includes("FORBIDDEN"))
+    return new DomainError(ErrorCode.FORBIDDEN, 403, "El profesional no pertenece a este tenant");
+  return new DomainError(ErrorCode.INTERNAL_ERROR, 500, `No se pudo registrar la eutanasia: ${msg}`);
+}
 
 // ─── Service ──────────────────────────────────────────────────────────────────
 
@@ -379,6 +426,108 @@ export class HistorialService {
       clientNameAtTime,
       attachmentsCount: 0,
       emailSent,
+    };
+  }
+
+  /**
+   * Registrar Eutanasia — la ÚNICA operación irreversible (CLAUDE.md regla 8).
+   *
+   * RN-EC10: exige confirmación explícita (código EUTHANASIA_CONFIRMATION_REQUIRED).
+   * RN-EC11: TODO (evento + estado='Fallecida' + cancelación de dosis pendientes
+   *          RN-PV4) se persiste en UNA sola transacción vía RPC `registrar_eutanasia`.
+   *          El Service NO escribe por partes: delega la transacción completa al RPC,
+   *          por lo que un fallo no puede dejar la mascota "media muerta" (rollback total).
+   * RN-EC12: no existe método inverso; revertir 'Fallecida' es soporte manual.
+   */
+  static async registrarEutanasia(
+    petId: string,
+    dto:   RegistrarEutanasiaDto,
+    ctx:   CallerContext,
+  ): Promise<EutanasiaResultado> {
+    const parsed = RegistrarEutanasiaSchema.safeParse(dto);
+    if (!parsed.success) {
+      throw new DomainError(
+        ErrorCode.VALIDATION_ERROR,
+        422,
+        "Datos de eutanasia inválidos",
+        parsed.error.issues,
+      );
+    }
+    const data = parsed.data;
+
+    // RN-EC10: la confirmación de UI no sustituye la validación de backend.
+    // Se valida ANTES de tocar la base (no se inicia ninguna transacción sin flag).
+    if (data.euthanasiaConfirmed !== true) {
+      throw new DomainError(
+        ErrorCode.EUTHANASIA_CONFIRMATION_REQUIRED,
+        422,
+        "Se requiere confirmación explícita para registrar una eutanasia",
+      );
+    }
+
+    const db = getServiceDb();
+
+    // RN-EC11: transacción atómica única. p_tenant_id SIEMPRE del JWT (regla 1).
+    const { data: row, error } = await db
+      .rpc("registrar_eutanasia", {
+        p_tenant_id:       ctx.tenantId,
+        p_pet_id:          petId,
+        p_professional_id: data.professionalId,
+        p_date:            data.date,
+        p_description:     data.description,
+        p_confirmed:       true,
+        p_weight_kg:       data.weightKg     ?? null,
+        p_temperature_c:   data.temperatureC ?? null,
+        p_diagnosis:       data.diagnosis    ?? null,
+        p_notes:           data.notes        ?? null,
+      })
+      .single();
+
+    if (error) throw mapEutanasiaRpcError(error);
+    if (!row) {
+      throw new DomainError(ErrorCode.INTERNAL_ERROR, 500, "El RPC de eutanasia no devolvió resultado");
+    }
+
+    // deno-lint-ignore no-explicit-any
+    const r = row as any;
+
+    // RN-S3: auditoría CREATE en módulo medical_records (tras el éxito de la
+    // transacción, igual patrón que cambiarDueno). Best-effort por diseño.
+    await recordAudit(db as never, {
+      tenantId:  ctx.tenantId,
+      userId:    ctx.callerUserId,
+      userName:  ctx.callerName,
+      userRole:  ctx.callerRole,
+      action:    "CREATE",
+      module:    "medical_records",
+      entityId:  r.event_id,
+      newValues: {
+        event_type:      "Eutanasia",
+        pet_id:          petId,
+        professional_id: data.professionalId,
+        deceased_date:   r.deceased_date,
+        deceased_reason: r.deceased_reason,
+        cancelled_doses: r.cancelled_doses,
+      },
+    });
+
+    return {
+      evento: {
+        id:               r.event_id,
+        petId:            r.pet_id,
+        date:             r.date,
+        eventType:        r.event_type,
+        professionalName: r.professional_name ?? null,
+        clientNameAtTime: r.client_name_at_time,
+      },
+      mascota: {
+        id:             r.pet_id,
+        name:           r.mascota_name,
+        estado:         r.mascota_estado,
+        deceasedDate:   r.deceased_date,
+        deceasedReason: r.deceased_reason,
+      },
+      cancelledDoses: r.cancelled_doses ?? 0,
     };
   }
 

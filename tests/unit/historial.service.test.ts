@@ -10,10 +10,12 @@ vi.mock("../../supabase/functions/api/src/shared/audit.ts", () => ({
 }));
 
 import { getServiceDb } from "../../supabase/functions/api/src/shared/db.ts";
+import { recordAudit } from "../../supabase/functions/api/src/shared/audit.ts";
 import { HistorialService } from "../../supabase/functions/api/src/modules/historial/historial.service.ts";
 import { ErrorCode } from "../../supabase/functions/api/src/shared/errors.ts";
 
 const mockGetServiceDb = vi.mocked(getServiceDb);
+const mockRecordAudit  = vi.mocked(recordAudit);
 
 const TENANT_ID  = "11111111-1111-4111-8111-111111111111";
 const PET_ID     = "22222222-2222-4222-8222-222222222222";
@@ -503,5 +505,173 @@ describe("generarSignedUrlAdjunto", () => {
     expect(db.storageFrom).toHaveBeenCalledWith("adjuntos-clinicos");
     expect(firmado.url).toBe("https://signed.example/abc.pdf");
     expect(firmado.fileName).toBe("rx.pdf");
+  });
+});
+
+// ─── registrarEutanasia (RN-EC10, RN-EC11, RN-EC12, RN-PV4) ─────────────────────
+// La ÚNICA operación irreversible del sistema (CLAUDE.md regla 8). Estos tests
+// verifican el contrato del Service; la atomicidad real (rollback en la DB) y el
+// aislamiento RLS se cubren en integración (bloqueante).
+
+function eutanasiaDto(over: Record<string, unknown> = {}) {
+  return {
+    date:           "2026-06-09",
+    professionalId: PROF_ID,
+    description:    "Eutanasia humanitaria por enfermedad terminal",
+    ...over,
+  };
+}
+
+// Fila snake_case tal como la devuelve el RPC registrar_eutanasia.
+function eutanasiaRpcRow(over: Record<string, unknown> = {}) {
+  return {
+    event_id:            EVENT_ID,
+    pet_id:              PET_ID,
+    date:                "2026-06-09",
+    event_type:          "Eutanasia",
+    professional_name:   "Dra. García",
+    client_name_at_time: "Juan Pérez",
+    mascota_name:        "Firulais",
+    mascota_estado:      "Fallecida",
+    deceased_date:       "2026-06-09",
+    deceased_reason:     "Eutanasia",
+    cancelled_doses:     0,
+    ...over,
+  };
+}
+
+describe("registrarEutanasia", () => {
+  it("RN-EC10: euthanasiaConfirmed ausente → EUTHANASIA_CONFIRMATION_REQUIRED (no inicia transacción)", async () => {
+    const db = buildMockDb();
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    await expect(
+      HistorialService.registrarEutanasia(PET_ID, eutanasiaDto() as never, CTX),
+    ).rejects.toMatchObject({ code: ErrorCode.EUTHANASIA_CONFIRMATION_REQUIRED, statusCode: 422 });
+
+    expect(db.rpc).not.toHaveBeenCalled();
+  });
+
+  it("RN-EC10: euthanasiaConfirmed false → EUTHANASIA_CONFIRMATION_REQUIRED (no inicia transacción)", async () => {
+    const db = buildMockDb();
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    await expect(
+      HistorialService.registrarEutanasia(PET_ID, eutanasiaDto({ euthanasiaConfirmed: false }) as never, CTX),
+    ).rejects.toMatchObject({ code: ErrorCode.EUTHANASIA_CONFIRMATION_REQUIRED, statusCode: 422 });
+
+    expect(db.rpc).not.toHaveBeenCalled();
+  });
+
+  it("registrarEutanasia: falta description → VALIDATION_ERROR (no inicia transacción)", async () => {
+    const db = buildMockDb();
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    await expect(
+      HistorialService.registrarEutanasia(PET_ID, eutanasiaDto({ description: "", euthanasiaConfirmed: true }) as never, CTX),
+    ).rejects.toMatchObject({ code: ErrorCode.VALIDATION_ERROR, statusCode: 422 });
+
+    expect(db.rpc).not.toHaveBeenCalled();
+  });
+
+  it("RN-EC11 (ROLLBACK): si el RPC falla, no persiste nada ni audita — una transacción o nada", async () => {
+    // El RPC lanza PET_DECEASED (p. ej. mascota ya fallecida). El Service NO debe
+    // hacer escrituras por partes: delega TODO en el único rpc('registrar_eutanasia').
+    const db = buildMockDb({
+      singleResults: [{ data: null, error: { message: "PET_DECEASED" } }],
+    });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    await expect(
+      HistorialService.registrarEutanasia(PET_ID, eutanasiaDto({ euthanasiaConfirmed: true }) as never, CTX),
+    ).rejects.toMatchObject({ code: ErrorCode.PET_DECEASED, statusCode: 422 });
+
+    // Toda la operación se delega a una sola llamada RPC (la transacción atómica).
+    expect(db.rpc).toHaveBeenCalledTimes(1);
+    expect(db.rpc).toHaveBeenCalledWith("registrar_eutanasia", expect.anything());
+    // El Service nunca escribe directamente: no hay insert/update sueltos que
+    // pudieran dejar la mascota "media muerta".
+    expect(db.builder["insert"]).not.toHaveBeenCalled();
+    expect(db.builder["update"]).not.toHaveBeenCalled();
+    // Sin éxito de la transacción, no se audita.
+    expect(mockRecordAudit).not.toHaveBeenCalled();
+  });
+
+  it("RN-EC11: éxito ejecuta una única transacción y mapea { evento, mascota }", async () => {
+    const db = buildMockDb({
+      singleResults: [{ data: eutanasiaRpcRow(), error: null }],
+    });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    const result = await HistorialService.registrarEutanasia(
+      PET_ID, eutanasiaDto({ euthanasiaConfirmed: true }) as never, CTX,
+    );
+
+    expect(db.rpc).toHaveBeenCalledTimes(1);
+    const [fnName, params] = (db.rpc as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(fnName).toBe("registrar_eutanasia");
+    // p_tenant_id SIEMPRE del JWT (regla 1); p_confirmed:true; mascota y profesional.
+    expect(params).toMatchObject({
+      p_confirmed:       true,
+      p_tenant_id:       TENANT_ID,
+      p_pet_id:          PET_ID,
+      p_professional_id: PROF_ID,
+      p_date:            "2026-06-09",
+    });
+
+    expect(result.evento.eventType).toBe("Eutanasia");
+    expect(result.evento.clientNameAtTime).toBe("Juan Pérez");
+    expect(result.mascota.estado).toBe("Fallecida");
+    expect(result.mascota.deceasedReason).toBe("Eutanasia");
+    expect(result.mascota.deceasedDate).toBe("2026-06-09");
+  });
+
+  it("RN-S3: la eutanasia exitosa audita en módulo medical_records", async () => {
+    const db = buildMockDb({
+      singleResults: [{ data: eutanasiaRpcRow(), error: null }],
+    });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    await HistorialService.registrarEutanasia(PET_ID, eutanasiaDto({ euthanasiaConfirmed: true }) as never, CTX);
+
+    expect(mockRecordAudit).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ module: "medical_records", action: "CREATE", entityId: EVENT_ID }),
+    );
+  });
+
+  it("RN-PV4: cancelledDoses refleja las dosis pendientes canceladas por el RPC", async () => {
+    const db = buildMockDb({
+      singleResults: [{ data: eutanasiaRpcRow({ cancelled_doses: 3 }), error: null }],
+    });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    const result = await HistorialService.registrarEutanasia(
+      PET_ID, eutanasiaDto({ euthanasiaConfirmed: true }) as never, CTX,
+    );
+
+    expect(result.cancelledDoses).toBe(3);
+  });
+
+  it("registrarEutanasia: RPC MASCOTA_NOT_FOUND → 404", async () => {
+    const db = buildMockDb({
+      singleResults: [{ data: null, error: { message: "MASCOTA_NOT_FOUND" } }],
+    });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    await expect(
+      HistorialService.registrarEutanasia(PET_ID, eutanasiaDto({ euthanasiaConfirmed: true }) as never, CTX),
+    ).rejects.toMatchObject({ code: ErrorCode.MASCOTA_NOT_FOUND, statusCode: 404 });
+  });
+
+  it("registrarEutanasia: RPC FORBIDDEN (profesional de otro tenant) → 403", async () => {
+    const db = buildMockDb({
+      singleResults: [{ data: null, error: { message: "FORBIDDEN" } }],
+    });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    await expect(
+      HistorialService.registrarEutanasia(PET_ID, eutanasiaDto({ euthanasiaConfirmed: true }) as never, CTX),
+    ).rejects.toMatchObject({ code: ErrorCode.FORBIDDEN, statusCode: 403 });
   });
 });
