@@ -468,11 +468,15 @@ export class HistorialService {
     const db = getServiceDb();
 
     // RN-EC11: transacción atómica única. p_tenant_id SIEMPRE del JWT (regla 1).
+    // RN-S3: el asiento de auditoría se hace DENTRO del RPC (atómico con la
+    // operación irreversible, no best-effort); por eso se pasa p_user_id (el
+    // usuario que ejecuta) y aquí NO se llama a recordAudit.
     const { data: row, error } = await db
       .rpc("registrar_eutanasia", {
         p_tenant_id:       ctx.tenantId,
         p_pet_id:          petId,
         p_professional_id: data.professionalId,
+        p_user_id:         ctx.callerUserId,
         p_date:            data.date,
         p_description:     data.description,
         p_confirmed:       true,
@@ -490,26 +494,6 @@ export class HistorialService {
 
     // deno-lint-ignore no-explicit-any
     const r = row as any;
-
-    // RN-S3: auditoría CREATE en módulo medical_records (tras el éxito de la
-    // transacción, igual patrón que cambiarDueno). Best-effort por diseño.
-    await recordAudit(db as never, {
-      tenantId:  ctx.tenantId,
-      userId:    ctx.callerUserId,
-      userName:  ctx.callerName,
-      userRole:  ctx.callerRole,
-      action:    "CREATE",
-      module:    "medical_records",
-      entityId:  r.event_id,
-      newValues: {
-        event_type:      "Eutanasia",
-        pet_id:          petId,
-        professional_id: data.professionalId,
-        deceased_date:   r.deceased_date,
-        deceased_reason: r.deceased_reason,
-        cancelled_doses: r.cancelled_doses,
-      },
-    });
 
     return {
       evento: {

@@ -2,6 +2,36 @@
 
 **Cómo usar este plan con Claude Code:** trabajar una etapa por vez, en sesiones de 1–2 casos de uso. Una etapa está **terminada** cuando: (a) todos sus criterios de aceptación (RN) tienen test que pasa, (b) los tests de RLS siguen en verde, (c) el usuario revisó y aprobó los diffs. Recién entonces se avanza. Las referencias RN-xx remiten al Documento Maestro v1.0 y al Addendum v1.1 (`/docs`); el Addendum tiene precedencia.
 
+
+## Nota de arquitectura: infraestructura de notificaciones (email)
+
+Varias etapas necesitan enviar email, pero la **infraestructura de envío real** (proveedor
+tipo Resend/SMTP, con su config y secrets) **NO está construida todavía** y se difiere a una
+sesión dedicada. Esto es trabajo planificado, no deuda técnica.
+
+**Estado por etapa:**
+- **E5 (Historial):** RN-EC9 (resumen por email al cliente) implementa solo la LÓGICA DEL FLAG
+  `sendEmailToClient` — marca `emailSent:true/false` y audita, sin entrega real. La regla queda
+  cubierta por tests; falta solo el envío.
+- **E6 (Turnos):** RN-NT1..NT6 (recordatorios automáticos) necesitan envío real vía
+  `NotificacionService`.
+- **E8 (Vacunación):** RN-PV6/PV7 (avisos de dosis próximas) reusan el mismo
+  `NotificacionService`.
+
+**Decisión:** construir la infraestructura de email **una sola vez**, como `NotificacionService`
+genérico (idealmente al arrancar E6, que es la primera que exige entrega real), y que E5/E6/E8
+la consuman. Integrar un proveedor de email es una **dependencia nueva** → requiere aprobación
+explícita según CLAUDE.md antes de instalarla.
+
+**Pendiente concreto cuando se construya:** enchufar el envío real en los puntos donde hoy solo
+se setea el flag (RN-EC9 de E5 es el primero).
+
+**Extensibilidad futura (no comprometido):** `NotificacionService` se diseña como genérico
+por CANAL, de modo que un canal adicional (p. ej. WhatsApp Business API) pueda sumarse sin
+tocar las etapas consumidoras. WhatsApp NO está en el spec v1.1 y NO se construye en el plan
+actual — queda como posible feature de producto post-v1 (implica cuenta Meta aprobada,
+plantillas pre-aprobadas y costo por mensaje; es un proyecto en sí mismo, no un agregado).
+
 ---
 
 ## Etapa 1 — Fundaciones (sin pantallas)

@@ -593,7 +593,8 @@ describe("registrarEutanasia", () => {
     // pudieran dejar la mascota "media muerta".
     expect(db.builder["insert"]).not.toHaveBeenCalled();
     expect(db.builder["update"]).not.toHaveBeenCalled();
-    // Sin éxito de la transacción, no se audita.
+    // El asiento de auditoría va dentro del RPC (rollbackea con la transacción);
+    // el Service no audita por separado.
     expect(mockRecordAudit).not.toHaveBeenCalled();
   });
 
@@ -616,6 +617,7 @@ describe("registrarEutanasia", () => {
       p_tenant_id:       TENANT_ID,
       p_pet_id:          PET_ID,
       p_professional_id: PROF_ID,
+      p_user_id:         CTX.callerUserId,   // ejecutor (para la auditoría atómica)
       p_date:            "2026-06-09",
     });
 
@@ -626,7 +628,10 @@ describe("registrarEutanasia", () => {
     expect(result.mascota.deceasedDate).toBe("2026-06-09");
   });
 
-  it("RN-S3: la eutanasia exitosa audita en módulo medical_records", async () => {
+  it("RN-S3: el asiento de auditoría es ATÓMICO (lo hace el RPC); el Service NO audita por separado", async () => {
+    // La auditoría de la eutanasia va DENTRO de la transacción del RPC (rollbackea
+    // junto con todo). El Service por tanto no debe llamar a recordAudit; sí pasa
+    // p_user_id para que el asiento registre al usuario que ejecuta.
     const db = buildMockDb({
       singleResults: [{ data: eutanasiaRpcRow(), error: null }],
     });
@@ -634,10 +639,9 @@ describe("registrarEutanasia", () => {
 
     await HistorialService.registrarEutanasia(PET_ID, eutanasiaDto({ euthanasiaConfirmed: true }) as never, CTX);
 
-    expect(mockRecordAudit).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.objectContaining({ module: "medical_records", action: "CREATE", entityId: EVENT_ID }),
-    );
+    expect(mockRecordAudit).not.toHaveBeenCalled();
+    const [, params] = (db.rpc as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(params).toMatchObject({ p_user_id: CTX.callerUserId });
   });
 
   it("RN-PV4: cancelledDoses refleja las dosis pendientes canceladas por el RPC", async () => {
