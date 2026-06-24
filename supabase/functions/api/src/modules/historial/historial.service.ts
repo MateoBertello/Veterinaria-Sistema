@@ -1,3 +1,5 @@
+import { PDFDocument, StandardFonts } from "pdf-lib";
+import * as XLSX from "xlsx";
 import { DomainError, ErrorCode } from "../../shared/errors.ts";
 import { recordAudit } from "../../shared/audit.ts";
 import { getServiceDb } from "../../shared/db.ts";
@@ -81,6 +83,113 @@ export interface AdjuntoFirmado {
   fileName: string;
   fileType: string;
   fileSize: number;
+}
+
+export interface HistorialExport {
+  buffer:      Uint8Array;
+  contentType: string;
+  filename:    string;
+}
+
+// ─── Tipos internos para export (no exportados) ──────────────────────────────
+
+interface PetInfo {
+  name:        string;
+  especieName: string | null;
+  razaName:    string | null;
+  ownerName:   string | null;
+}
+
+interface HistorialRow {
+  id:            string;
+  date:          string;
+  event_type:    string;
+  weight_kg:     number | null;
+  temperature_c: number | null;
+  description:   string;
+  diagnosis:     string | null;
+  profesional:   { full_name: string } | null;
+}
+
+// ─── Helpers privados de export ───────────────────────────────────────────────
+
+function norm(s: string): string {
+  return s.normalize("NFD").replace(/[̀-ͯ]/g, "");
+}
+
+function trunc(s: string, max: number): string {
+  return s.length > max ? s.slice(0, max - 3) + "..." : s;
+}
+
+function today(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+async function buildPdf(pet: PetInfo, records: HistorialRow[]): Promise<Uint8Array> {
+  const doc  = await PDFDocument.create();
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  const bold = await doc.embedFont(StandardFonts.HelveticaBold);
+
+  const PW = 612, PH = 792, MX = 50, MY = 50, LINE = 15;
+
+  let page = doc.addPage([PW, PH]);
+  let y    = PH - MY;
+
+  const draw = (text: string, size = 11, isBold = false) => {
+    if (y < MY + LINE) {
+      page = doc.addPage([PW, PH]);
+      y    = PH - MY;
+    }
+    page.drawText(norm(text), { x: MX, y, size, font: isBold ? bold : font });
+    y -= LINE;
+  };
+
+  // Encabezado
+  draw("HISTORIAL CLINICO", 16, true);
+  y -= 4;
+  draw(`Mascota: ${pet.name}  |  ${pet.especieName ?? ""}/${pet.razaName ?? ""}`, 12, true);
+  draw(`Dueno: ${pet.ownerName ?? "—"}`, 11);
+  draw(`Generado: ${today()}   |   Total: ${records.length} registros`, 10);
+  y -= 10;
+
+  // Registros
+  for (const r of records) {
+    if (y < MY + 70) {
+      page = doc.addPage([PW, PH]);
+      y    = PH - MY;
+    }
+    draw(`${r.date}  —  ${r.event_type}  —  ${r.profesional?.full_name ?? "—"}`, 11, true);
+    const measures: string[] = [];
+    if (r.weight_kg    != null) measures.push(`Peso: ${r.weight_kg} kg`);
+    if (r.temperature_c != null) measures.push(`Temp: ${r.temperature_c}C`);
+    if (measures.length) draw(measures.join("  |  "), 10);
+    draw(`Desc: ${trunc(r.description, 90)}`, 10);
+    if (r.diagnosis) draw(`Diag: ${trunc(r.diagnosis, 90)}`, 10);
+    y -= 8;
+  }
+
+  return doc.save();
+}
+
+function buildXlsx(records: HistorialRow[]): Uint8Array {
+  const headers = [
+    "Fecha", "Tipo", "Profesional",
+    "Peso (kg)", "Temp. (C)",
+    "Descripcion", "Diagnostico",
+  ];
+  const rows = records.map((r) => [
+    r.date,
+    r.event_type,
+    r.profesional?.full_name ?? "",
+    r.weight_kg     ?? "",
+    r.temperature_c ?? "",
+    r.description,
+    r.diagnosis     ?? "",
+  ]);
+  const wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
+  XLSX.utils.book_append_sheet(wb, ws, "Historial");
+  return new Uint8Array(XLSX.write(wb, { type: "buffer", bookType: "xlsx" }) as ArrayBuffer);
 }
 
 // ─── Eutanasia: forma de respuesta { evento, mascota } (Addendum v1.1) ──────────
@@ -663,5 +772,94 @@ export class HistorialService {
       fileType: a.file_type,
       fileSize: a.file_size,
     };
+  }
+
+  /**
+   * Exportar historial clínico como PDF o XLSX (RN-EX1..EX5).
+   * RN-EX1: lanza EMPTY_HISTORY si no hay registros.
+   * RN-EX2/EX3: genera PDF con maquetado o XLSX con columnas fijas.
+   * RN-EX4: registra auditoría EXPORT en medical_records.
+   * RN-EX5: permiso view_medical_history lo aplica el controller (middleware).
+   */
+  static async exportarHistorial(
+    petId:  string,
+    format: "pdf" | "xlsx",
+    ctx:    CallerContext,
+  ): Promise<HistorialExport> {
+    const db = getServiceDb();
+
+    // Una sola query para datos de la mascota (con especie, raza y dueño actual).
+    const { data: mascota } = await db
+      .from("mascotas")
+      .select(
+        "id, name, especie:especies!especie_id(name), raza:razas!raza_id(name), cliente:clientes!client_id(full_name)",
+      )
+      .eq("id", petId)
+      .eq("tenant_id", ctx.tenantId)
+      .maybeSingle();
+
+    if (!mascota) {
+      throw new DomainError(ErrorCode.MASCOTA_NOT_FOUND, 404, "Mascota no encontrada");
+    }
+
+    // deno-lint-ignore no-explicit-any
+    const m = mascota as any;
+    const pet: PetInfo = {
+      name:        m.name,
+      especieName: m.especie?.name ?? null,
+      razaName:    m.raza?.name    ?? null,
+      ownerName:   m.cliente?.full_name ?? null,
+    };
+
+    // Todos los registros del historial (sin paginación, export completo).
+    // Sin N+1: query única con embed de profesional.
+    const { data: records, error } = await db
+      .from("historial_clinico")
+      .select(
+        "id, date, event_type, weight_kg, temperature_c, description, diagnosis, profesional:usuarios!professional_id(full_name)",
+      )
+      .eq("tenant_id", ctx.tenantId)
+      .eq("pet_id", petId)
+      .eq("deleted", false)
+      .order("date", { ascending: false });
+
+    if (error) {
+      throw new DomainError(ErrorCode.INTERNAL_ERROR, 500, "Error al consultar el historial");
+    }
+
+    // RN-EX1: no exportar historial vacío.
+    if (!records || records.length === 0) {
+      throw new DomainError(ErrorCode.EMPTY_HISTORY, 400, "El historial está vacío; no hay nada para exportar");
+    }
+
+    const rows = records as unknown as HistorialRow[];
+    const date = today();
+
+    let buffer:      Uint8Array;
+    let contentType: string;
+    let filename:    string;
+
+    if (format === "pdf") {
+      buffer      = await buildPdf(pet, rows);
+      contentType = "application/pdf";
+      filename    = `historial-${petId}-${date}.pdf`;
+    } else {
+      buffer      = buildXlsx(rows);
+      contentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+      filename    = `historial-${petId}-${date}.xlsx`;
+    }
+
+    // RN-EX4: auditoría EXPORT.
+    await recordAudit(db as never, {
+      tenantId:  ctx.tenantId,
+      userId:    ctx.callerUserId,
+      userName:  ctx.callerName,
+      userRole:  ctx.callerRole,
+      action:    "EXPORT",
+      module:    "medical_records",
+      entityId:  petId,
+    });
+
+    return { buffer, contentType, filename };
   }
 }

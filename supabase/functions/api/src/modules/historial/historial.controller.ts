@@ -4,6 +4,7 @@ import {
   ListarHistorialQuerySchema,
   CrearEventoClinicoSchema,
   RegistrarEutanasiaSchema,
+  ExportHistorialQuerySchema,
 } from "./historial.schemas.ts";
 import { DomainError, ErrorCode } from "../../shared/errors.ts";
 import { ok } from "../../shared/envelope.ts";
@@ -65,6 +66,25 @@ historialRouter.post("/:id/adjuntos", manageMedicalHistory, async (c) => {
 
 export const historialMascotaRouter = new Hono();
 historialMascotaRouter.use("/*", ...sharedMiddleware);
+
+// GET /mascotas/:petId/historial/export?format=pdf|xlsx — Exportar (RN-EX1..EX5)
+// Registrada antes de /:petId/historial para que Hono no intente resolver
+// el segmento 'export' como query de la ruta de listado.
+historialMascotaRouter.get("/:petId/historial/export", async (c) => {
+  const petId  = c.req.param("petId")!;
+  const parsed = ExportHistorialQuerySchema.safeParse({ format: c.req.query("format") });
+  if (!parsed.success) {
+    throw new DomainError(ErrorCode.VALIDATION_ERROR, 422, "Formato inválido. Use ?format=pdf o ?format=xlsx", parsed.error.issues);
+  }
+  const result = await HistorialService.exportarHistorial(petId, parsed.data.format, callerCtx(c));
+  return new Response(result.buffer.buffer as ArrayBuffer, {
+    status: 200,
+    headers: {
+      "Content-Type":        result.contentType,
+      "Content-Disposition": `attachment; filename="${result.filename}"`,
+    },
+  });
+});
 
 // GET /mascotas/:petId/historial?page=&limit=
 historialMascotaRouter.get("/:petId/historial", async (c) => {

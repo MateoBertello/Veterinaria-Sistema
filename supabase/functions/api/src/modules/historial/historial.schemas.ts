@@ -1,5 +1,12 @@
 import { z } from "zod";
 
+// ─── Exportar Historial (RN-EX1..EX5) ───────────────────────────────────────
+export const ExportHistorialQuerySchema = z.object({
+  format: z.enum(["pdf", "xlsx"]).default("pdf"),
+});
+
+export type ExportHistorialQuery = z.infer<typeof ExportHistorialQuerySchema>;
+
 export const ListarHistorialQuerySchema = z.object({
   page:  z.coerce.number().int().positive().default(1),
   limit: z.coerce.number().int().min(1).max(100).default(20),
