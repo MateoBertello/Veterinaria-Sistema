@@ -36,6 +36,7 @@ export enum ErrorCode {
 
   // ── Turnos ────────────────────────────────────────────────────────
   PAST_DATE             = "PAST_DATE",
+  TURNO_NOT_FOUND       = "TURNO_NOT_FOUND",
   TURNO_SOLAPADO        = "TURNO_SOLAPADO",
   DUPLICATE_APPOINTMENT = "DUPLICATE_APPOINTMENT",
   APPOINTMENT_LOCKED    = "APPOINTMENT_LOCKED",

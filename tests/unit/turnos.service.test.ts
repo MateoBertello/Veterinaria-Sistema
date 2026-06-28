@@ -229,6 +229,350 @@ describe("TurnoService.crearTurno", () => {
   });
 });
 
+// ─── Tests: Modificar / Cancelar / Eliminar (RN-MC) ──────────────────────────
+
+describe("TurnoService.obtenerTurno", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  function turnoExistente(status = "Programado", over: Record<string, unknown> = {}) {
+    return {
+      id: TURNO_ID, date: FECHA_FUTURA, start_time: "10:00", end_time: "10:30",
+      status, reason: "Control", notes: null, tenant_id: TENANT_ID,
+      servicio: null, doctor: null, mascota: null, cliente: null, ...over,
+    };
+  }
+
+  it("RN-MC1: Programado sin admin → accionesDisponibles ['modificar','cancelar','eliminar']", async () => {
+    const db = makeDb([
+      { data: turnoExistente("Programado") },
+      { data: { roles: { name: "veterinario" } } },
+    ]);
+    mockGetServiceDb.mockReturnValue(db as never);
+    const result = await TurnoService.obtenerTurno(TURNO_ID, ctx);
+    expect(result.accionesDisponibles).toEqual(["modificar", "cancelar", "eliminar"]);
+  });
+
+  it("RN-MC1: Confirmado sin admin → accionesDisponibles ['modificar','cancelar','eliminar']", async () => {
+    const db = makeDb([
+      { data: turnoExistente("Confirmado") },
+      { data: { roles: { name: "recepcionista" } } },
+    ]);
+    mockGetServiceDb.mockReturnValue(db as never);
+    const result = await TurnoService.obtenerTurno(TURNO_ID, ctx);
+    expect(result.accionesDisponibles).toEqual(["modificar", "cancelar", "eliminar"]);
+  });
+
+  it("RN-MC1: Completado sin admin → accionesDisponibles []", async () => {
+    const db = makeDb([
+      { data: turnoExistente("Completado") },
+      { data: { roles: { name: "veterinario" } } },
+    ]);
+    mockGetServiceDb.mockReturnValue(db as never);
+    const result = await TurnoService.obtenerTurno(TURNO_ID, ctx);
+    expect(result.accionesDisponibles).toEqual([]);
+  });
+
+  it("RN-MC1: Completado con admin → accionesDisponibles ['eliminar']", async () => {
+    const db = makeDb([
+      { data: turnoExistente("Completado") },
+      { data: { roles: { name: "admin" } } },
+    ]);
+    mockGetServiceDb.mockReturnValue(db as never);
+    const result = await TurnoService.obtenerTurno(TURNO_ID, ctx);
+    expect(result.accionesDisponibles).toEqual(["eliminar"]);
+  });
+
+  it("RN-MC1: Cancelado con admin → accionesDisponibles ['eliminar']", async () => {
+    const db = makeDb([
+      { data: turnoExistente("Cancelado") },
+      { data: { roles: { name: "admin" } } },
+    ]);
+    mockGetServiceDb.mockReturnValue(db as never);
+    const result = await TurnoService.obtenerTurno(TURNO_ID, ctx);
+    expect(result.accionesDisponibles).toEqual(["eliminar"]);
+  });
+});
+
+describe("TurnoService.modificarTurno", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  function turnoActual(status = "Confirmado", over: Record<string, unknown> = {}) {
+    return {
+      id: TURNO_ID, date: FECHA_FUTURA, start_time: "10:00", end_time: "10:30",
+      status, reason: "Control", notes: null, tenant_id: TENANT_ID,
+      servicio_id: SERVICE_ID, doctor_id: DOCTOR_ID,
+      servicio: null, doctor: null, mascota: null, cliente: null, ...over,
+    };
+  }
+
+  it("RN-MC1: modificarTurno en Completado → APPOINTMENT_LOCKED", async () => {
+    const db = makeDb([{ data: turnoActual("Completado") }]);
+    mockGetServiceDb.mockReturnValue(db as never);
+    await expect(
+      TurnoService.modificarTurno(TURNO_ID, { reason: "nuevo motivo" }, ctx),
+    ).rejects.toMatchObject({ code: ErrorCode.APPOINTMENT_LOCKED, statusCode: 422 });
+  });
+
+  it("RN-MC1: modificarTurno en Cancelado → APPOINTMENT_LOCKED", async () => {
+    const db = makeDb([{ data: turnoActual("Cancelado") }]);
+    mockGetServiceDb.mockReturnValue(db as never);
+    await expect(
+      TurnoService.modificarTurno(TURNO_ID, { notes: "x" }, ctx),
+    ).rejects.toMatchObject({ code: ErrorCode.APPOINTMENT_LOCKED, statusCode: 422 });
+  });
+
+  it("RN-MC2: modificarTurno con nuevo servicio usa duración vigente server-side", async () => {
+    const NUEVO_SERVICIO_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const turnoModificado = {
+      ...turnoActual(), servicio_id: NUEVO_SERVICIO_ID,
+      start_time: "14:00", end_time: "15:00",
+      servicio: null, doctor: null, mascota: null, cliente: null,
+    };
+    const db = makeDb([
+      { data: turnoActual("Confirmado") },               // fetch turno actual
+      { data: { id: NUEVO_SERVICIO_ID, duracion_minutos: 60, requiere_profesional: false, activo: true } }, // servicio nuevo
+      { data: [{ start_time: "13:00", end_time: "17:00" }] }, // franjas del doctor (cubre 14:00-15:00)
+      { data: turnoModificado },                         // UPDATE result
+    ]);
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    await TurnoService.modificarTurno(
+      TURNO_ID,
+      { servicioId: NUEVO_SERVICIO_ID, startTime: "14:00" },
+      ctx,
+    );
+
+    const updatePayload = (db["update"] as ReturnType<typeof vi.fn>).mock.calls[0][0] as Record<string, unknown>;
+    expect(updatePayload["end_time"]).toBe("15:00"); // 14:00 + 60min
+    expect(updatePayload["servicio_id"]).toBe(NUEVO_SERVICIO_ID);
+  });
+
+  it("RN-MC2: servicio inactivo al modificar → SERVICE_NOT_FOUND", async () => {
+    const db = makeDb([
+      { data: turnoActual("Confirmado") },
+      { data: { id: SERVICE_ID, duracion_minutos: 30, requiere_profesional: false, activo: false } },
+    ]);
+    mockGetServiceDb.mockReturnValue(db as never);
+    await expect(
+      TurnoService.modificarTurno(TURNO_ID, { servicioId: SERVICE_ID, startTime: "10:00" }, ctx),
+    ).rejects.toMatchObject({ code: ErrorCode.SERVICE_NOT_FOUND, statusCode: 422 });
+  });
+
+  it("RN-MC7: modificarTurno audita UPDATE en módulo appointments", async () => {
+    const db = makeDb([
+      { data: turnoActual("Programado") },
+      { data: { ...turnoActual(), reason: "motivo nuevo", servicio: null, doctor: null, mascota: null, cliente: null } },
+    ]);
+    mockGetServiceDb.mockReturnValue(db as never);
+    await TurnoService.modificarTurno(TURNO_ID, { reason: "motivo nuevo" }, ctx);
+    expect(mockRecordAudit).toHaveBeenCalledOnce();
+    const auditArg = mockRecordAudit.mock.calls[0][1];
+    expect(auditArg.action).toBe("UPDATE");
+    expect(auditArg.module).toBe("appointments");
+    expect(auditArg.entityId).toBe(TURNO_ID);
+  });
+});
+
+describe("TurnoService.cancelarTurno", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  function turnoActual(status = "Confirmado") {
+    return {
+      id: TURNO_ID, date: FECHA_FUTURA, start_time: "10:00", end_time: "10:30",
+      status, reason: "Control", notes: null, tenant_id: TENANT_ID,
+      servicio_id: SERVICE_ID, doctor_id: null,
+      servicio: null, doctor: null, mascota: null, cliente: null,
+    };
+  }
+
+  it("RN-MC1/ES3: cancelarTurno en Completado → APPOINTMENT_LOCKED", async () => {
+    const db = makeDb([{ data: turnoActual("Completado") }]);
+    mockGetServiceDb.mockReturnValue(db as never);
+    await expect(
+      TurnoService.cancelarTurno(TURNO_ID, { cancellationReason: "Paciente no llega" }, ctx),
+    ).rejects.toMatchObject({ code: ErrorCode.APPOINTMENT_LOCKED, statusCode: 422 });
+  });
+
+  it("RN-MC1/ES3: cancelarTurno en Cancelado → APPOINTMENT_LOCKED", async () => {
+    const db = makeDb([{ data: turnoActual("Cancelado") }]);
+    mockGetServiceDb.mockReturnValue(db as never);
+    await expect(
+      TurnoService.cancelarTurno(TURNO_ID, { cancellationReason: "ya cancelado" }, ctx),
+    ).rejects.toMatchObject({ code: ErrorCode.APPOINTMENT_LOCKED, statusCode: 422 });
+  });
+
+  it("RN-MC3: cancelarTurno setea status=Cancelado + cancellationReason + cancelledAt", async () => {
+    const cancelado = {
+      ...turnoActual("Cancelado"),
+      cancellation_reason: "Paciente no llega", cancelled_at: new Date().toISOString(),
+    };
+    const db = makeDb([
+      { data: turnoActual("Confirmado") },
+      { data: cancelado },
+    ]);
+    mockGetServiceDb.mockReturnValue(db as never);
+    await TurnoService.cancelarTurno(TURNO_ID, { cancellationReason: "Paciente no llega" }, ctx);
+    const updatePayload = (db["update"] as ReturnType<typeof vi.fn>).mock.calls[0][0] as Record<string, unknown>;
+    expect(updatePayload["status"]).toBe("Cancelado");
+    expect(updatePayload["cancellation_reason"]).toBe("Paciente no llega");
+    expect(updatePayload["cancelled_at"]).toBeDefined();
+  });
+
+  it("RN-MC7: cancelarTurno audita CANCEL en módulo appointments", async () => {
+    const cancelado = { ...turnoActual("Cancelado"), cancellation_reason: "motivo", cancelled_at: new Date().toISOString() };
+    const db = makeDb([
+      { data: turnoActual("Programado") },
+      { data: cancelado },
+    ]);
+    mockGetServiceDb.mockReturnValue(db as never);
+    await TurnoService.cancelarTurno(TURNO_ID, { cancellationReason: "motivo" }, ctx);
+    expect(mockRecordAudit).toHaveBeenCalledOnce();
+    const auditArg = mockRecordAudit.mock.calls[0][1];
+    expect(auditArg.action).toBe("CANCEL");
+    expect(auditArg.module).toBe("appointments");
+  });
+});
+
+describe("TurnoService.eliminarTurno", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  function turnoActual(status = "Programado") {
+    return {
+      id: TURNO_ID, date: FECHA_FUTURA, start_time: "10:00", end_time: "10:30",
+      status, reason: "Control", notes: null, tenant_id: TENANT_ID,
+      servicio_id: SERVICE_ID, doctor_id: null,
+      servicio: null, doctor: null, mascota: null, cliente: null,
+    };
+  }
+
+  it("RN-MC6: eliminarTurno en Cancelado sin admin → APPOINTMENT_LOCKED", async () => {
+    const db = makeDb([
+      { data: turnoActual("Cancelado") },
+      { data: { roles: { name: "recepcionista" } } },
+    ]);
+    mockGetServiceDb.mockReturnValue(db as never);
+    await expect(TurnoService.eliminarTurno(TURNO_ID, ctx)).rejects.toMatchObject({
+      code: ErrorCode.APPOINTMENT_LOCKED, statusCode: 403,
+    });
+  });
+
+  it("RN-MC6: eliminarTurno en Completado sin admin → APPOINTMENT_LOCKED", async () => {
+    const db = makeDb([
+      { data: turnoActual("Completado") },
+      { data: { roles: { name: "veterinario" } } },
+    ]);
+    mockGetServiceDb.mockReturnValue(db as never);
+    await expect(TurnoService.eliminarTurno(TURNO_ID, ctx)).rejects.toMatchObject({
+      code: ErrorCode.APPOINTMENT_LOCKED, statusCode: 403,
+    });
+  });
+
+  it("RN-MC6: eliminarTurno en Cancelado con admin → OK", async () => {
+    const db = makeDb([
+      { data: turnoActual("Cancelado") },
+      { data: { roles: { name: "admin" } } },
+      { data: null, error: null },
+    ]);
+    mockGetServiceDb.mockReturnValue(db as never);
+    await expect(TurnoService.eliminarTurno(TURNO_ID, ctx)).resolves.toBeUndefined();
+  });
+
+  it("RN-MC6: eliminarTurno en Programado (no terminal) sin admin → OK", async () => {
+    const db = makeDb([
+      { data: turnoActual("Programado") },
+      { data: null, error: null },
+    ]);
+    mockGetServiceDb.mockReturnValue(db as never);
+    await expect(TurnoService.eliminarTurno(TURNO_ID, ctx)).resolves.toBeUndefined();
+  });
+
+  it("RN-MC7: eliminarTurno audita DELETE en módulo appointments", async () => {
+    const db = makeDb([
+      { data: turnoActual("Confirmado") },
+      { data: null, error: null },
+    ]);
+    mockGetServiceDb.mockReturnValue(db as never);
+    await TurnoService.eliminarTurno(TURNO_ID, ctx);
+    expect(mockRecordAudit).toHaveBeenCalledOnce();
+    const auditArg = mockRecordAudit.mock.calls[0][1];
+    expect(auditArg.action).toBe("DELETE");
+    expect(auditArg.module).toBe("appointments");
+    expect(auditArg.entityId).toBe(TURNO_ID);
+  });
+});
+
+// ─── Tests: Gestionar Estado (RN-ES) ─────────────────────────────────────────
+
+describe("TurnoService.cambiarEstado", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  function turnoActual(status = "Programado") {
+    return {
+      id: TURNO_ID, date: FECHA_FUTURA, start_time: "10:00", end_time: "10:30",
+      status, reason: "Control", notes: null, tenant_id: TENANT_ID,
+      servicio_id: SERVICE_ID, doctor_id: null,
+      servicio: null, doctor: null, mascota: null, cliente: null,
+    };
+  }
+
+  it("RN-ES1: Programado→Confirmado → OK", async () => {
+    const db = makeDb([
+      { data: turnoActual("Programado") },
+      { data: { ...turnoActual("Confirmado") } },
+    ]);
+    mockGetServiceDb.mockReturnValue(db as never);
+    const result = await TurnoService.cambiarEstado(TURNO_ID, { status: "Confirmado" }, ctx);
+    expect(result.status).toBe("Confirmado");
+  });
+
+  it("RN-ES1: Confirmado→Completado → OK", async () => {
+    const db = makeDb([
+      { data: turnoActual("Confirmado") },
+      { data: { ...turnoActual("Completado") } },
+    ]);
+    mockGetServiceDb.mockReturnValue(db as never);
+    const result = await TurnoService.cambiarEstado(TURNO_ID, { status: "Completado" }, ctx);
+    expect(result.status).toBe("Completado");
+  });
+
+  it("RN-ES1: Completado→Programado → INVALID_TRANSITION", async () => {
+    const db = makeDb([{ data: turnoActual("Completado") }]);
+    mockGetServiceDb.mockReturnValue(db as never);
+    await expect(
+      TurnoService.cambiarEstado(TURNO_ID, { status: "Programado" }, ctx),
+    ).rejects.toMatchObject({ code: ErrorCode.INVALID_TRANSITION, statusCode: 422 });
+  });
+
+  it("RN-ES1: Programado→Completado (saltar Confirmado) → INVALID_TRANSITION", async () => {
+    const db = makeDb([{ data: turnoActual("Programado") }]);
+    mockGetServiceDb.mockReturnValue(db as never);
+    await expect(
+      TurnoService.cambiarEstado(TURNO_ID, { status: "Completado" }, ctx),
+    ).rejects.toMatchObject({ code: ErrorCode.INVALID_TRANSITION, statusCode: 422 });
+  });
+
+  it("RN-ES3: cambiarEstado sobre Cancelado (terminal) → INVALID_TRANSITION", async () => {
+    const db = makeDb([{ data: turnoActual("Cancelado") }]);
+    mockGetServiceDb.mockReturnValue(db as never);
+    await expect(
+      TurnoService.cambiarEstado(TURNO_ID, { status: "Confirmado" }, ctx),
+    ).rejects.toMatchObject({ code: ErrorCode.INVALID_TRANSITION, statusCode: 422 });
+  });
+
+  it("RN-ES5: cambiarEstado audita UPDATE en módulo appointments", async () => {
+    const db = makeDb([
+      { data: turnoActual("Programado") },
+      { data: { ...turnoActual("Confirmado") } },
+    ]);
+    mockGetServiceDb.mockReturnValue(db as never);
+    await TurnoService.cambiarEstado(TURNO_ID, { status: "Confirmado" }, ctx);
+    expect(mockRecordAudit).toHaveBeenCalledOnce();
+    const auditArg = mockRecordAudit.mock.calls[0][1];
+    expect(auditArg.action).toBe("UPDATE");
+    expect(auditArg.module).toBe("appointments");
+  });
+});
+
 describe("TurnoService.slotsDisponibles", () => {
   beforeEach(() => {
     vi.clearAllMocks();
