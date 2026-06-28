@@ -20,6 +20,7 @@ import {
   historialMascotaRouter,
   adjuntosRouter,
 } from "./modules/historial/historial.controller.ts";
+import { turnosRouter } from "./modules/turnos/turnos.controller.ts";
 
 const app = new Hono().basePath("/api/v1");
 
@@ -67,6 +68,9 @@ app.route("/auditoria", auditoriaRouter);
 app.route("/historial", historialRouter);
 app.route("/mascotas", historialMascotaRouter); // aditivo: /:petId/historial y /:petId/resumen-clinico
 app.route("/adjuntos", adjuntosRouter);          // descarga de adjuntos por signed URL
+
+// ─── Turnos (módulo vendible — Etapa 6) ──────────────────────────────────────
+app.route("/turnos", turnosRouter);
 
 // ─── Consola Super Admin (fuera de tenant) ──────────────────────────────────────
 // Montado en /api/v1/admin/tenants; el router NO repite el segmento /tenants.
