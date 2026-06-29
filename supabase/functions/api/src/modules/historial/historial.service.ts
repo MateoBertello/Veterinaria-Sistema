@@ -4,6 +4,11 @@ import { DomainError, ErrorCode } from "../../shared/errors.ts";
 import { recordAudit } from "../../shared/audit.ts";
 import { getServiceDb } from "../../shared/db.ts";
 import {
+  CanalEmailResend,
+  type CanalNotificacion,
+  type MensajeNotificacion,
+} from "../../shared/notificaciones/canal-email.ts";
+import {
   CrearEventoClinicoSchema,
   RegistrarEutanasiaSchema,
   type CrearEventoClinicoDto,
@@ -76,6 +81,15 @@ export interface EventoCreado {
   clientNameAtTime: string;
   attachmentsCount: number;
   emailSent:        boolean;
+}
+
+/**
+ * Dependencias inyectables de `crearRegistro`. Permiten mockear el canal de email
+ * en los tests (sin enviar mail en CI). Por defecto usa `CanalEmailResend` (la
+ * misma infraestructura de la Etapa 6c; no se duplica canal ni envío).
+ */
+export interface CrearRegistroDeps {
+  canalEmail?: CanalNotificacion;
 }
 
 export interface AdjuntoFirmado {
@@ -244,6 +258,52 @@ function mapEutanasiaRpcError(error: { message?: string }): DomainError {
   if (msg.includes("FORBIDDEN"))
     return new DomainError(ErrorCode.FORBIDDEN, 403, "El profesional no pertenece a este tenant");
   return new DomainError(ErrorCode.INTERNAL_ERROR, 500, `No se pudo registrar la eutanasia: ${msg}`);
+}
+
+// ─── Resumen clínico por email (RN-EC9) ────────────────────────────────────────
+
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+/** Datos del evento recién creado necesarios para componer el resumen. */
+interface ResumenClinicoInput {
+  email:       string;
+  clientName:  string;
+  petName:     string | null;
+  eventType:   string;
+  date:        string;
+  description: string;
+  diagnosis:   string | null;
+  treatment:   string | null;
+  notes:       string | null;
+}
+
+/**
+ * Compone el `MensajeNotificacion` del resumen clínico para el cliente (RN-EC9).
+ * No envía nada: solo arma el contenido que consume el canal de la Etapa 6c.
+ */
+function construirResumenClinico(input: ResumenClinicoInput): MensajeNotificacion {
+  const mascota = input.petName ?? "tu mascota";
+  const asunto  = `Resumen de ${input.eventType} — ${mascota}`;
+
+  const filas: string[] = [
+    `<p>Hola ${escapeHtml(input.clientName)},</p>`,
+    `<p>Te compartimos el resumen del evento clínico de <strong>${escapeHtml(mascota)}</strong>:</p>`,
+    `<ul>`,
+    `<li><strong>Tipo:</strong> ${escapeHtml(input.eventType)}</li>`,
+    `<li><strong>Fecha:</strong> ${escapeHtml(input.date)}</li>`,
+    `<li><strong>Descripción:</strong> ${escapeHtml(input.description)}</li>`,
+  ];
+  if (input.diagnosis) filas.push(`<li><strong>Diagnóstico:</strong> ${escapeHtml(input.diagnosis)}</li>`);
+  if (input.treatment) filas.push(`<li><strong>Tratamiento:</strong> ${escapeHtml(input.treatment)}</li>`);
+  if (input.notes)     filas.push(`<li><strong>Notas:</strong> ${escapeHtml(input.notes)}</li>`);
+  filas.push(`</ul>`);
+
+  return { destino: input.email, asunto, cuerpo: filas.join("") };
 }
 
 // ─── Service ──────────────────────────────────────────────────────────────────
@@ -429,6 +489,7 @@ export class HistorialService {
     petId: string,
     dto:   CrearEventoClinicoDto,
     ctx:   CallerContext,
+    deps:  CrearRegistroDeps = {},
   ): Promise<EventoCreado> {
     // RN-EC1/RN-EC6: defense-in-depth (el Controller ya validó con Zod).
     const parsed = CrearEventoClinicoSchema.safeParse(dto);
@@ -447,7 +508,7 @@ export class HistorialService {
     // Una sola query: mascota del tenant + dueño actual (RN-EC5, sin N+1).
     const { data: mascota } = await db
       .from("mascotas")
-      .select("id, estado, client_id, cliente:clientes!client_id(full_name, email)")
+      .select("id, name, estado, client_id, cliente:clientes!client_id(full_name, email)")
       .eq("id", petId)
       .eq("tenant_id", ctx.tenantId)
       .maybeSingle();
@@ -523,12 +584,47 @@ export class HistorialService {
       newValues: payload as Record<string, unknown>,
     });
 
-    // RN-EC9: solo se "envía" si se solicitó y el cliente tiene email.
-    // (La entrega real de email se difiere; aquí se resuelve el flag.)
-    // TODO(E6-notif): enchufar el envío real con CanalEmailResend
-    // (shared/notificaciones/canal-email.ts), construido en la Etapa 6. Hoy solo se
-    // resuelve el flag; cuando se cablee, marcar emailSent según el resultado del envío.
-    const emailSent = data.sendEmailToClient === true && !!m.cliente?.email;
+    // RN-EC9: envío real del resumen al cliente, reutilizando el canal de la Etapa 6c.
+    // Best-effort: el evento clínico YA está registrado (insert + auditoría arriba),
+    // así que un email caído NUNCA tumba el flujo clínico. `emailSent` refleja la
+    // ENTREGA lograda (true solo si el canal devolvió OK).
+    let emailSent = false;
+    if (data.sendEmailToClient === true && m.cliente?.email) {
+      const canalEmail = deps.canalEmail ?? new CanalEmailResend();
+      try {
+        await canalEmail.enviar(
+          construirResumenClinico({
+            email:       m.cliente.email,
+            clientName:  clientNameAtTime,
+            petName:     m.name ?? null,
+            eventType:   data.eventType,
+            date:        data.date,
+            description: data.description,
+            diagnosis:   data.diagnosis ?? null,
+            treatment:   data.treatment ?? null,
+            notes:       data.notes ?? null,
+          }),
+        );
+        emailSent = true;
+
+        // Auditoría del envío exitoso (tenant del JWT), sin intervención del usuario.
+        await recordAudit(db as never, {
+          tenantId: ctx.tenantId,
+          userId:   ctx.callerUserId,
+          userName: ctx.callerName,
+          userRole: ctx.callerRole,
+          action:   "CREATE",
+          module:   "medical_records",
+          entityId: created.id,
+          details:  `Resumen clínico enviado por email a ${m.cliente.email}`,
+        });
+      } catch (e) {
+        // Mismo criterio que el procesador de turnos: el fallo de email no rompe el
+        // flujo; se registra para observabilidad y se deja emailSent en false.
+        const motivo = (e instanceof Error ? e.message : String(e)).slice(0, 500);
+        console.error("[historial] Falló el envío del resumen clínico:", motivo);
+      }
+    }
 
     return {
       id:               created.id,

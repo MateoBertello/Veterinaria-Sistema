@@ -326,6 +326,7 @@ function dtoBase(over: Record<string, unknown> = {}) {
 
 const mascotaViva = {
   id:        PET_ID,
+  name:      "Firulais",
   estado:    "Activa",
   client_id: CLIENT_A,
   cliente:   { full_name: "Juan Pérez", email: "juan@example.com" },
@@ -396,7 +397,7 @@ describe("crearRegistro", () => {
     ).rejects.toMatchObject({ code: ErrorCode.VALIDATION_ERROR, statusCode: 422 });
   });
 
-  it("RN-EC9: emailSent true si se solicita y el cliente tiene email", async () => {
+  it("RN-EC9: emailSent true si se solicita, hay email y el canal entrega OK", async () => {
     const db = buildMockDb({
       singleResults: [
         { data: mascotaViva, error: null },
@@ -404,14 +405,20 @@ describe("crearRegistro", () => {
       ],
     });
     mockGetServiceDb.mockReturnValue(db as never);
+    const canalEmail = { enviar: vi.fn().mockResolvedValue(undefined) };
 
     const evento = await HistorialService.crearRegistro(
-      PET_ID, dtoBase({ sendEmailToClient: true }) as never, CTX,
+      PET_ID, dtoBase({ sendEmailToClient: true }) as never, CTX, { canalEmail } as never,
+    );
+
+    expect(canalEmail.enviar).toHaveBeenCalledTimes(1);
+    expect(canalEmail.enviar).toHaveBeenCalledWith(
+      expect.objectContaining({ destino: "juan@example.com" }),
     );
     expect(evento.emailSent).toBe(true);
   });
 
-  it("RN-EC9: emailSent false si se solicita pero el cliente no tiene email", async () => {
+  it("RN-EC9: emailSent false si se solicita pero el cliente no tiene email (no se envía)", async () => {
     const db = buildMockDb({
       singleResults: [
         { data: { ...mascotaViva, cliente: { full_name: "Juan Pérez", email: null } }, error: null },
@@ -419,10 +426,50 @@ describe("crearRegistro", () => {
       ],
     });
     mockGetServiceDb.mockReturnValue(db as never);
+    const canalEmail = { enviar: vi.fn().mockResolvedValue(undefined) };
 
     const evento = await HistorialService.crearRegistro(
-      PET_ID, dtoBase({ sendEmailToClient: true }) as never, CTX,
+      PET_ID, dtoBase({ sendEmailToClient: true }) as never, CTX, { canalEmail } as never,
     );
+
+    expect(canalEmail.enviar).not.toHaveBeenCalled();
+    expect(evento.emailSent).toBe(false);
+  });
+
+  it("RN-EC9: best-effort — si el canal falla, el evento se registra igual y emailSent=false", async () => {
+    const db = buildMockDb({
+      singleResults: [
+        { data: mascotaViva, error: null },
+        { data: { id: EVENT_ID, date: "2026-06-04", event_type: "Consulta" }, error: null },
+      ],
+    });
+    mockGetServiceDb.mockReturnValue(db as never);
+    const canalEmail = { enviar: vi.fn().mockRejectedValue(new Error("Resend 503")) };
+
+    const evento = await HistorialService.crearRegistro(
+      PET_ID, dtoBase({ sendEmailToClient: true }) as never, CTX, { canalEmail } as never,
+    );
+
+    expect(canalEmail.enviar).toHaveBeenCalledTimes(1);
+    expect(evento.id).toBe(EVENT_ID);   // el evento clínico quedó registrado
+    expect(evento.emailSent).toBe(false);
+  });
+
+  it("RN-EC9: sin sendEmailToClient no se intenta envío", async () => {
+    const db = buildMockDb({
+      singleResults: [
+        { data: mascotaViva, error: null },
+        { data: { id: EVENT_ID, date: "2026-06-04", event_type: "Consulta" }, error: null },
+      ],
+    });
+    mockGetServiceDb.mockReturnValue(db as never);
+    const canalEmail = { enviar: vi.fn().mockResolvedValue(undefined) };
+
+    const evento = await HistorialService.crearRegistro(
+      PET_ID, dtoBase({ sendEmailToClient: false }) as never, CTX, { canalEmail } as never,
+    );
+
+    expect(canalEmail.enviar).not.toHaveBeenCalled();
     expect(evento.emailSent).toBe(false);
   });
 });
