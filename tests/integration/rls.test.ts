@@ -29,6 +29,7 @@ let jwtA:      string;
 let jwtB:      string;
 let clienteAId = "";
 let doctorAId  = "";
+let notifAId   = "";
 
 /** Cliente con el JWT de un usuario (RLS activo) */
 function userClient(jwt: string): SupabaseClient {
@@ -204,6 +205,17 @@ beforeAll(async () => {
       active: true,
     });
   }
+
+  // Insertar una notificación de turno en tenant A (Etapa 6) para los tests de aislamiento.
+  const { data: notifA } = await serviceDb.from("notificaciones").insert({
+    tenant_id: tenantAId,
+    origen: "turno",
+    referencia_id: clienteAId || tenantAId, // un UUID cualquiera del tenant A
+    canal: "email",
+    estado: "pendiente",
+    mensaje: "Recordatorio de A",
+  }).select("id").single();
+  notifAId = notifA?.id ?? "";
 }, 30_000);
 
 afterAll(async () => {
@@ -682,5 +694,58 @@ describeIntegration("RLS-auditoria: registros_auditoria — aislamiento por tena
       })
       .select("id");
     expect((inserted ?? []).length).toBe(0);
+  });
+});
+
+describeIntegration("RLS-N: Aislamiento de notificaciones (Etapa 6)", () => {
+  it("el usuario B no ve notificaciones del tenant A", async () => {
+    if (skipIfNoCredentials()) return;
+    const { data } = await userClient(jwtB)
+      .from("notificaciones")
+      .select("id, tenant_id")
+      .eq("tenant_id", tenantAId);
+    expect(data ?? []).toHaveLength(0);
+  });
+
+  it("el usuario A sí ve sus propias notificaciones", async () => {
+    if (skipIfNoCredentials()) return;
+    const { data } = await userClient(jwtA)
+      .from("notificaciones")
+      .select("id")
+      .eq("id", notifAId);
+    expect((data ?? []).length).toBe(1);
+  });
+
+  it("el usuario B no puede MODIFICAR notificaciones del tenant A (RLS write)", async () => {
+    if (skipIfNoCredentials()) return;
+    // La política USING oculta la fila de A para B → el UPDATE afecta 0 filas.
+    const { data: updated } = await userClient(jwtB)
+      .from("notificaciones")
+      .update({ estado: "enviada" })
+      .eq("id", notifAId)
+      .select("id");
+    expect(updated ?? []).toHaveLength(0);
+
+    // Verificación con service role: el estado original se conserva intacto.
+    const { data: intacto } = await serviceDb
+      .from("notificaciones")
+      .select("estado")
+      .eq("id", notifAId)
+      .single();
+    expect(intacto?.estado).toBe("pendiente");
+  });
+
+  it("el usuario B no puede INSERTAR notificaciones con tenant_id ajeno (WITH CHECK)", async () => {
+    if (skipIfNoCredentials()) return;
+    const { error } = await userClient(jwtB)
+      .from("notificaciones")
+      .insert({
+        tenant_id: tenantAId,
+        origen: "turno",
+        referencia_id: tenantAId,
+        canal: "email",
+        estado: "pendiente",
+      });
+    expect(error).not.toBeNull();
   });
 });

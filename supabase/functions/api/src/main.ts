@@ -21,6 +21,7 @@ import {
   adjuntosRouter,
 } from "./modules/historial/historial.controller.ts";
 import { turnosRouter } from "./modules/turnos/turnos.controller.ts";
+import { notificacionesRouter } from "./modules/notificaciones/notificaciones.controller.ts";
 
 const app = new Hono().basePath("/api/v1");
 
@@ -70,6 +71,9 @@ app.route("/mascotas", historialMascotaRouter); // aditivo: /:petId/historial y 
 app.route("/adjuntos", adjuntosRouter);          // descarga de adjuntos por signed URL
 
 // ─── Turnos (módulo vendible — Etapa 6) ──────────────────────────────────────
+// Notificaciones se registra primero: su prefijo /turnos/notificaciones es más
+// específico que el /turnos/:id de la agenda (Hono permite registros aditivos).
+app.route("/turnos/notificaciones", notificacionesRouter);
 app.route("/turnos", turnosRouter);
 
 // ─── Consola Super Admin (fuera de tenant) ──────────────────────────────────────

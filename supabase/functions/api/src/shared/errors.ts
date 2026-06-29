@@ -61,6 +61,9 @@ export enum ErrorCode {
   // ── Horarios ──────────────────────────────────────────────────────
   INVALID_RANGE    = "INVALID_RANGE",
   SCHEDULE_OVERLAP = "SCHEDULE_OVERLAP",
+
+  // ── Notificaciones ────────────────────────────────────────────────
+  NOTIFICATION_PROVIDER_NOT_CONFIGURED = "NOTIFICATION_PROVIDER_NOT_CONFIGURED",
 }
 
 export class DomainError extends Error {

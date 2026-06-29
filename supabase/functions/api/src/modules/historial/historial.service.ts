@@ -525,6 +525,9 @@ export class HistorialService {
 
     // RN-EC9: solo se "envía" si se solicitó y el cliente tiene email.
     // (La entrega real de email se difiere; aquí se resuelve el flag.)
+    // TODO(E6-notif): enchufar el envío real con CanalEmailResend
+    // (shared/notificaciones/canal-email.ts), construido en la Etapa 6. Hoy solo se
+    // resuelve el flag; cuando se cablee, marcar emailSent según el resultado del envío.
     const emailSent = data.sendEmailToClient === true && !!m.cliente?.email;
 
     return {
