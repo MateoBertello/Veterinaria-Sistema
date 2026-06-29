@@ -5,6 +5,7 @@ import { ConfiguracionService } from "../configuracion/configuracion.service.ts"
 import {
   CrearEstadiaSchema,
   type CrearEstadiaDto,
+  type ModificarEstadiaDto,
 } from "./guarderia.schemas.ts";
 
 // ─── DTOs públicos ────────────────────────────────────────────────────────────
@@ -32,6 +33,13 @@ export interface EstadiaPublica {
   petTamano:     string;
   petDieta:      string | null;
   clientName:    string;
+}
+
+/** Respuesta de cancelación (shape del spec v1.0 §5). */
+export interface CancelResponse {
+  id:          string;
+  status:      string;
+  cancelledAt: string;
 }
 
 /** Ocupación de un día dentro del rango consultado (GET /estadias/cupo). */
@@ -62,12 +70,12 @@ function eachDay(from: string, to: string): string[] {
 }
 
 /**
- * Mapea el error de `crear_estadia_con_cupo` a DomainError. El RPC lanza
- * `RAISE EXCEPTION` con el MESSAGE igual al código de ErrorCode. Para el cupo,
- * el mensaje es `CUPO_GUARDERIA_AGOTADO:<json de días>`; se parsean los días
- * para poblar `details` (RN-GU4).
+ * Mapea los errores de los RPCs de guardería a DomainError. Cubre todos los
+ * casos de crear, modificar y cancelar. Para el cupo, el mensaje es
+ * `CUPO_GUARDERIA_AGOTADO:<json de días>`; se parsean los días para poblar
+ * `details` (RN-GU4 / RN-ME2).
  */
-function mapCrearEstadiaRpcError(error: { message?: string }): DomainError {
+function mapEstadiaRpcError(error: { message?: string }, fallbackMsg = "operación de estadía"): DomainError {
   const msg = error.message ?? "";
 
   if (msg.includes("CUPO_GUARDERIA_AGOTADO")) {
@@ -88,6 +96,10 @@ function mapCrearEstadiaRpcError(error: { message?: string }): DomainError {
       dias,
     );
   }
+  if (msg.includes("STAY_LOCKED"))
+    return new DomainError(ErrorCode.STAY_LOCKED, 422, "La estadía no puede modificarse en su estado actual");
+  if (msg.includes("ESTADIA_NOT_FOUND"))
+    return new DomainError(ErrorCode.ESTADIA_NOT_FOUND, 404, "Estadía no encontrada");
   if (msg.includes("STAY_OVERLAP"))
     return new DomainError(ErrorCode.STAY_OVERLAP, 409, "La mascota ya tiene una estadía que se superpone con ese rango");
   if (msg.includes("PET_DECEASED"))
@@ -96,7 +108,7 @@ function mapCrearEstadiaRpcError(error: { message?: string }): DomainError {
     return new DomainError(ErrorCode.MASCOTA_NOT_FOUND, 404, "Mascota no encontrada en este tenant");
   if (msg.includes("CONFIG_NOT_FOUND"))
     return new DomainError(ErrorCode.CONFIG_NOT_FOUND, 404, "Configuración de la clínica no encontrada. Contacte a soporte.");
-  return new DomainError(ErrorCode.INTERNAL_ERROR, 500, `No se pudo registrar la estadía: ${msg}`);
+  return new DomainError(ErrorCode.INTERNAL_ERROR, 500, `No se pudo completar la ${fallbackMsg}: ${msg}`);
 }
 
 function toPublic(row: Record<string, unknown>): EstadiaPublica {
@@ -174,7 +186,7 @@ export class EstadiaService {
       })
       .single();
 
-    if (error) throw mapCrearEstadiaRpcError(error);
+    if (error) throw mapEstadiaRpcError(error, "registro de estadía");
     if (!row) {
       throw new DomainError(ErrorCode.INTERNAL_ERROR, 500, "El RPC de estadía no devolvió resultado");
     }
@@ -201,6 +213,107 @@ export class EstadiaService {
     });
 
     return estadia;
+  }
+
+  /**
+   * Modificar Estadía (RN-ME1..ME2, ME5-ME6).
+   *
+   * El controller pre-rellena los valores vigentes antes de llamar a este método,
+   * por lo que los cuatro campos de contenido siempre llegan completos (el RPC
+   * los requiere NOT NULL). La revalidación de cupo en los nuevos días y la
+   * detección de solape ocurren de forma atómica en el RPC `modificar_estadia_con_cupo`,
+   * que reutiliza el mismo mutex FOR UPDATE de 7a para evitar overbooking.
+   */
+  static async actualizar(
+    id:  string,
+    dto: Required<Pick<ModificarEstadiaDto, "checkInDate" | "checkOutDate" | "reason">> & { notes: string | null },
+    ctx: CallerContext,
+  ): Promise<EstadiaPublica> {
+    // Defensa en profundidad: misma validación de rango que en crear (RN-ME2/GU1).
+    if (dto.checkOutDate < dto.checkInDate) {
+      throw new DomainError(ErrorCode.INVALID_RANGE, 422, "La fecha de egreso debe ser posterior o igual a la de ingreso");
+    }
+    if (dto.checkInDate < today()) {
+      throw new DomainError(ErrorCode.PAST_DATE, 422, "La fecha de ingreso no puede ser anterior a hoy");
+    }
+
+    const db = getServiceDb();
+
+    const { data: row, error } = await db
+      .rpc("modificar_estadia_con_cupo", {
+        p_tenant_id:  ctx.tenantId,
+        p_estadia_id: id,
+        p_check_in:   dto.checkInDate,
+        p_check_out:  dto.checkOutDate,
+        p_reason:     dto.reason,
+        p_notes:      dto.notes ?? null,
+      })
+      .single();
+
+    if (error) throw mapEstadiaRpcError(error, "modificación de estadía");
+    if (!row) throw new DomainError(ErrorCode.INTERNAL_ERROR, 500, "El RPC de modificación no devolvió resultado");
+
+    const estadia = toPublic(row as unknown as Record<string, unknown>);
+
+    await recordAudit(db as never, {
+      tenantId:  ctx.tenantId,
+      userId:    ctx.callerUserId,
+      userName:  ctx.callerName,
+      userRole:  ctx.callerRole,
+      action:    "UPDATE",
+      module:    "daycare",
+      entityId:  estadia.id,
+      newValues: {
+        checkInDate:  estadia.checkInDate,
+        checkOutDate: estadia.checkOutDate,
+        reason:       estadia.reason,
+        notes:        estadia.notes,
+      },
+    });
+
+    return estadia;
+  }
+
+  /**
+   * Cancelar Estadía (RN-ME1, ME3, ME5-ME6).
+   *
+   * No requiere guarda de cupo: marcar como Cancelada libera la ocupación de esos
+   * días automáticamente (el conteo solo incluye Reservada/EnCurso). La validación
+   * de estado y la actualización ocurren de forma atómica en el RPC `cancelar_estadia`.
+   */
+  static async cancelar(id: string, motivo: string, ctx: CallerContext): Promise<CancelResponse> {
+    const db = getServiceDb();
+
+    const { data: row, error } = await db
+      .rpc("cancelar_estadia", {
+        p_tenant_id:           ctx.tenantId,
+        p_estadia_id:          id,
+        p_cancellation_reason: motivo,
+      })
+      .single();
+
+    if (error) throw mapEstadiaRpcError(error, "cancelación de estadía");
+    if (!row) throw new DomainError(ErrorCode.INTERNAL_ERROR, 500, "El RPC de cancelación no devolvió resultado");
+
+    const r = row as unknown as Record<string, unknown>;
+    const result: CancelResponse = {
+      id:          r["id"]           as string,
+      status:      r["status"]       as string,
+      cancelledAt: r["cancelled_at"] as string,
+    };
+
+    await recordAudit(db as never, {
+      tenantId:  ctx.tenantId,
+      userId:    ctx.callerUserId,
+      userName:  ctx.callerName,
+      userRole:  ctx.callerRole,
+      action:    "UPDATE",
+      module:    "daycare",
+      entityId:  result.id,
+      newValues: { status: "Cancelada", cancellationReason: motivo },
+    });
+
+    return result;
   }
 
   /**

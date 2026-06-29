@@ -20,7 +20,7 @@ vi.mock("../../supabase/functions/api/src/modules/configuracion/configuracion.se
 import { getServiceDb } from "../../supabase/functions/api/src/shared/db.ts";
 import { recordAudit }  from "../../supabase/functions/api/src/shared/audit.ts";
 import { ConfiguracionService } from "../../supabase/functions/api/src/modules/configuracion/configuracion.service.ts";
-import { EstadiaService } from "../../supabase/functions/api/src/modules/guarderia/guarderia.service.ts";
+import { EstadiaService, type CancelResponse } from "../../supabase/functions/api/src/modules/guarderia/guarderia.service.ts";
 import { ErrorCode }    from "../../supabase/functions/api/src/shared/errors.ts";
 
 const mockGetServiceDb = vi.mocked(getServiceDb);
@@ -199,6 +199,194 @@ describe("EstadiaService.crear", () => {
         module:   "daycare",
         entityId: ESTADIA_ID,
         tenantId: TENANT_ID,
+      }),
+    );
+  });
+});
+
+// ─── Fixtures compartidas para actualizar / cancelar ──────────────────────────
+
+const dtoModificar = {
+  checkInDate:  ymd(10),
+  checkOutDate: ymd(14),
+  reason:       "Viaje extendido",
+  notes:        null as string | null,
+};
+
+const filaRpcModificada = {
+  ...filaRpc,
+  check_in_date:  dtoModificar.checkInDate,
+  check_out_date: dtoModificar.checkOutDate,
+  reason:         dtoModificar.reason,
+  notes:          null,
+};
+
+// ─── actualizar ───────────────────────────────────────────────────────────────
+
+describe("EstadiaService.actualizar", () => {
+  beforeEach(() => { vi.clearAllMocks(); });
+
+  // ── RN-ME1 ──────────────────────────────────────────────────────────────────
+
+  it("RN-ME1: Finalizada → STAY_LOCKED (422)", async () => {
+    mockGetServiceDb.mockReturnValue(
+      buildDb({ rpcError: { message: "STAY_LOCKED" } }) as never,
+    );
+    await expect(
+      EstadiaService.actualizar(ESTADIA_ID, dtoModificar, ctx),
+    ).rejects.toMatchObject({ code: ErrorCode.STAY_LOCKED, statusCode: 422 });
+  });
+
+  it("RN-ME1: Cancelada → STAY_LOCKED (422)", async () => {
+    mockGetServiceDb.mockReturnValue(
+      buildDb({ rpcError: { message: "STAY_LOCKED" } }) as never,
+    );
+    await expect(
+      EstadiaService.actualizar(ESTADIA_ID, dtoModificar, ctx),
+    ).rejects.toMatchObject({ code: ErrorCode.STAY_LOCKED, statusCode: 422 });
+  });
+
+  it("RN-ME1: EnCurso + cambio de checkIn → STAY_LOCKED (422)", async () => {
+    mockGetServiceDb.mockReturnValue(
+      buildDb({ rpcError: { message: "STAY_LOCKED" } }) as never,
+    );
+    await expect(
+      EstadiaService.actualizar(ESTADIA_ID, { ...dtoModificar, checkInDate: ymd(11) }, ctx),
+    ).rejects.toMatchObject({ code: ErrorCode.STAY_LOCKED, statusCode: 422 });
+  });
+
+  // ── RN-ME2 ──────────────────────────────────────────────────────────────────
+
+  it("RN-ME2: checkOut < checkIn → INVALID_RANGE (422) — falla antes del RPC", async () => {
+    // El mock no importa: el service lanza antes de llamar al RPC.
+    mockGetServiceDb.mockReturnValue(buildDb() as never);
+    await expect(
+      EstadiaService.actualizar(
+        ESTADIA_ID,
+        { ...dtoModificar, checkInDate: ymd(14), checkOutDate: ymd(10) },
+        ctx,
+      ),
+    ).rejects.toMatchObject({ code: ErrorCode.INVALID_RANGE, statusCode: 422 });
+  });
+
+  it("RN-ME2: checkIn anterior a hoy → PAST_DATE (422) — falla antes del RPC", async () => {
+    mockGetServiceDb.mockReturnValue(buildDb() as never);
+    await expect(
+      EstadiaService.actualizar(
+        ESTADIA_ID,
+        { ...dtoModificar, checkInDate: ymd(-1), checkOutDate: ymd(2) },
+        ctx,
+      ),
+    ).rejects.toMatchObject({ code: ErrorCode.PAST_DATE, statusCode: 422 });
+  });
+
+  it("RN-ME2: solape con otra estadía → STAY_OVERLAP (409)", async () => {
+    mockGetServiceDb.mockReturnValue(
+      buildDb({ rpcError: { message: "STAY_OVERLAP" } }) as never,
+    );
+    await expect(
+      EstadiaService.actualizar(ESTADIA_ID, dtoModificar, ctx),
+    ).rejects.toMatchObject({ code: ErrorCode.STAY_OVERLAP, statusCode: 409 });
+  });
+
+  it("RN-ME2: cupo agotado en nuevos días → CUPO_GUARDERIA_AGOTADO (409) con días en details", async () => {
+    const dias = [ymd(10), ymd(11)];
+    mockGetServiceDb.mockReturnValue(
+      buildDb({ rpcError: { message: `CUPO_GUARDERIA_AGOTADO:${JSON.stringify(dias)}` } }) as never,
+    );
+    await expect(
+      EstadiaService.actualizar(ESTADIA_ID, dtoModificar, ctx),
+    ).rejects.toMatchObject({
+      code:       ErrorCode.CUPO_GUARDERIA_AGOTADO,
+      statusCode: 409,
+      details:    dias,
+    });
+  });
+
+  it("RN-ME1+ME6: éxito → estadía actualizada + auditoría UPDATE daycare", async () => {
+    mockGetServiceDb.mockReturnValue(buildDb({ rpcData: filaRpcModificada }) as never);
+
+    const estadia = await EstadiaService.actualizar(ESTADIA_ID, dtoModificar, ctx);
+
+    expect(estadia).toMatchObject({
+      id:           ESTADIA_ID,
+      checkInDate:  dtoModificar.checkInDate,
+      checkOutDate: dtoModificar.checkOutDate,
+      reason:       dtoModificar.reason,
+    });
+    expect(mockRecordAudit).toHaveBeenCalledTimes(1);
+    expect(mockRecordAudit).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        action:   "UPDATE",
+        module:   "daycare",
+        entityId: ESTADIA_ID,
+        tenantId: TENANT_ID,
+      }),
+    );
+  });
+});
+
+// ─── cancelar ─────────────────────────────────────────────────────────────────
+
+describe("EstadiaService.cancelar", () => {
+  beforeEach(() => { vi.clearAllMocks(); });
+
+  // ── RN-ME1 ──────────────────────────────────────────────────────────────────
+
+  it("RN-ME1: Finalizada/Cancelada → STAY_LOCKED (422)", async () => {
+    mockGetServiceDb.mockReturnValue(
+      buildDb({ rpcError: { message: "STAY_LOCKED" } }) as never,
+    );
+    await expect(
+      EstadiaService.cancelar(ESTADIA_ID, "Ya no necesito guardería", ctx),
+    ).rejects.toMatchObject({ code: ErrorCode.STAY_LOCKED, statusCode: 422 });
+  });
+
+  // ── RN-ME3 ──────────────────────────────────────────────────────────────────
+
+  it("RN-ME3: éxito → { id, status:'Cancelada', cancelledAt }", async () => {
+    const cancelledAt = "2026-06-29T12:00:00Z";
+    mockGetServiceDb.mockReturnValue(
+      buildDb({
+        rpcData: { id: ESTADIA_ID, status: "Cancelada", cancelled_at: cancelledAt },
+      }) as never,
+    );
+
+    const result: CancelResponse = await EstadiaService.cancelar(
+      ESTADIA_ID,
+      "Ya no necesito guardería",
+      ctx,
+    );
+
+    expect(result).toEqual({
+      id:          ESTADIA_ID,
+      status:      "Cancelada",
+      cancelledAt,
+    });
+  });
+
+  // ── RN-ME6 ──────────────────────────────────────────────────────────────────
+
+  it("RN-ME6: éxito → auditoría UPDATE daycare con status:Cancelada", async () => {
+    const cancelledAt = "2026-06-29T12:00:00Z";
+    mockGetServiceDb.mockReturnValue(
+      buildDb({
+        rpcData: { id: ESTADIA_ID, status: "Cancelada", cancelled_at: cancelledAt },
+      }) as never,
+    );
+
+    await EstadiaService.cancelar(ESTADIA_ID, "Ya no necesito guardería", ctx);
+
+    expect(mockRecordAudit).toHaveBeenCalledTimes(1);
+    expect(mockRecordAudit).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        action:    "UPDATE",
+        module:    "daycare",
+        entityId:  ESTADIA_ID,
+        tenantId:  TENANT_ID,
+        newValues: expect.objectContaining({ status: "Cancelada" }),
       }),
     );
   });

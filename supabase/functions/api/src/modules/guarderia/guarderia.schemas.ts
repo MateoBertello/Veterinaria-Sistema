@@ -29,5 +29,22 @@ export const CupoQuerySchema = z.object({
   path:    ["dateTo"],
 });
 
-export type CrearEstadiaDto = z.infer<typeof CrearEstadiaSchema>;
-export type CupoQuery       = z.infer<typeof CupoQuerySchema>;
+/** Modificar Estadía (Etapa 7; RN-ME1..ME2). Todos los campos son opcionales
+ *  en el schema; el controller pre-rellena los valores vigentes antes de llamar
+ *  al service, que los envía al RPC siempre completos. */
+export const ModificarEstadiaSchema = z.object({
+  checkInDate:  z.string().regex(YMD, "checkInDate debe ser YYYY-MM-DD").optional(),
+  checkOutDate: z.string().regex(YMD, "checkOutDate debe ser YYYY-MM-DD").optional(),
+  reason:       z.string().min(1).max(200).optional(),
+  notes:        z.string().max(500).nullable().optional(),
+});
+
+/** Cancelar Estadía (RN-ME3): motivo obligatorio. */
+export const CancelarEstadiaSchema = z.object({
+  cancellationReason: z.string().min(1).max(500),
+});
+
+export type CrearEstadiaDto    = z.infer<typeof CrearEstadiaSchema>;
+export type CupoQuery          = z.infer<typeof CupoQuerySchema>;
+export type ModificarEstadiaDto = z.infer<typeof ModificarEstadiaSchema>;
+export type CancelarEstadiaDto  = z.infer<typeof CancelarEstadiaSchema>;

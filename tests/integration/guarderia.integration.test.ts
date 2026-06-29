@@ -196,6 +196,31 @@ function esExito(r: RpcResult): boolean {
   return r.error === null && Array.isArray(r.data) && r.data.length === 1;
 }
 
+/** Crea una estadía via RPC y devuelve su id. Lanza si el RPC falla. */
+async function crearEstadiaRpc(
+  tenantId: string, clientId: string, petId: string,
+  checkIn: string, checkOut: string,
+): Promise<string> {
+  const r = await serviceDb.rpc(
+    "crear_estadia_con_cupo",
+    estadiaRpcParams(tenantId, clientId, petId, checkIn, checkOut),
+  ) as RpcResult;
+  if (!esExito(r)) throw new Error(`crearEstadiaRpc falló: ${r.error?.message}`);
+  return ((r.data as Array<{ id: string }>)[0]).id;
+}
+
+function modificarRpcParams(
+  tenantId: string, estadiaId: string,
+  checkIn: string, checkOut: string,
+  reason = "Modificación de integración", notes: string | null = null,
+) {
+  return { p_tenant_id: tenantId, p_estadia_id: estadiaId, p_check_in: checkIn, p_check_out: checkOut, p_reason: reason, p_notes: notes };
+}
+
+function cancelarRpcParams(tenantId: string, estadiaId: string, reason = "Cancelación de integración") {
+  return { p_tenant_id: tenantId, p_estadia_id: estadiaId, p_cancellation_reason: reason };
+}
+
 // ─── Caso 1: CONCURRENCIA por el último lugar (el más crítico) ──────────────────
 
 describeIntegration("Guardería: concurrencia por el último lugar (RN-GU4, FOR UPDATE)", () => {
@@ -361,5 +386,298 @@ describeIntegration("Guardería: endurecimiento del RPC (anon no puede ejecutarl
       estadiaRpcParams(tenantA.tenantId, tenantA.clienteId, petId, "2027-06-10", "2027-06-10"),
     ) as RpcResult;
     expect(error?.message ?? "").toMatch(/permission denied/i);
+  });
+
+  it("anon tampoco puede invocar modificar_estadia_con_cupo ni cancelar_estadia", async () => {
+    if (skipIfNoCredentials() || !tenantA.jwt) return;
+
+    const anonDb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth: { persistSession: false } });
+    const fakeId = "00000000-0000-4000-8000-000000000001";
+
+    const { error: errMod } = await anonDb.rpc(
+      "modificar_estadia_con_cupo",
+      modificarRpcParams(tenantA.tenantId, fakeId, "2027-06-11", "2027-06-11"),
+    ) as RpcResult;
+    expect(errMod?.message ?? "").toMatch(/permission denied/i);
+
+    const { error: errCan } = await anonDb.rpc(
+      "cancelar_estadia",
+      cancelarRpcParams(tenantA.tenantId, fakeId),
+    ) as RpcResult;
+    expect(errCan?.message ?? "").toMatch(/permission denied/i);
+  });
+});
+
+// ─── Modificar: revalidación de cupo (RN-ME2) ────────────────────────────────────
+//
+// Verifica que:
+//  a) mover una estadía a un día lleno → CUPO_GUARDERIA_AGOTADO (con los días en msg).
+//  b) mover a un día con lugar → OK; el día viejo libera su slot y el nuevo lo toma.
+//  El RPC excluye la estadía actual del conteo para no auto-bloquearse (key diff vs crear).
+
+describeIntegration("Guardería: modificar — revalidación de cupo (RN-ME2)", () => {
+  it("mover a día lleno → CUPO_GUARDERIA_AGOTADO; luego mover a día libre → OK y cupo correcto en ambos días", async () => {
+    if (skipIfNoCredentials() || !tenantA.jwt) return;
+
+    await setCupo(tenantA.tenantId, 1);
+
+    const dLleno = "2027-07-10";
+    const dLibre = "2027-07-15";
+
+    // Llena el día 10 (cupo=1).
+    const petOcupa  = await crearMascota(tenantA, "ModCupoOcupa");
+    await crearEstadiaRpc(tenantA.tenantId, tenantA.clienteId, petOcupa, dLleno, dLleno);
+
+    // Estadía que vamos a modificar: cubre el día 15 (libre).
+    const petMover = await crearMascota(tenantA, "ModCupoMover");
+    const idMover  = await crearEstadiaRpc(tenantA.tenantId, tenantA.clienteId, petMover, dLibre, dLibre);
+
+    // a) Intentar mover a dLleno → CUPO_GUARDERIA_AGOTADO.
+    const rFallo = await serviceDb.rpc(
+      "modificar_estadia_con_cupo",
+      modificarRpcParams(tenantA.tenantId, idMover, dLleno, dLleno),
+    ) as RpcResult;
+    expect(rFallo.error).toBeTruthy();
+    expect(rpcReallyRan(rFallo.error)).toBe(true);
+    expect(rFallo.error?.message ?? "").toContain("CUPO_GUARDERIA_AGOTADO");
+
+    // La estadía NO se modificó: idMover sigue en dLibre.
+    expect(await contarActivasEnDia(tenantA.tenantId, dLibre)).toBe(1);
+    expect(await contarActivasEnDia(tenantA.tenantId, dLleno)).toBe(1);
+
+    // b) Mover a un día con lugar (día 20, completamente libre).
+    const dDestino = "2027-07-20";
+    const rOk = await serviceDb.rpc(
+      "modificar_estadia_con_cupo",
+      modificarRpcParams(tenantA.tenantId, idMover, dDestino, dDestino),
+    ) as RpcResult;
+    expect(rpcReallyRan(rOk.error)).toBe(true);
+    expect(esExito(rOk)).toBe(true);
+
+    // Cupo correcto tras la modificación:
+    // - dLibre (15): liberado → 0 activas.
+    // - dDestino (20): tomado → 1 activa.
+    expect(await contarActivasEnDia(tenantA.tenantId, dLibre)).toBe(0);
+    expect(await contarActivasEnDia(tenantA.tenantId, dDestino)).toBe(1);
+  });
+});
+
+// ─── Cancelar: el cupo se libera (RN-ME3) ────────────────────────────────────────
+//
+// Prueba que al cancelar, los días de la estadía dejan de contar en el cupo, de
+// forma que un alta que antes se rechazaba (por CUPO_GUARDERIA_AGOTADO) ahora entra.
+// Esto valida que cancelar_estadia NO deja el lugar "fantasma" ocupado.
+
+describeIntegration("Guardería: cancelar — libera cupo (RN-ME3)", () => {
+  it("cancel → cupo liberado → una alta que antes era rechazada ahora entra", async () => {
+    if (skipIfNoCredentials() || !tenantA.jwt) return;
+
+    await setCupo(tenantA.tenantId, 1);
+    const dia = "2027-07-25";
+
+    // Llenar el día.
+    const petCan1 = await crearMascota(tenantA, "CancelCupo1");
+    const idCan1  = await crearEstadiaRpc(tenantA.tenantId, tenantA.clienteId, petCan1, dia, dia);
+
+    // Confirmar que el cupo está lleno: un segundo alta se rechaza.
+    const petCan2 = await crearMascota(tenantA, "CancelCupo2");
+    const rAntes = await serviceDb.rpc(
+      "crear_estadia_con_cupo",
+      estadiaRpcParams(tenantA.tenantId, tenantA.clienteId, petCan2, dia, dia),
+    ) as RpcResult;
+    expect(rAntes.error?.message ?? "").toContain("CUPO_GUARDERIA_AGOTADO");
+
+    // Cancelar la primera estadía.
+    const rCan = await serviceDb.rpc(
+      "cancelar_estadia",
+      cancelarRpcParams(tenantA.tenantId, idCan1),
+    ) as RpcResult;
+    expect(rpcReallyRan(rCan.error)).toBe(true);
+    expect(esExito(rCan)).toBe(true);
+
+    // El status devuelto es Cancelada y cancelled_at es un timestamp válido.
+    const fila = (rCan.data as Array<{ id: string; status: string; cancelled_at: string }>)[0];
+    expect(fila.status).toBe("Cancelada");
+    expect(fila.cancelled_at).toBeTruthy();
+
+    // Verificar en la base: la estadía tiene status Cancelada y cancelled_at.
+    const { data: rowDb } = await serviceDb
+      .from("estadias")
+      .select("status, cancelled_at")
+      .eq("id", idCan1)
+      .single() as { data: { status: string; cancelled_at: string } | null };
+    expect(rowDb?.status).toBe("Cancelada");
+    expect(rowDb?.cancelled_at).toBeTruthy();
+
+    // El cupo quedó libre: el día ya no tiene activas.
+    expect(await contarActivasEnDia(tenantA.tenantId, dia)).toBe(0);
+
+    // La alta de petCan2 ahora pasa.
+    const rDespues = await serviceDb.rpc(
+      "crear_estadia_con_cupo",
+      estadiaRpcParams(tenantA.tenantId, tenantA.clienteId, petCan2, dia, dia),
+    ) as RpcResult;
+    expect(rpcReallyRan(rDespues.error)).toBe(true);
+    expect(esExito(rDespues)).toBe(true);
+    expect(await contarActivasEnDia(tenantA.tenantId, dia)).toBe(1);
+  });
+});
+
+// ─── STAY_LOCKED: estados terminales y restricción EnCurso (RN-ME1) ──────────────
+
+describeIntegration("Guardería: STAY_LOCKED — estados terminales y EnCurso (RN-ME1)", () => {
+  it("Finalizada → modificar lanza STAY_LOCKED; cancelar lanza STAY_LOCKED", async () => {
+    if (skipIfNoCredentials() || !tenantA.jwt) return;
+
+    await setCupo(tenantA.tenantId, 10);
+    const dia = "2027-07-30";
+    const petFin = await crearMascota(tenantA, "LockFinalizada");
+    const idFin  = await crearEstadiaRpc(tenantA.tenantId, tenantA.clienteId, petFin, dia, dia);
+
+    // Pasar a Finalizada vía DB directo (simula el check-out completado).
+    await serviceDb.from("estadias").update({ status: "Finalizada" }).eq("id", idFin);
+
+    const rMod = await serviceDb.rpc(
+      "modificar_estadia_con_cupo",
+      modificarRpcParams(tenantA.tenantId, idFin, "2027-07-31", "2027-07-31"),
+    ) as RpcResult;
+    expect(rMod.error?.message ?? "").toContain("STAY_LOCKED");
+
+    const rCan = await serviceDb.rpc(
+      "cancelar_estadia",
+      cancelarRpcParams(tenantA.tenantId, idFin),
+    ) as RpcResult;
+    expect(rCan.error?.message ?? "").toContain("STAY_LOCKED");
+
+    // La estadía sigue siendo Finalizada (no fue alterada).
+    const { data: rowDb } = await serviceDb
+      .from("estadias").select("status").eq("id", idFin).single() as { data: { status: string } | null };
+    expect(rowDb?.status).toBe("Finalizada");
+  });
+
+  it("EnCurso + cambio de check_in → STAY_LOCKED; solo cambio de check_out → OK", async () => {
+    if (skipIfNoCredentials() || !tenantA.jwt) return;
+
+    await setCupo(tenantA.tenantId, 10);
+    const checkIn  = "2027-08-01";
+    const checkOut = "2027-08-03";
+
+    const petEnCurso = await crearMascota(tenantA, "LockEnCurso");
+    const idEnCurso  = await crearEstadiaRpc(tenantA.tenantId, tenantA.clienteId, petEnCurso, checkIn, checkOut);
+
+    // Pasar a EnCurso vía DB directo.
+    await serviceDb.from("estadias").update({ status: "EnCurso" }).eq("id", idEnCurso);
+
+    // Intentar cambiar check_in → STAY_LOCKED.
+    const rModCheckIn = await serviceDb.rpc(
+      "modificar_estadia_con_cupo",
+      modificarRpcParams(tenantA.tenantId, idEnCurso, "2027-08-02", checkOut),
+    ) as RpcResult;
+    expect(rModCheckIn.error?.message ?? "").toContain("STAY_LOCKED");
+
+    // Solo cambiar check_out → OK (check_in queda igual).
+    const nuevoCheckOut = "2027-08-05";
+    const rModCheckOut = await serviceDb.rpc(
+      "modificar_estadia_con_cupo",
+      modificarRpcParams(tenantA.tenantId, idEnCurso, checkIn, nuevoCheckOut),
+    ) as RpcResult;
+    expect(rpcReallyRan(rModCheckOut.error)).toBe(true);
+    expect(esExito(rModCheckOut)).toBe(true);
+
+    // Verificar que el check_out se actualizó.
+    const { data: rowDb } = await serviceDb
+      .from("estadias").select("check_out_date, status").eq("id", idEnCurso).single() as {
+        data: { check_out_date: string; status: string } | null;
+      };
+    expect(rowDb?.check_out_date).toBe(nuevoCheckOut);
+    expect(rowDb?.status).toBe("EnCurso");
+  });
+});
+
+// ─── Aislamiento de tenant en modificar / cancelar (bloqueante) ──────────────────
+
+describeIntegration("Guardería: aislamiento tenant en modificar/cancelar (bloqueante)", () => {
+  it("B no puede modificar una estadía de A vía RPC (p_tenant_id de B → ESTADIA_NOT_FOUND)", async () => {
+    if (skipIfNoCredentials() || !tenantA.jwt || !tenantB.jwt) return;
+
+    await setCupo(tenantA.tenantId, 10);
+    const dia    = "2027-08-10";
+    const petDeA = await crearMascota(tenantA, "AisladoModA");
+    const idDeA  = await crearEstadiaRpc(tenantA.tenantId, tenantA.clienteId, petDeA, dia, dia);
+
+    // B intenta modificar la estadía de A pasando su propio tenantId.
+    const rMod = await serviceDb.rpc(
+      "modificar_estadia_con_cupo",
+      modificarRpcParams(tenantB.tenantId, idDeA, "2027-08-11", "2027-08-11"),
+    ) as RpcResult;
+    expect(rMod.error).toBeTruthy();
+    expect(rpcReallyRan(rMod.error)).toBe(true);
+    expect(rMod.error?.message ?? "").toContain("ESTADIA_NOT_FOUND");
+
+    // La estadía de A no fue alterada.
+    const { data: rowDb } = await serviceDb
+      .from("estadias").select("check_in_date").eq("id", idDeA).single() as {
+        data: { check_in_date: string } | null;
+      };
+    expect(rowDb?.check_in_date).toBe(dia);
+  });
+
+  it("B no puede cancelar una estadía de A vía RPC (p_tenant_id de B → ESTADIA_NOT_FOUND)", async () => {
+    if (skipIfNoCredentials() || !tenantA.jwt || !tenantB.jwt) return;
+
+    await setCupo(tenantA.tenantId, 10);
+    const dia    = "2027-08-15";
+    const petDeA = await crearMascota(tenantA, "AisladoCancelA");
+    const idDeA  = await crearEstadiaRpc(tenantA.tenantId, tenantA.clienteId, petDeA, dia, dia);
+
+    const rCan = await serviceDb.rpc(
+      "cancelar_estadia",
+      cancelarRpcParams(tenantB.tenantId, idDeA),
+    ) as RpcResult;
+    expect(rCan.error).toBeTruthy();
+    expect(rpcReallyRan(rCan.error)).toBe(true);
+    expect(rCan.error?.message ?? "").toContain("ESTADIA_NOT_FOUND");
+
+    // La estadía de A sigue Reservada.
+    const { data: rowDb } = await serviceDb
+      .from("estadias").select("status").eq("id", idDeA).single() as {
+        data: { status: string } | null;
+      };
+    expect(rowDb?.status).toBe("Reservada");
+  });
+
+  it("B no puede modificar ni cancelar vía HTTP con JWT de B sobre estadía de A → 404 ESTADIA_NOT_FOUND", async () => {
+    if (skipIfNoCredentials() || !tenantA.jwt || !tenantB.jwt) return;
+
+    await setCupo(tenantA.tenantId, 10);
+    const dia    = "2027-08-20";
+    const petDeA = await crearMascota(tenantA, "AisladoHttpA");
+    const idDeA  = await crearEstadiaRpc(tenantA.tenantId, tenantA.clienteId, petDeA, dia, dia);
+
+    // Modificar con JWT de B.
+    const resMod = await callApp(`/estadias/${idDeA}`, {
+      method: "PUT", jwt: tenantB.jwt,
+      body: { checkInDate: "2027-08-21", checkOutDate: "2027-08-21", reason: "Intento ajeno" },
+    });
+    const bodyMod = await resMod.json() as { error: { code: string } };
+    expect(resMod.status).toBe(404);
+    expect(bodyMod.error.code).toBe("ESTADIA_NOT_FOUND");
+
+    // Cancelar con JWT de B.
+    const resCan = await callApp(`/estadias/${idDeA}/cancelar`, {
+      method: "PATCH", jwt: tenantB.jwt,
+      body: { cancellationReason: "Intento ajeno" },
+    });
+    const bodyCan = await resCan.json() as { error: { code: string } };
+    expect(resCan.status).toBe(404);
+    expect(bodyCan.error.code).toBe("ESTADIA_NOT_FOUND");
+
+    // La estadía de A no fue tocada.
+    const { data: rowDb } = await serviceDb
+      .from("estadias").select("status, check_in_date").eq("id", idDeA).single() as {
+        data: { status: string; check_in_date: string } | null;
+      };
+    expect(rowDb?.status).toBe("Reservada");
+    expect(rowDb?.check_in_date).toBe(dia);
   });
 });

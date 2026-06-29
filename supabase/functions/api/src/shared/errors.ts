@@ -43,6 +43,7 @@ export enum ErrorCode {
   INVALID_TRANSITION    = "INVALID_TRANSITION",
 
   // ── Guardería ─────────────────────────────────────────────────────
+  ESTADIA_NOT_FOUND      = "ESTADIA_NOT_FOUND",
   STAY_OVERLAP           = "STAY_OVERLAP",
   STAY_LOCKED            = "STAY_LOCKED",
   CUPO_GUARDERIA_AGOTADO = "CUPO_GUARDERIA_AGOTADO",
