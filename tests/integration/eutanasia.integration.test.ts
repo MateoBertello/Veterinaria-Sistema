@@ -245,7 +245,6 @@ describeIntegration("Eutanasia: happy path (RN-EC11, RN-PV4)", () => {
       data: { evento: { id: string; eventType: string }; mascota: { estado: string; deceasedReason: string; deceasedDate: string }; cancelledDoses: number };
     };
 
-    console.log("ERROR REVELADO:", JSON.stringify(body, null, 2));
     expect(res.status).toBe(201);
     expect(body.success).toBe(true);
     expect(body.data.evento.eventType).toBe("Eutanasia");
