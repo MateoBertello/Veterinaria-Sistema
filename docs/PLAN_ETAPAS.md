@@ -202,11 +202,11 @@ plantillas pre-aprobadas y costo por mensaje; es un proyecto en sí mismo, no un
 | Etapa | Estado | RNs con test | Fecha de cierre | Notas |
 | :---- | :---- | :---- | :---- | :---- |
 | 1 — Fundaciones | Pendiente | — | — | |
-| 2 — Auth + Super Admin | ✅ Cerrada | RN-S1..S3, RN-SA1..SA5, RN-SM1..SM4 | 2026-06-19 | Auth+Usuarios, Super Admin/Tenants, Módulos Contratados + sidebar dinámico (lógica). Endpoint `/modulos-habilitados` en camelCase. |
+| 2 — Auth + Super Admin | Backend ✅ / Frontend pendiente | RN-S1..S3, RN-SA1..SA5, RN-SM1..SM4 | 2026-06-19 | Backend cerrado: Auth+Usuarios, Super Admin/Tenants, Módulos Contratados + sidebar dinámico (lógica). Endpoint `/modulos-habilitados` en camelCase. **Frontend pendiente** (scaffold/pantallas diferidas). |
 | 3 — Core | ✅ Cerrada | RN-CL1..CL9, RN-MA1..MA10, RN-CD1..CD5, RN-MF1..MF5 | 2026-06-22 | Backend (4 bloques) + pantallas Clientes y Mascotas. Catálogos por PostgREST directo vía proxy. Filtros edadCat son convención de UI. |
-| 4 — Transversales | ✅ Cerrada | RN-SV1..SV7, RN-CF1..CF5, RN-HOR1..HOR6, RN-AUD1..AUD5 | 2026-06-23 | Backend: Servicios, Configuración, Doctores, Horarios, Auditoría (consulta + export CSV con truncación explícita). 12 unit tests de auditoría + bloque RLS-auditoria bloqueante. |
-| 5 — Historial Clínico | Pendiente | — | — | |
-| 6 — Turnos | Pendiente | — | — | |
+| 4 — Transversales | Backend ✅ / Frontend pendiente | RN-SV1..SV7, RN-CF1..CF5, RN-HOR1..HOR6, RN-AUD1..AUD5 | 2026-06-23 | Backend cerrado: Servicios, Configuración, Doctores, Horarios, Auditoría (consulta + export CSV con truncación explícita). 12 unit tests de auditoría + bloque RLS-auditoria bloqueante. **Frontend pendiente.** |
+| 5 — Historial Clínico | Backend ✅ / Frontend pendiente | RN-HC1..HC5, RN-EC1..EC12, RN-EX1..EX5 | — | Backend cerrado: HC/EC/eutanasia transaccional/adjuntos/export PDF+XLSX; RN-EC9 con envío real de resumen por email (reusa canal Etapa 6c). **Frontend pendiente.** |
+| 6 — Turnos | Backend ✅ / Frontend pendiente | RN-TU1..TU10, RN-MC1..MC7, RN-ES1..ES5, RN-NT1..NT6 | — | Backend cerrado: agendar con duración por servicio, transiciones de estado, modificar/cancelar, `NotificacionService` genérico + recordatorios (canal email Resend). **Frontend pendiente.** |
 | 7 — Guardería | Pendiente | — | — | |
 | 8 — Plan de Vacunación | Pendiente | — | — | |
 | 9 — Hardening | Pendiente | — | — | |
