@@ -196,12 +196,15 @@ describeIntegration("HC-Storage: tenant A registra y adjunta", () => {
     const ctxA = { tenantId: tenantAId, callerUserId: userAId, callerName: "Usuario A", callerRole: "admin" };
     const evento = await HistorialService.crearRegistro(
       petActivaA,
-      { date: "2026-06-10", eventType: "Consulta", professionalId: userAId, description: "Control anual", sendEmailToClient: true },
+      // Sin envío de email: este test cubre el aislamiento de Storage, no la
+      // notificación. El canal de email (RN-EC9) está cubierto por unit tests
+      // con mock, así que no dependemos de un proveedor externo aquí.
+      { date: "2026-06-10", eventType: "Consulta", professionalId: userAId, description: "Control anual", sendEmailToClient: false },
       ctxA,
     );
     recordAId = evento.id;
     expect(evento.clientNameAtTime).toBe("Cliente HC A");
-    expect(evento.emailSent).toBe(true); // RN-EC9: cliente A tiene email
+    expect(evento.emailSent).toBe(false); // no se solicitó envío
 
     const pdf = new File([new Blob(["%PDF-1.4 test"])], "rx.pdf", { type: "application/pdf" });
     const meta = await HistorialService.adjuntarArchivo(recordAId, pdf, ctxA);
