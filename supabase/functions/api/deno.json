@@ -1,6 +1,7 @@
 {
   "imports": {
     "hono": "npm:hono@^4.4.1",
+    "@sentry/deno": "npm:@sentry/deno@^8.9.2",
     "@supabase/supabase-js": "npm:@supabase/supabase-js@^2.43.4",
     "zod": "npm:zod@^3.23.8",
     "pdf-lib": "npm:pdf-lib@~1.17.1",
