@@ -1,0 +1,249 @@
+import { DomainError, ErrorCode } from "../../shared/errors.ts";
+import { recordAudit } from "../../shared/audit.ts";
+import { getServiceDb } from "../../shared/db.ts";
+import { ConfiguracionService } from "../configuracion/configuracion.service.ts";
+import {
+  CrearEstadiaSchema,
+  type CrearEstadiaDto,
+} from "./guarderia.schemas.ts";
+
+// ─── DTOs públicos ────────────────────────────────────────────────────────────
+
+/** Contexto del usuario autenticado (mismo shape que el resto de los services). */
+export interface CallerContext {
+  tenantId:     string;
+  callerUserId: string;
+  callerName:   string;
+  callerRole:   string;
+}
+
+export interface EstadiaPublica {
+  id:            string;
+  clientId:      string;
+  petId:         string;
+  checkInDate:   string;
+  checkOutDate:  string;
+  status:        string;          // siempre 'Reservada' al crear (RN-GU5)
+  reason:        string;
+  notes:         string | null;
+  createdAt:     string;
+  // Tarjeta de mascota (Addendum v1.1 pantalla 3): tamaño + dieta + dueño.
+  petName:       string;
+  petTamano:     string;
+  petDieta:      string | null;
+  clientName:    string;
+}
+
+/** Ocupación de un día dentro del rango consultado (GET /estadias/cupo). */
+export interface CupoDia {
+  date:        string;
+  ocupados:    number;
+  cupo:        number;
+  disponible:  number;
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function today(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+/** Lista de fechas "YYYY-MM-DD" en el rango inclusivo [from, to]. */
+function eachDay(from: string, to: string): string[] {
+  const out: string[] = [];
+  // Mediodía UTC para evitar corrimientos por DST al iterar por días.
+  const cur = new Date(`${from}T12:00:00Z`);
+  const end = new Date(`${to}T12:00:00Z`);
+  while (cur <= end) {
+    out.push(cur.toISOString().slice(0, 10));
+    cur.setUTCDate(cur.getUTCDate() + 1);
+  }
+  return out;
+}
+
+/**
+ * Mapea el error de `crear_estadia_con_cupo` a DomainError. El RPC lanza
+ * `RAISE EXCEPTION` con el MESSAGE igual al código de ErrorCode. Para el cupo,
+ * el mensaje es `CUPO_GUARDERIA_AGOTADO:<json de días>`; se parsean los días
+ * para poblar `details` (RN-GU4).
+ */
+function mapCrearEstadiaRpcError(error: { message?: string }): DomainError {
+  const msg = error.message ?? "";
+
+  if (msg.includes("CUPO_GUARDERIA_AGOTADO")) {
+    let dias: unknown[] = [];
+    const colon = msg.indexOf(":", msg.indexOf("CUPO_GUARDERIA_AGOTADO"));
+    if (colon !== -1) {
+      try {
+        const parsed = JSON.parse(msg.slice(colon + 1));
+        if (Array.isArray(parsed)) dias = parsed;
+      } catch {
+        // Si no se pudo parsear, se devuelve sin detalle de días.
+      }
+    }
+    return new DomainError(
+      ErrorCode.CUPO_GUARDERIA_AGOTADO,
+      409,
+      "No hay cupo de guardería disponible en los días seleccionados",
+      dias,
+    );
+  }
+  if (msg.includes("STAY_OVERLAP"))
+    return new DomainError(ErrorCode.STAY_OVERLAP, 409, "La mascota ya tiene una estadía que se superpone con ese rango");
+  if (msg.includes("PET_DECEASED"))
+    return new DomainError(ErrorCode.PET_DECEASED, 422, "No se puede registrar una estadía para una mascota fallecida");
+  if (msg.includes("MASCOTA_NOT_FOUND"))
+    return new DomainError(ErrorCode.MASCOTA_NOT_FOUND, 404, "Mascota no encontrada en este tenant");
+  if (msg.includes("CONFIG_NOT_FOUND"))
+    return new DomainError(ErrorCode.CONFIG_NOT_FOUND, 404, "Configuración de la clínica no encontrada. Contacte a soporte.");
+  return new DomainError(ErrorCode.INTERNAL_ERROR, 500, `No se pudo registrar la estadía: ${msg}`);
+}
+
+function toPublic(row: Record<string, unknown>): EstadiaPublica {
+  return {
+    id:           row["id"]             as string,
+    clientId:     row["client_id"]      as string,
+    petId:        row["pet_id"]         as string,
+    checkInDate:  row["check_in_date"]  as string,
+    checkOutDate: row["check_out_date"] as string,
+    status:       row["status"]         as string,
+    reason:       row["reason"]         as string,
+    notes:        (row["notes"]         as string | null) ?? null,
+    createdAt:    row["created_at"]     as string,
+    petName:      row["pet_name"]       as string,
+    petTamano:    row["pet_tamano"]     as string,
+    petDieta:     (row["pet_dieta"]     as string | null) ?? null,
+    clientName:   row["client_name"]    as string,
+  };
+}
+
+// ─── Service ──────────────────────────────────────────────────────────────────
+
+export class EstadiaService {
+  /**
+   * Registrar Estadía (RN-GU1..GU5, RN-GU7).
+   *
+   * RN-GU1 (rango / fecha pasada) se valida acá con códigos específicos.
+   * RN-GU2 (solape), RN-GU3 (mascota válida) y RN-GU4 (cupo) se delegan al RPC
+   * `crear_estadia_con_cupo`, que resuelve el cupo con una guarda atómica por
+   * tenant (FOR UPDATE sobre configuracion_tenant) — ver la migración: el cupo
+   * NO se chequea-antes-de-insertar en el Service para evitar la ventana de
+   * carrera que produciría overbooking.
+   */
+  static async crear(dto: CrearEstadiaDto, ctx: CallerContext): Promise<EstadiaPublica> {
+    // Defensa en profundidad: el Controller ya validó el formato con Zod.
+    const parsed = CrearEstadiaSchema.safeParse(dto);
+    if (!parsed.success) {
+      throw new DomainError(
+        ErrorCode.VALIDATION_ERROR,
+        422,
+        "Datos de la estadía inválidos",
+        parsed.error.issues,
+      );
+    }
+    const data = parsed.data;
+
+    // RN-GU1: rango válido (egreso ≥ ingreso) e ingreso no anterior a hoy.
+    if (data.checkOutDate < data.checkInDate) {
+      throw new DomainError(
+        ErrorCode.INVALID_RANGE,
+        422,
+        "La fecha de egreso debe ser posterior o igual a la de ingreso",
+      );
+    }
+    if (data.checkInDate < today()) {
+      throw new DomainError(
+        ErrorCode.PAST_DATE,
+        422,
+        "La fecha de ingreso no puede ser anterior a hoy",
+      );
+    }
+
+    const db = getServiceDb();
+
+    // RN-GU2/GU3/GU4: transacción con guarda de cupo. p_tenant_id SIEMPRE del JWT.
+    const { data: row, error } = await db
+      .rpc("crear_estadia_con_cupo", {
+        p_tenant_id: ctx.tenantId,
+        p_client_id: data.clientId,
+        p_pet_id:    data.petId,
+        p_check_in:  data.checkInDate,
+        p_check_out: data.checkOutDate,
+        p_reason:    data.reason,
+        p_notes:     data.notes ?? null,
+      })
+      .single();
+
+    if (error) throw mapCrearEstadiaRpcError(error);
+    if (!row) {
+      throw new DomainError(ErrorCode.INTERNAL_ERROR, 500, "El RPC de estadía no devolvió resultado");
+    }
+
+    const estadia = toPublic(row as unknown as Record<string, unknown>);
+
+    // RN-GU7: auditoría CREATE en módulo daycare.
+    await recordAudit(db as never, {
+      tenantId:  ctx.tenantId,
+      userId:    ctx.callerUserId,
+      userName:  ctx.callerName,
+      userRole:  ctx.callerRole,
+      action:    "CREATE",
+      module:    "daycare",
+      entityId:  estadia.id,
+      newValues: {
+        clientId:     estadia.clientId,
+        petId:        estadia.petId,
+        checkInDate:  estadia.checkInDate,
+        checkOutDate: estadia.checkOutDate,
+        status:       estadia.status,
+        reason:       estadia.reason,
+      },
+    });
+
+    return estadia;
+  }
+
+  /**
+   * Ocupación vs. cupo por día en el rango [dateFrom, dateTo] (GET /estadias/cupo).
+   * Sin N+1: UNA sola query trae las estadías activas que solapan el rango y la
+   * ocupación por día se agrega en memoria (no se consulta por día). El cupo
+   * vigente se lee de la configuración del tenant (RN-CF3, sin caché).
+   */
+  static async cupo(
+    dateFrom: string,
+    dateTo:   string,
+    ctx:      CallerContext,
+  ): Promise<CupoDia[]> {
+    const cupo = (await ConfiguracionService.valor(ctx.tenantId, "cupoMaximoDiario")) as number;
+
+    const db = getServiceDb();
+
+    // Estadías activas que solapan el rango: check_in ≤ dateTo AND check_out ≥ dateFrom.
+    const { data, error } = await db
+      .from("estadias")
+      .select("check_in_date, check_out_date")
+      .eq("tenant_id", ctx.tenantId)
+      .in("status", ["Reservada", "EnCurso"])
+      .lte("check_in_date", dateTo)
+      .gte("check_out_date", dateFrom);
+
+    if (error) {
+      throw new DomainError(ErrorCode.INTERNAL_ERROR, 500, "Error al consultar la ocupación de guardería");
+    }
+
+    const rows = (data ?? []) as Array<{ check_in_date: string; check_out_date: string }>;
+
+    return eachDay(dateFrom, dateTo).map((date) => {
+      // Rango inclusivo '[]': el día cuenta si check_in ≤ date ≤ check_out.
+      const ocupados = rows.filter(
+        (r) => r.check_in_date <= date && date <= r.check_out_date,
+      ).length;
+      return {
+        date,
+        ocupados,
+        cupo,
+        disponible: Math.max(0, cupo - ocupados),
+      };
+    });
+  }
+}

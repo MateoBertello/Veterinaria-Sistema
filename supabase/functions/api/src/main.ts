@@ -22,6 +22,7 @@ import {
 } from "./modules/historial/historial.controller.ts";
 import { turnosRouter } from "./modules/turnos/turnos.controller.ts";
 import { notificacionesRouter } from "./modules/notificaciones/notificaciones.controller.ts";
+import { guarderiaRouter } from "./modules/guarderia/guarderia.controller.ts";
 
 const app = new Hono().basePath("/api/v1");
 
@@ -75,6 +76,9 @@ app.route("/adjuntos", adjuntosRouter);          // descarga de adjuntos por sig
 // específico que el /turnos/:id de la agenda (Hono permite registros aditivos).
 app.route("/turnos/notificaciones", notificacionesRouter);
 app.route("/turnos", turnosRouter);
+
+// ─── Guardería (módulo vendible — Etapa 7) ───────────────────────────────────
+app.route("/estadias", guarderiaRouter);
 
 // ─── Consola Super Admin (fuera de tenant) ──────────────────────────────────────
 // Montado en /api/v1/admin/tenants; el router NO repite el segmento /tenants.
