@@ -38,6 +38,21 @@ export interface ProcesarOpts {
   tenantId?: string;
 }
 
+/**
+ * Aviso genérico a enviar por un canal, independiente del origen (turno/vacunación).
+ * Permite que `_enviarAviso` sea la ÚNICA fuente de idempotencia (RN-NT3): un solo
+ * INSERT en `notificaciones` con el UNIQUE(tenant, origen, referencia_id, canal).
+ */
+interface AvisoNotificacion {
+  origen:       "turno" | "vacunacion";
+  referenciaId: string;
+  destino:      string;
+  asunto:       string;
+  cuerpo:       string;
+  resumen:      string;
+  auditDetail:  string;
+}
+
 interface ContactoCliente {
   fullName: string;
   email:    string | null;
@@ -108,6 +123,59 @@ function construirMensaje(turno: TurnoParaNotificar): { asunto: string; cuerpo: 
     `el <strong>${turno.date}</strong> a las <strong>${hhmm}</strong>.</p>`;
   const resumen = `Turno de ${mascota}${servicio} el ${turno.date} ${hhmm}`;
   return { asunto, cuerpo, resumen };
+}
+
+// ─── Helpers de Avisos de Vacunación (RN-PV6/PV7) ───────────────────────────────
+
+interface DosisParaNotificar {
+  id:            string;
+  fechaEstimada: string;
+  estado:        string;
+  cliente:       ContactoCliente;
+  mascota:       string | null;
+  tipoVacuna:    string | null;
+}
+
+// Embed: resuelve dosis → mascota → dueño (cliente) y tipo de vacuna en UNA consulta
+// (sin N+1). FK únicas verificadas: plan_vacunacion.pet_id→mascotas, mascotas.client_id→clientes.
+const PLAN_VACUNA_NOTIF_SELECT =
+  "id, fecha_estimada, estado, notified_at, " +
+  "mascota:mascotas(name, cliente:clientes(full_name, email, phone)), " +
+  "tipo:tipos_vacuna(nombre)";
+
+function mapDosis(row: Record<string, unknown>): DosisParaNotificar {
+  const pet  = unwrapEmbed<Record<string, unknown>>(row["mascota"]);
+  const cli  = unwrapEmbed<Record<string, unknown>>(pet?.["cliente"]);
+  const tipo = unwrapEmbed<Record<string, unknown>>(row["tipo"]);
+  return {
+    id:            row["id"] as string,
+    fechaEstimada: row["fecha_estimada"] as string,
+    estado:        row["estado"] as string,
+    cliente: {
+      fullName: (cli?.["full_name"] as string) ?? "",
+      email:    (cli?.["email"]     as string | null) ?? null,
+      phone:    (cli?.["phone"]     as string | null) ?? null,
+    },
+    mascota:    (pet?.["name"]    as string | null) ?? null,
+    tipoVacuna: (tipo?.["nombre"] as string | null) ?? null,
+  };
+}
+
+function construirMensajeVacuna(dosis: DosisParaNotificar): { asunto: string; cuerpo: string; resumen: string } {
+  const mascota = dosis.mascota ?? "tu mascota";
+  const tipo    = dosis.tipoVacuna ?? "vacuna";
+  const asunto  = `Recordatorio de vacunación — ${mascota}`;
+  const cuerpo =
+    `<p>Hola ${dosis.cliente.fullName || ""},</p>` +
+    `<p>La vacuna <strong>${tipo}</strong> de <strong>${mascota}</strong> ` +
+    `vence el <strong>${dosis.fechaEstimada}</strong>.</p>`;
+  const resumen = `La vacuna ${tipo} de ${mascota} vence el ${dosis.fechaEstimada}`;
+  return { asunto, cuerpo, resumen };
+}
+
+/** Días enteros (b − a) entre dos fechas "YYYY-MM-DD". */
+function diffDias(a: string, b: string): number {
+  return Math.round((Date.parse(`${b}T00:00:00Z`) - Date.parse(`${a}T00:00:00Z`)) / 86_400_000);
 }
 
 // ─── NotificacionService (genérico por canal y por origen) ──────────────────────
@@ -287,7 +355,7 @@ export const NotificacionService = {
         const objetivo = this.canalesDisponibles(turno.cliente, config);
         if (objetivo.length === 0) {
           // RN-NT4 / flujo 3a: sin datos de contacto → se marca fallida con motivo.
-          await this._registrarFallidaSinContacto(db, tenantId, turno.id);
+          await this._registrarFallidaSinContacto(db, tenantId, "turno", turno.id);
           result.failed++;
           continue;
         }
@@ -305,23 +373,135 @@ export const NotificacionService = {
   },
 
   /**
-   * Segundo procesador (Avisos de Plan de Vacunación, RN-PV6/PV7). Se implementa en
-   * la Etapa 8 reutilizando esta misma infraestructura (canales, registro de envíos,
-   * idempotencia por UNIQUE con `origen='vacunacion'`). Stub explícito para el plan.
+   * RN-PV7: una dosis entra en la ventana de aviso si está `Pendiente` y
+   * `0 ≤ (fechaEstimada − hoy) ≤ diasAvisoVacuna`. Puro (sin DB) para test directo.
    */
-  procesarAvisosVacunacion(): Promise<ResultadoProcesamiento> {
-    throw new DomainError(
-      ErrorCode.INTERNAL_ERROR,
-      501,
-      "procesarAvisosVacunacion se implementa en la Etapa 8 (Plan de Vacunación)",
-    );
+  debeAvisarVacuna(dosis: DosisParaNotificar, diasAvisoVacuna: number, now: Date): boolean {
+    if (dosis.estado !== "Pendiente") return false;
+    const dias = diffDias(dateStr(now), dosis.fechaEstimada);
+    return dias >= 0 && dias <= diasAvisoVacuna;
+  },
+
+  /**
+   * Avisos de Plan de Vacunación (Addendum v1.1, RN-PV6/PV7). Reutiliza la misma
+   * infraestructura que los turnos: canales (`_enviarAviso`), registro en
+   * `notificaciones` e idempotencia por el UNIQUE con `origen='vacunacion'` (RN-NT3).
+   *
+   * - `opts.tenantId` presente → disparo manual de un tenant; ausente → barrido de
+   *   todos los activos (tarea programada; el scheduler se cablea en E9 junto con turnos).
+   * - RN-PV7: la ventana es `diasAvisoVacuna` del tenant (config); cada tenant avisa en
+   *   su propia ventana.
+   * - RN-PV6: la idempotencia es el UNIQUE de `notificaciones` (dos corridas seguidas no
+   *   reenvían: el 2.º INSERT choca → `skipped`). `plan_vacunacion.notified_at` se setea
+   *   como marcador denormalizado tras el envío, NO como guardia de dedupe.
+   * - Canales según datos de contacto del cliente (RN-NT4), con la misma config de canal
+   *   del módulo Turnos. No se mira `enabled` (toggle de recordatorios de turnos): los
+   *   avisos de vacuna se gobiernan por `diasAvisoVacuna`.
+   */
+  async procesarAvisosVacunacion(
+    opts: ProcesarOpts = {},
+    deps: ProcesarDeps = {},
+  ): Promise<ResultadoProcesamiento> {
+    const db = getServiceDb();
+    const now = deps.now ?? new Date();
+    const canales: Partial<Record<Canal, CanalNotificacion>> =
+      deps.canales ?? { email: new CanalEmailResend() };
+
+    const result: ResultadoProcesamiento = { processed: 0, sent: 0, failed: 0, skipped: 0 };
+
+    // Determinar el universo de tenants a procesar.
+    let tenantIds: string[];
+    if (opts.tenantId) {
+      tenantIds = [opts.tenantId];
+    } else {
+      const { data: tenants } = await db.from("tenants").select("id").eq("activo", true);
+      tenantIds = ((tenants as unknown[]) ?? []).map((t) => (t as Record<string, unknown>)["id"] as string);
+    }
+
+    for (const tenantId of tenantIds) {
+      const dias = await this._diasAvisoVacuna(tenantId); // RN-PV7
+      const config = await this.obtenerConfig(tenantId);  // flags de canal (RN-NT4)
+
+      // Acota el barrido: dosis pendientes entre hoy y hoy+ventana (usa idx_planvac_tenant_barrido).
+      const desde = dateStr(now);
+      const hasta = dateStr(new Date(now.getTime() + dias * 86_400_000));
+
+      const { data: rows, error } = await db
+        .from("plan_vacunacion")
+        .select(PLAN_VACUNA_NOTIF_SELECT)
+        .eq("tenant_id", tenantId)
+        .eq("estado", "Pendiente")
+        .gte("fecha_estimada", desde)
+        .lte("fecha_estimada", hasta)
+        .order("fecha_estimada", { ascending: true });
+
+      if (error) {
+        throw new DomainError(
+          ErrorCode.INTERNAL_ERROR,
+          500,
+          `Error consultando dosis a notificar: ${error.message}`,
+        );
+      }
+
+      for (const raw of ((rows as unknown[]) ?? [])) {
+        const dosis = mapDosis(raw as Record<string, unknown>);
+        if (!this.debeAvisarVacuna(dosis, dias, now)) continue;
+
+        result.processed++;
+
+        const objetivo = this.canalesDisponibles(dosis.cliente, config);
+        if (objetivo.length === 0) {
+          // Sin datos de contacto en ningún canal → fallida con motivo (RN-NT4).
+          await this._registrarFallidaSinContacto(db, tenantId, "vacunacion", dosis.id);
+          result.failed++;
+          continue;
+        }
+
+        const mensaje = construirMensajeVacuna(dosis);
+        let algunEnviado = false;
+        for (const canal of objetivo) {
+          const impl = canales[canal];
+          if (!impl) continue; // canal sin proveedor (whatsapp/sms): diferido, no se registra.
+          const destino = destinoDeCanal(canal, dosis.cliente) as string;
+          const outcome = await this._enviarAviso(
+            db,
+            tenantId,
+            {
+              origen:       "vacunacion",
+              referenciaId: dosis.id,
+              destino,
+              asunto:       mensaje.asunto,
+              cuerpo:       mensaje.cuerpo,
+              resumen:      mensaje.resumen,
+              auditDetail:  `Aviso de vacunación enviado por ${canal} a ${destino}`,
+            },
+            canal,
+            impl,
+            now,
+          );
+          result[outcome]++;
+          if (outcome === "sent") algunEnviado = true;
+        }
+
+        // RN-PV6: marcador denormalizado (la dedupe real es el UNIQUE, ya aplicado arriba).
+        if (algunEnviado) {
+          await db
+            .from("plan_vacunacion")
+            .update({ notified_at: now.toISOString() })
+            .eq("id", dosis.id)
+            .eq("tenant_id", tenantId);
+        }
+      }
+    }
+
+    return result;
   },
 
   // ─── Privados ─────────────────────────────────────────────────────────────
 
   /**
-   * Envía un recordatorio por un canal con idempotencia apoyada en la DB (RN-NT3).
-   * Devuelve el contador a incrementar: 'sent' | 'failed' | 'skipped'.
+   * Envía un recordatorio de turno por un canal. Arma el aviso desde el turno y delega
+   * el núcleo idempotente en `_enviarAviso` (compartido con los avisos de vacunación).
    */
   async _enviarPorCanal(
     db: ReturnType<typeof getServiceDb>,
@@ -332,23 +512,55 @@ export const NotificacionService = {
     now: Date,
   ): Promise<"sent" | "failed" | "skipped"> {
     const mensaje = construirMensaje(turno);
+    const destino = destinoDeCanal(canal, turno.cliente) as string;
+    return this._enviarAviso(
+      db,
+      tenantId,
+      {
+        origen:       "turno",
+        referenciaId: turno.id,
+        destino,
+        asunto:       mensaje.asunto,
+        cuerpo:       mensaje.cuerpo,
+        resumen:      mensaje.resumen,
+        auditDetail:  `Recordatorio de turno enviado por ${canal} a ${destino}`,
+      },
+      canal,
+      impl,
+      now,
+    );
+  },
 
-    // RN-NT3: INSERT idempotente. Si ya existe (UNIQUE) → ya procesado → skipped.
+  /**
+   * Núcleo de envío genérico con idempotencia apoyada en la DB (RN-NT3, RN-PV6):
+   * un INSERT en `notificaciones` con UNIQUE(tenant, origen, referencia_id, canal).
+   * Si choca (23505) → ya procesado → `skipped`. Si entra → envía, marca `enviada` y
+   * audita como evento del sistema (RN-NT6). Error del proveedor → `fallida` con motivo.
+   * Devuelve el contador a incrementar: 'sent' | 'failed' | 'skipped'.
+   */
+  async _enviarAviso(
+    db: ReturnType<typeof getServiceDb>,
+    tenantId: string,
+    aviso: AvisoNotificacion,
+    canal: Canal,
+    impl: CanalNotificacion,
+    now: Date,
+  ): Promise<"sent" | "failed" | "skipped"> {
     const { data: ins, error: insError } = await db
       .from("notificaciones")
       .insert({
         tenant_id:     tenantId,
-        origen:        "turno",
-        referencia_id: turno.id,
+        origen:        aviso.origen,
+        referencia_id: aviso.referenciaId,
         canal,
         estado:        "pendiente",
-        mensaje:       mensaje.resumen,
+        mensaje:       aviso.resumen,
       })
       .select("id")
       .single();
 
     if (insError) {
-      if (insError.code === "23505") return "skipped"; // ya notificado (RN-NT3)
+      if (insError.code === "23505") return "skipped"; // ya notificado (RN-NT3/PV6)
       throw new DomainError(
         ErrorCode.INTERNAL_ERROR,
         500,
@@ -357,16 +569,14 @@ export const NotificacionService = {
     }
 
     const notifId = (ins as Record<string, unknown>)["id"] as string;
-    const destino = destinoDeCanal(canal, turno.cliente) as string;
 
     try {
-      await impl.enviar({ destino, asunto: mensaje.asunto, cuerpo: mensaje.cuerpo });
+      await impl.enviar({ destino: aviso.destino, asunto: aviso.asunto, cuerpo: aviso.cuerpo });
       await db
         .from("notificaciones")
         .update({ estado: "enviada", sent_at: now.toISOString() })
         .eq("id", notifId);
 
-      // RN-NT6: el envío se registra como evento del sistema.
       await recordAudit(db as never, {
         tenantId,
         userId:   null,
@@ -374,8 +584,8 @@ export const NotificacionService = {
         userRole: null,
         action:   "CREATE",
         module:   "system",
-        entityId: turno.id,
-        details:  `Recordatorio de turno enviado por ${canal} a ${destino}`,
+        entityId: aviso.referenciaId,
+        details:  aviso.auditDetail,
       });
       return "sent";
     } catch (e) {
@@ -388,16 +598,29 @@ export const NotificacionService = {
     }
   },
 
+  /** RN-PV7: ventana de aviso del tenant (config). Default 7 si faltara la fila. */
+  async _diasAvisoVacuna(tenantId: string): Promise<number> {
+    const db = getServiceDb();
+    const { data: row } = await db
+      .from("configuracion_tenant")
+      .select("dias_aviso_vacuna")
+      .eq("tenant_id", tenantId)
+      .maybeSingle();
+    const v = (row as Record<string, unknown> | null)?.["dias_aviso_vacuna"];
+    return typeof v === "number" ? v : 7;
+  },
+
   /** RN-NT4 (flujo 3a): registra una notificación fallida cuando no hay ningún canal con contacto. */
   async _registrarFallidaSinContacto(
     db: ReturnType<typeof getServiceDb>,
     tenantId: string,
-    turnoId: string,
+    origen: "turno" | "vacunacion",
+    referenciaId: string,
   ): Promise<void> {
     const { error } = await db.from("notificaciones").insert({
       tenant_id:      tenantId,
-      origen:         "turno",
-      referencia_id:  turnoId,
+      origen,
+      referencia_id:  referenciaId,
       canal:          "email",
       estado:         "fallida",
       failure_reason: "El cliente no tiene datos de contacto en ningún canal habilitado",

@@ -208,5 +208,5 @@ plantillas pre-aprobadas y costo por mensaje; es un proyecto en sí mismo, no un
 | 5 — Historial Clínico | Backend ✅ / Frontend pendiente | RN-HC1..HC5, RN-EC1..EC12, RN-EX1..EX5 | — | Backend cerrado: HC/EC/eutanasia transaccional/adjuntos/export PDF+XLSX; RN-EC9 con envío real de resumen por email (reusa canal Etapa 6c). **Frontend pendiente.** |
 | 6 — Turnos | Backend ✅ / Frontend pendiente | RN-TU1..TU10, RN-MC1..MC7, RN-ES1..ES5, RN-NT1..NT6 | — | Backend cerrado: agendar con duración por servicio, transiciones de estado, modificar/cancelar, `NotificacionService` genérico + recordatorios (canal email Resend). **Frontend pendiente.** |
 | 7 — Guardería | Pendiente | — | — | |
-| 8 — Plan de Vacunación | Pendiente | — | — | |
+| 8 — Plan de Vacunación | Backend ✅ / Frontend pendiente | RN-PV1..PV9 | 2026-06-30 | Backend cerrado: plan de dosis (CRUD + marcar aplicada transaccional) y **avisos automáticos** (RN-PV6/PV7) reusando `NotificacionService` (`origen='vacunacion'`); idempotencia por el UNIQUE de `notificaciones`; ventana por-tenant (`diasAvisoVacuna`); endpoint manual `POST /notificaciones/vacunas/procesar` (cron diferido a E9, junto con turnos). Integración bloqueante verde: idempotencia real por UNIQUE, ventana dos tenants, aislamiento. **Frontend pendiente** (pestaña de plan en la ficha de mascota). |
 | 9 — Hardening | Pendiente | — | — | |

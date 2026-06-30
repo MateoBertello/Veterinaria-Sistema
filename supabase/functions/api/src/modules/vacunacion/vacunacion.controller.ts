@@ -1,6 +1,7 @@
 import { Hono, type Context } from "hono";
 import { z } from "zod";
 import { VacunacionService, type CallerContext } from "./vacunacion.service.ts";
+import { NotificacionService } from "../notificaciones/notificaciones.service.ts";
 import {
   ProgramarDosisSchema,
   EditarDosisSchema,
@@ -127,4 +128,25 @@ planVacunacionRouter.patch("/:id/aplicar", manageMedicalHistory, async (c) => {
 
   const dosis = await VacunacionService.marcarDosisAplicada(idParsed.data, parsed.data, callerCtx(c));
   return c.json(ok(dosis), 200);
+});
+
+// ─── /notificaciones/vacunas — disparo de avisos de vacunación (RN-PV6/PV7) ──
+// Módulo vendible 'historial_clinico' + permiso manage_medical_history (RN-PV8).
+
+export const avisosVacunacionRouter = new Hono();
+
+avisosVacunacionRouter.use(
+  "/*",
+  tenantContext,
+  requireActiveTenant,
+  requireModule("historial_clinico"),
+  requirePermission("manage_medical_history"),
+);
+
+// POST /notificaciones/vacunas/procesar — disparo manual "Verificar".
+// Procesa SOLO el tenant del JWT; el cron periódico (E9) barrerá todos los activos.
+avisosVacunacionRouter.post("/procesar", async (c) => {
+  const { tenantId } = getTenantContext(c);
+  const resumen = await NotificacionService.procesarAvisosVacunacion({ tenantId });
+  return c.json(ok(resumen), 200);
 });

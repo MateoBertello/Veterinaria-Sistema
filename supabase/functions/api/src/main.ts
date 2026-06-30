@@ -26,6 +26,7 @@ import { guarderiaRouter } from "./modules/guarderia/guarderia.controller.ts";
 import {
   planVacunacionRouter,
   planVacunacionMascotaRouter,
+  avisosVacunacionRouter,
 } from "./modules/vacunacion/vacunacion.controller.ts";
 
 const app = new Hono().basePath("/api/v1");
@@ -89,6 +90,8 @@ app.route("/estadias", guarderiaRouter);
 // planVacunacionRouter:        rutas planas → /plan-vacunacion/:id
 app.route("/mascotas", planVacunacionMascotaRouter);
 app.route("/plan-vacunacion", planVacunacionRouter);
+// avisosVacunacionRouter: disparo manual de avisos → /notificaciones/vacunas/procesar (RN-PV6/PV7)
+app.route("/notificaciones/vacunas", avisosVacunacionRouter);
 
 // ─── Consola Super Admin (fuera de tenant) ──────────────────────────────────────
 // Montado en /api/v1/admin/tenants; el router NO repite el segmento /tenants.

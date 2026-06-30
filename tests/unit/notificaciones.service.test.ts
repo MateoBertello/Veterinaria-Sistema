@@ -404,11 +404,8 @@ describe("NotificacionService", () => {
     expect(mockRecordAudit.mock.calls[0][1].module).toBe("system");
   });
 
-  // ── Stub del segundo procesador (E8) ──────────────────────────────────────────
-
-  it("procesarAvisosVacunacion es un stub pendiente para la Etapa 8", () => {
-    expect(() => NotificacionService.procesarAvisosVacunacion()).toThrow();
-  });
+  // Avisos de vacunación (procesarAvisosVacunacion) se prueban en
+  // tests/unit/vacunacion-avisos.service.test.ts (RN-PV6/PV7).
 });
 
 /** Helper para construir el shape interno que espera debeNotificar (no usa DB). */
