@@ -23,6 +23,10 @@ import {
 import { turnosRouter } from "./modules/turnos/turnos.controller.ts";
 import { notificacionesRouter } from "./modules/notificaciones/notificaciones.controller.ts";
 import { guarderiaRouter } from "./modules/guarderia/guarderia.controller.ts";
+import {
+  planVacunacionRouter,
+  planVacunacionMascotaRouter,
+} from "./modules/vacunacion/vacunacion.controller.ts";
 
 const app = new Hono().basePath("/api/v1");
 
@@ -79,6 +83,12 @@ app.route("/turnos", turnosRouter);
 
 // ─── Guardería (módulo vendible — Etapa 7) ───────────────────────────────────
 app.route("/estadias", guarderiaRouter);
+
+// ─── Plan de Vacunación (módulo historial_clinico — Etapa 8) ─────────────────
+// planVacunacionMascotaRouter: aditivo en /mascotas → /:petId/plan-vacunacion
+// planVacunacionRouter:        rutas planas → /plan-vacunacion/:id
+app.route("/mascotas", planVacunacionMascotaRouter);
+app.route("/plan-vacunacion", planVacunacionRouter);
 
 // ─── Consola Super Admin (fuera de tenant) ──────────────────────────────────────
 // Montado en /api/v1/admin/tenants; el router NO repite el segmento /tenants.

@@ -35,3 +35,20 @@ export function listarEspecies(): Promise<Especie[]> {
 export function listarRazas(especieId: string): Promise<Raza[]> {
   return postgrest<Raza>(`razas?especie_id=eq.${especieId}&select=id,name,especie_id&order=name`);
 }
+
+export interface TipoVacuna {
+  id:                    string;
+  nombre:                string;
+  especie_aplicable:     string | null;
+  meses_refuerzo_sugerido: number | null;
+}
+
+/** Catálogo global de tipos de vacuna activos (PostgREST directo vía proxy). */
+export function listarTiposVacuna(especieAplicable?: string): Promise<TipoVacuna[]> {
+  const filter = especieAplicable
+    ? `&especie_aplicable=eq.${encodeURIComponent(especieAplicable)}`
+    : "";
+  return postgrest<TipoVacuna>(
+    `tipos_vacuna?select=id,nombre,especie_aplicable,meses_refuerzo_sugerido&active=eq.true${filter}&order=nombre`,
+  );
+}

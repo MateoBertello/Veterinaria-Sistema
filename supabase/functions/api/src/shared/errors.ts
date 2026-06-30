@@ -57,6 +57,7 @@ export enum ErrorCode {
 
   // ── Plan de Vacunación ────────────────────────────────────────────
   VACCINE_TYPE_NOT_FOUND       = "VACCINE_TYPE_NOT_FOUND",
+  VACCINE_PLAN_NOT_FOUND       = "VACCINE_PLAN_NOT_FOUND",
   VACCINE_PLAN_ALREADY_APPLIED = "VACCINE_PLAN_ALREADY_APPLIED",
 
   // ── Horarios ──────────────────────────────────────────────────────
