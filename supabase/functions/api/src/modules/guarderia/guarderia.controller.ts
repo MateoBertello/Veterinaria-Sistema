@@ -1,6 +1,6 @@
 import { Hono, type Context } from "hono";
 import { z } from "zod";
-import { EstadiaService, type CallerContext } from "./guarderia.service.ts";
+import { EstadiaService, type CallerContext, type CheckinResponse, type CheckoutResponse } from "./guarderia.service.ts";
 import {
   CrearEstadiaSchema,
   CupoQuerySchema,
@@ -99,6 +99,33 @@ guarderiaRouter.put("/:id", async (c) => {
 
   const estadia = await EstadiaService.actualizar(idParsed.data, dto, callerCtx(c));
   return c.json(ok(estadia), 200);
+});
+
+// PATCH /estadias/:id/checkin — Check-in de Estadía (RN-CK1, CK2, CK4..CK6).
+// Sin body: el timestamp de ingreso lo pone el RPC server-side.
+guarderiaRouter.patch("/:id/checkin", async (c) => {
+  const id = c.req.param("id");
+  const idParsed = z.string().uuid().safeParse(id);
+  if (!idParsed.success) {
+    throw new DomainError(ErrorCode.VALIDATION_ERROR, 422, "ID de estadía inválido");
+  }
+
+  const result: CheckinResponse = await EstadiaService.checkin(idParsed.data, callerCtx(c));
+  return c.json(ok(result), 200);
+});
+
+// PATCH /estadias/:id/checkout — Check-out de Estadía (RN-CK1, CK3, CK4..CK6).
+// Sin body: el timestamp de egreso lo pone el RPC server-side. El cupo se libera
+// implícitamente al pasar a Finalizada (deja de contar en el cupo de la guardería).
+guarderiaRouter.patch("/:id/checkout", async (c) => {
+  const id = c.req.param("id");
+  const idParsed = z.string().uuid().safeParse(id);
+  if (!idParsed.success) {
+    throw new DomainError(ErrorCode.VALIDATION_ERROR, 422, "ID de estadía inválido");
+  }
+
+  const result: CheckoutResponse = await EstadiaService.checkout(idParsed.data, callerCtx(c));
+  return c.json(ok(result), 200);
 });
 
 // PATCH /estadias/:id/cancelar — Cancelar Estadía (RN-ME1, ME3, ME5-ME6).

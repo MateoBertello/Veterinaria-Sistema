@@ -42,6 +42,20 @@ export interface CancelResponse {
   cancelledAt: string;
 }
 
+/** Respuesta de check-in (RN-CK2). */
+export interface CheckinResponse {
+  id:          string;
+  status:      string;
+  checkedInAt: string;
+}
+
+/** Respuesta de check-out (RN-CK3). */
+export interface CheckoutResponse {
+  id:           string;
+  status:       string;
+  checkedOutAt: string;
+}
+
 /** Ocupación de un día dentro del rango consultado (GET /estadias/cupo). */
 export interface CupoDia {
   date:        string;
@@ -96,6 +110,8 @@ function mapEstadiaRpcError(error: { message?: string }, fallbackMsg = "operaci�
       dias,
     );
   }
+  if (msg.includes("INVALID_TRANSITION"))
+    return new DomainError(ErrorCode.INVALID_TRANSITION, 422, "La transición de estado no es válida para la estadía en su estado actual");
   if (msg.includes("STAY_LOCKED"))
     return new DomainError(ErrorCode.STAY_LOCKED, 422, "La estadía no puede modificarse en su estado actual");
   if (msg.includes("ESTADIA_NOT_FOUND"))
@@ -311,6 +327,89 @@ export class EstadiaService {
       module:    "daycare",
       entityId:  result.id,
       newValues: { status: "Cancelada", cancellationReason: motivo },
+    });
+
+    return result;
+  }
+
+  /**
+   * Check-in de Estadía (RN-CK1, CK2, CK4, CK6).
+   *
+   * Transición válida: Reservada → EnCurso. Cualquier otro estado origen →
+   * INVALID_TRANSITION (422). El RPC `hacer_checkin` valida el estado y registra
+   * checked_in_at de forma atómica (FOR UPDATE sobre la fila de la estadía).
+   */
+  static async checkin(id: string, ctx: CallerContext): Promise<CheckinResponse> {
+    const db = getServiceDb();
+
+    const { data: row, error } = await db
+      .rpc("hacer_checkin", {
+        p_tenant_id:  ctx.tenantId,
+        p_estadia_id: id,
+      })
+      .single();
+
+    if (error) throw mapEstadiaRpcError(error, "check-in de estadía");
+    if (!row) throw new DomainError(ErrorCode.INTERNAL_ERROR, 500, "El RPC de check-in no devolvió resultado");
+
+    const r = row as unknown as Record<string, unknown>;
+    const result: CheckinResponse = {
+      id:          r["id"]            as string,
+      status:      r["status"]        as string,
+      checkedInAt: r["checked_in_at"] as string,
+    };
+
+    await recordAudit(db as never, {
+      tenantId:  ctx.tenantId,
+      userId:    ctx.callerUserId,
+      userName:  ctx.callerName,
+      userRole:  ctx.callerRole,
+      action:    "UPDATE",
+      module:    "daycare",
+      entityId:  result.id,
+      newValues: { status: "EnCurso", checkedInAt: result.checkedInAt },
+    });
+
+    return result;
+  }
+
+  /**
+   * Check-out de Estadía (RN-CK1, CK3, CK4, CK6).
+   *
+   * Transición válida: EnCurso → Finalizada. Cualquier otro estado origen →
+   * INVALID_TRANSITION (422). Al pasar a Finalizada el cupo se libera de forma
+   * implícita: el conteo de cupo filtra solo Reservada/EnCurso. El RPC
+   * `hacer_checkout` valida el estado y registra checked_out_at atómicamente.
+   */
+  static async checkout(id: string, ctx: CallerContext): Promise<CheckoutResponse> {
+    const db = getServiceDb();
+
+    const { data: row, error } = await db
+      .rpc("hacer_checkout", {
+        p_tenant_id:  ctx.tenantId,
+        p_estadia_id: id,
+      })
+      .single();
+
+    if (error) throw mapEstadiaRpcError(error, "check-out de estadía");
+    if (!row) throw new DomainError(ErrorCode.INTERNAL_ERROR, 500, "El RPC de check-out no devolvió resultado");
+
+    const r = row as unknown as Record<string, unknown>;
+    const result: CheckoutResponse = {
+      id:           r["id"]             as string,
+      status:       r["status"]         as string,
+      checkedOutAt: r["checked_out_at"] as string,
+    };
+
+    await recordAudit(db as never, {
+      tenantId:  ctx.tenantId,
+      userId:    ctx.callerUserId,
+      userName:  ctx.callerName,
+      userRole:  ctx.callerRole,
+      action:    "UPDATE",
+      module:    "daycare",
+      entityId:  result.id,
+      newValues: { status: "Finalizada", checkedOutAt: result.checkedOutAt },
     });
 
     return result;

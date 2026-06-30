@@ -594,6 +594,289 @@ describeIntegration("Guardería: STAY_LOCKED — estados terminales y EnCurso (R
   });
 });
 
+// ─── Check-in / Check-out — Ciclo de cupo (el crítico, RN-CK3 × RN-GU4) ─────────
+//
+// Prueba que Finalizada libera el cupo de verdad, cruzando con la guarda de 7a.
+// Flujo: cupo=1 → crear estadía A (ocupa slot) → segunda alta rechazada →
+//        check-in A (sigue ocupando: EnCurso también cuenta) → segunda alta
+//        sigue rechazada → check-out A (Finalizada) → segunda alta AHORA entra.
+
+describeIntegration("Guardería: check-out libera cupo (RN-CK3 × RN-GU4)", () => {
+  it("ciclo completo: crear → check-in → cupo sigue ocupado → check-out → cupo libre → nueva alta entra", async () => {
+    if (skipIfNoCredentials() || !tenantA.jwt) return;
+
+    await setCupo(tenantA.tenantId, 1);
+    const dia = "2027-09-10";
+
+    const petCkA = await crearMascota(tenantA, "CheckCupoA");
+    const petCkB = await crearMascota(tenantA, "CheckCupoB");
+
+    // (1) Crear estadía A: Reservada ocupa el cupo.
+    const idA = await crearEstadiaRpc(tenantA.tenantId, tenantA.clienteId, petCkA, dia, dia);
+    expect(await contarActivasEnDia(tenantA.tenantId, dia)).toBe(1);
+
+    // (2) Segunda alta rechazada: cupo lleno con Reservada.
+    const rAntes = await serviceDb.rpc(
+      "crear_estadia_con_cupo",
+      estadiaRpcParams(tenantA.tenantId, tenantA.clienteId, petCkB, dia, dia),
+    ) as RpcResult;
+    expect(rAntes.error?.message ?? "").toContain("CUPO_GUARDERIA_AGOTADO");
+
+    // (3) Check-in de A: Reservada → EnCurso. Cupo SIGUE ocupado (EnCurso cuenta).
+    const rCheckin = await serviceDb.rpc("hacer_checkin", {
+      p_tenant_id:  tenantA.tenantId,
+      p_estadia_id: idA,
+    }) as RpcResult;
+    expect(rpcReallyRan(rCheckin.error)).toBe(true);
+    expect(esExito(rCheckin)).toBe(true);
+
+    const filaCheckin = (rCheckin.data as Array<{ id: string; status: string; checked_in_at: string }>)[0];
+    expect(filaCheckin.status).toBe("EnCurso");
+    expect(filaCheckin.checked_in_at).toBeTruthy();
+
+    // Cupo sigue ocupado: B sigue sin poder entrar.
+    expect(await contarActivasEnDia(tenantA.tenantId, dia)).toBe(1);
+    const rDurante = await serviceDb.rpc(
+      "crear_estadia_con_cupo",
+      estadiaRpcParams(tenantA.tenantId, tenantA.clienteId, petCkB, dia, dia),
+    ) as RpcResult;
+    expect(rDurante.error?.message ?? "").toContain("CUPO_GUARDERIA_AGOTADO");
+
+    // (4) Check-out de A: EnCurso → Finalizada. Cupo liberado implícitamente.
+    const rCheckout = await serviceDb.rpc("hacer_checkout", {
+      p_tenant_id:  tenantA.tenantId,
+      p_estadia_id: idA,
+    }) as RpcResult;
+    expect(rpcReallyRan(rCheckout.error)).toBe(true);
+    expect(esExito(rCheckout)).toBe(true);
+
+    const filaCheckout = (rCheckout.data as Array<{ id: string; status: string; checked_out_at: string }>)[0];
+    expect(filaCheckout.status).toBe("Finalizada");
+    expect(filaCheckout.checked_out_at).toBeTruthy();
+
+    // Verificar en DB: checked_out_at persistido.
+    const { data: rowDb } = await serviceDb
+      .from("estadias")
+      .select("status, checked_out_at")
+      .eq("id", idA)
+      .single() as { data: { status: string; checked_out_at: string } | null };
+    expect(rowDb?.status).toBe("Finalizada");
+    expect(rowDb?.checked_out_at).toBeTruthy();
+
+    // Finalizada no cuenta en el cupo: contarActivas debe ser 0.
+    expect(await contarActivasEnDia(tenantA.tenantId, dia)).toBe(0);
+
+    // (5) Segunda alta B ahora sí entra.
+    const rDespues = await serviceDb.rpc(
+      "crear_estadia_con_cupo",
+      estadiaRpcParams(tenantA.tenantId, tenantA.clienteId, petCkB, dia, dia),
+    ) as RpcResult;
+    expect(rpcReallyRan(rDespues.error)).toBe(true);
+    expect(esExito(rDespues)).toBe(true);
+    expect(await contarActivasEnDia(tenantA.tenantId, dia)).toBe(1);
+  });
+});
+
+// ─── Check-in / Check-out — Transiciones reales vía RPC (RN-CK1, CK4) ──────────
+
+describeIntegration("Guardería: transiciones check-in y check-out (RN-CK1/CK4)", () => {
+  it("hacer_checkin: Reservada → OK; EnCurso → INVALID_TRANSITION; Finalizada → INVALID_TRANSITION; Cancelada → INVALID_TRANSITION", async () => {
+    if (skipIfNoCredentials() || !tenantA.jwt) return;
+
+    await setCupo(tenantA.tenantId, 10);
+    const dia = "2027-09-15";
+
+    // Reservada → check-in OK.
+    const petTr1 = await crearMascota(tenantA, "TrCheckinOk");
+    const idTr1  = await crearEstadiaRpc(tenantA.tenantId, tenantA.clienteId, petTr1, dia, dia);
+
+    const rOk = await serviceDb.rpc("hacer_checkin", {
+      p_tenant_id: tenantA.tenantId, p_estadia_id: idTr1,
+    }) as RpcResult;
+    expect(rpcReallyRan(rOk.error)).toBe(true);
+    expect(esExito(rOk)).toBe(true);
+    expect((rOk.data as Array<{ status: string }>)[0].status).toBe("EnCurso");
+
+    // EnCurso → check-in rechazado (ya está en curso).
+    const rEnCurso = await serviceDb.rpc("hacer_checkin", {
+      p_tenant_id: tenantA.tenantId, p_estadia_id: idTr1,
+    }) as RpcResult;
+    expect(rEnCurso.error?.message ?? "").toContain("INVALID_TRANSITION");
+
+    // Finalizada → check-in rechazado.
+    const petTr2 = await crearMascota(tenantA, "TrCheckinFin");
+    const idTr2  = await crearEstadiaRpc(tenantA.tenantId, tenantA.clienteId, petTr2, dia, dia);
+    await serviceDb.from("estadias").update({ status: "Finalizada" }).eq("id", idTr2);
+
+    const rFin = await serviceDb.rpc("hacer_checkin", {
+      p_tenant_id: tenantA.tenantId, p_estadia_id: idTr2,
+    }) as RpcResult;
+    expect(rpcReallyRan(rFin.error)).toBe(true);
+    expect(rFin.error?.message ?? "").toContain("INVALID_TRANSITION");
+
+    // Cancelada → check-in rechazado.
+    const petTr3 = await crearMascota(tenantA, "TrCheckinCan");
+    const idTr3  = await crearEstadiaRpc(tenantA.tenantId, tenantA.clienteId, petTr3, dia, dia);
+    await serviceDb.rpc("cancelar_estadia", {
+      p_tenant_id: tenantA.tenantId, p_estadia_id: idTr3, p_cancellation_reason: "Test",
+    });
+
+    const rCan = await serviceDb.rpc("hacer_checkin", {
+      p_tenant_id: tenantA.tenantId, p_estadia_id: idTr3,
+    }) as RpcResult;
+    expect(rpcReallyRan(rCan.error)).toBe(true);
+    expect(rCan.error?.message ?? "").toContain("INVALID_TRANSITION");
+  });
+
+  it("hacer_checkout: EnCurso → OK; Reservada → INVALID_TRANSITION; Finalizada → INVALID_TRANSITION", async () => {
+    if (skipIfNoCredentials() || !tenantA.jwt) return;
+
+    await setCupo(tenantA.tenantId, 10);
+    const dia = "2027-09-20";
+
+    // Reservada → checkout rechazado (no hizo check-in).
+    const petCo1 = await crearMascota(tenantA, "TrCheckoutRes");
+    const idCo1  = await crearEstadiaRpc(tenantA.tenantId, tenantA.clienteId, petCo1, dia, dia);
+
+    const rRes = await serviceDb.rpc("hacer_checkout", {
+      p_tenant_id: tenantA.tenantId, p_estadia_id: idCo1,
+    }) as RpcResult;
+    expect(rpcReallyRan(rRes.error)).toBe(true);
+    expect(rRes.error?.message ?? "").toContain("INVALID_TRANSITION");
+
+    // EnCurso → checkout OK.
+    await serviceDb.rpc("hacer_checkin", {
+      p_tenant_id: tenantA.tenantId, p_estadia_id: idCo1,
+    });
+
+    const rOk = await serviceDb.rpc("hacer_checkout", {
+      p_tenant_id: tenantA.tenantId, p_estadia_id: idCo1,
+    }) as RpcResult;
+    expect(rpcReallyRan(rOk.error)).toBe(true);
+    expect(esExito(rOk)).toBe(true);
+    expect((rOk.data as Array<{ status: string }>)[0].status).toBe("Finalizada");
+
+    // Finalizada → checkout rechazado (ya finalizada).
+    const rFin = await serviceDb.rpc("hacer_checkout", {
+      p_tenant_id: tenantA.tenantId, p_estadia_id: idCo1,
+    }) as RpcResult;
+    expect(rpcReallyRan(rFin.error)).toBe(true);
+    expect(rFin.error?.message ?? "").toContain("INVALID_TRANSITION");
+  });
+});
+
+// ─── Check-in / Check-out — Aislamiento de tenant (bloqueante) ───────────────────
+
+describeIntegration("Guardería: aislamiento tenant en check-in/out (bloqueante)", () => {
+  it("B no puede hacer check-in sobre estadía de A vía RPC (p_tenant_id de B → ESTADIA_NOT_FOUND)", async () => {
+    if (skipIfNoCredentials() || !tenantA.jwt || !tenantB.jwt) return;
+
+    await setCupo(tenantA.tenantId, 10);
+    const dia   = "2027-09-25";
+    const petDeA = await crearMascota(tenantA, "CheckinAisladoA");
+    const idDeA  = await crearEstadiaRpc(tenantA.tenantId, tenantA.clienteId, petDeA, dia, dia);
+
+    const rCheckin = await serviceDb.rpc("hacer_checkin", {
+      p_tenant_id:  tenantB.tenantId,
+      p_estadia_id: idDeA,
+    }) as RpcResult;
+    expect(rCheckin.error).toBeTruthy();
+    expect(rpcReallyRan(rCheckin.error)).toBe(true);
+    expect(rCheckin.error?.message ?? "").toContain("ESTADIA_NOT_FOUND");
+
+    // La estadía de A sigue en Reservada.
+    const { data: rowDb } = await serviceDb
+      .from("estadias").select("status").eq("id", idDeA).single() as {
+        data: { status: string } | null;
+      };
+    expect(rowDb?.status).toBe("Reservada");
+  });
+
+  it("B no puede hacer check-out sobre estadía de A vía RPC (p_tenant_id de B → ESTADIA_NOT_FOUND)", async () => {
+    if (skipIfNoCredentials() || !tenantA.jwt || !tenantB.jwt) return;
+
+    await setCupo(tenantA.tenantId, 10);
+    const dia   = "2027-09-26";
+    const petDeA = await crearMascota(tenantA, "CheckoutAisladoA");
+    const idDeA  = await crearEstadiaRpc(tenantA.tenantId, tenantA.clienteId, petDeA, dia, dia);
+    await serviceDb.rpc("hacer_checkin", {
+      p_tenant_id: tenantA.tenantId, p_estadia_id: idDeA,
+    });
+
+    const rCheckout = await serviceDb.rpc("hacer_checkout", {
+      p_tenant_id:  tenantB.tenantId,
+      p_estadia_id: idDeA,
+    }) as RpcResult;
+    expect(rCheckout.error).toBeTruthy();
+    expect(rpcReallyRan(rCheckout.error)).toBe(true);
+    expect(rCheckout.error?.message ?? "").toContain("ESTADIA_NOT_FOUND");
+
+    // La estadía de A sigue EnCurso (no fue alterada por B).
+    const { data: rowDb } = await serviceDb
+      .from("estadias").select("status").eq("id", idDeA).single() as {
+        data: { status: string } | null;
+      };
+    expect(rowDb?.status).toBe("EnCurso");
+  });
+
+  it("B no puede hacer check-in/out vía HTTP con JWT de B sobre estadía de A → 404 ESTADIA_NOT_FOUND", async () => {
+    if (skipIfNoCredentials() || !tenantA.jwt || !tenantB.jwt) return;
+
+    await setCupo(tenantA.tenantId, 10);
+    const dia   = "2027-09-27";
+    const petDeA = await crearMascota(tenantA, "CheckHttpAisladoA");
+    const idDeA  = await crearEstadiaRpc(tenantA.tenantId, tenantA.clienteId, petDeA, dia, dia);
+
+    // check-in con JWT de B.
+    const resCheckin = await callApp(`/estadias/${idDeA}/checkin`, {
+      method: "PATCH", jwt: tenantB.jwt,
+    });
+    const bodyCheckin = await resCheckin.json() as { error: { code: string } };
+    expect(resCheckin.status).toBe(404);
+    expect(bodyCheckin.error.code).toBe("ESTADIA_NOT_FOUND");
+
+    // La estadía de A sigue Reservada (B no pudo hacer check-in).
+    // Hacemos check-in legítimo con JWT de A para probar el check-out cross-tenant.
+    await callApp(`/estadias/${idDeA}/checkin`, { method: "PATCH", jwt: tenantA.jwt });
+
+    // check-out con JWT de B.
+    const resCheckout = await callApp(`/estadias/${idDeA}/checkout`, {
+      method: "PATCH", jwt: tenantB.jwt,
+    });
+    const bodyCheckout = await resCheckout.json() as { error: { code: string } };
+    expect(resCheckout.status).toBe(404);
+    expect(bodyCheckout.error.code).toBe("ESTADIA_NOT_FOUND");
+
+    // La estadía de A sigue EnCurso (B no pudo hacer check-out).
+    const { data: rowDb } = await serviceDb
+      .from("estadias").select("status").eq("id", idDeA).single() as {
+        data: { status: string } | null;
+      };
+    expect(rowDb?.status).toBe("EnCurso");
+  });
+});
+
+// ─── Endurecimiento de EXECUTE para hacer_checkin/checkout (REVOKE FROM PUBLIC) ────
+
+describeIntegration("Guardería: endurecimiento de RPCs hacer_checkin y hacer_checkout (anon no puede ejecutarlos)", () => {
+  it("anon no puede invocar hacer_checkin ni hacer_checkout (EXECUTE revocado de PUBLIC)", async () => {
+    if (skipIfNoCredentials() || !tenantA.jwt) return;
+
+    const anonDb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth: { persistSession: false } });
+    const fakeId = "00000000-0000-4000-8000-000000000002";
+
+    const { error: errCheckin } = await anonDb.rpc("hacer_checkin", {
+      p_tenant_id: tenantA.tenantId, p_estadia_id: fakeId,
+    }) as RpcResult;
+    expect(errCheckin?.message ?? "").toMatch(/permission denied/i);
+
+    const { error: errCheckout } = await anonDb.rpc("hacer_checkout", {
+      p_tenant_id: tenantA.tenantId, p_estadia_id: fakeId,
+    }) as RpcResult;
+    expect(errCheckout?.message ?? "").toMatch(/permission denied/i);
+  });
+});
+
 // ─── Aislamiento de tenant en modificar / cancelar (bloqueante) ──────────────────
 
 describeIntegration("Guardería: aislamiento tenant en modificar/cancelar (bloqueante)", () => {

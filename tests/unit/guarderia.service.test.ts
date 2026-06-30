@@ -392,6 +392,168 @@ describe("EstadiaService.cancelar", () => {
   });
 });
 
+// ─── checkin ──────────────────────────────────────────────────────────────────
+
+describe("EstadiaService.checkin", () => {
+  beforeEach(() => { vi.clearAllMocks(); });
+
+  const checkinRow = {
+    id:            ESTADIA_ID,
+    status:        "EnCurso",
+    checked_in_at: "2026-06-30T10:00:00Z",
+  };
+
+  // ── RN-CK1 ──────────────────────────────────────────────────────────────────
+
+  it("RN-CK1: Reservada → EnCurso (éxito) — RPC retorna id, status y checked_in_at", async () => {
+    mockGetServiceDb.mockReturnValue(buildDb({ rpcData: checkinRow }) as never);
+
+    const result = await EstadiaService.checkin(ESTADIA_ID, ctx);
+
+    expect(result).toMatchObject({
+      id:          ESTADIA_ID,
+      status:      "EnCurso",
+      checkedInAt: checkinRow.checked_in_at,
+    });
+  });
+
+  it("RN-CK1: EnCurso → INVALID_TRANSITION (422) — ya está en curso", async () => {
+    mockGetServiceDb.mockReturnValue(
+      buildDb({ rpcError: { message: "INVALID_TRANSITION" } }) as never,
+    );
+    await expect(
+      EstadiaService.checkin(ESTADIA_ID, ctx),
+    ).rejects.toMatchObject({ code: ErrorCode.INVALID_TRANSITION, statusCode: 422 });
+  });
+
+  // ── RN-CK4 ──────────────────────────────────────────────────────────────────
+
+  it("RN-CK4: Finalizada → INVALID_TRANSITION (422) — estado terminal", async () => {
+    mockGetServiceDb.mockReturnValue(
+      buildDb({ rpcError: { message: "INVALID_TRANSITION" } }) as never,
+    );
+    await expect(
+      EstadiaService.checkin(ESTADIA_ID, ctx),
+    ).rejects.toMatchObject({ code: ErrorCode.INVALID_TRANSITION, statusCode: 422 });
+  });
+
+  it("RN-CK4: Cancelada → INVALID_TRANSITION (422) — estado terminal", async () => {
+    mockGetServiceDb.mockReturnValue(
+      buildDb({ rpcError: { message: "INVALID_TRANSITION" } }) as never,
+    );
+    await expect(
+      EstadiaService.checkin(ESTADIA_ID, ctx),
+    ).rejects.toMatchObject({ code: ErrorCode.INVALID_TRANSITION, statusCode: 422 });
+  });
+
+  // ── RN-CK2 ──────────────────────────────────────────────────────────────────
+
+  it("RN-CK2: checked_in_at presente en la respuesta tras check-in exitoso", async () => {
+    mockGetServiceDb.mockReturnValue(buildDb({ rpcData: checkinRow }) as never);
+
+    const result = await EstadiaService.checkin(ESTADIA_ID, ctx);
+
+    expect(result.checkedInAt).toBe(checkinRow.checked_in_at);
+  });
+
+  // ── RN-CK6 ──────────────────────────────────────────────────────────────────
+
+  it("RN-CK6: éxito → auditoría UPDATE módulo daycare con status EnCurso", async () => {
+    mockGetServiceDb.mockReturnValue(buildDb({ rpcData: checkinRow }) as never);
+
+    await EstadiaService.checkin(ESTADIA_ID, ctx);
+
+    expect(mockRecordAudit).toHaveBeenCalledTimes(1);
+    expect(mockRecordAudit).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        action:    "UPDATE",
+        module:    "daycare",
+        entityId:  ESTADIA_ID,
+        tenantId:  TENANT_ID,
+        newValues: expect.objectContaining({ status: "EnCurso" }),
+      }),
+    );
+  });
+});
+
+// ─── checkout ─────────────────────────────────────────────────────────────────
+
+describe("EstadiaService.checkout", () => {
+  beforeEach(() => { vi.clearAllMocks(); });
+
+  const checkoutRow = {
+    id:             ESTADIA_ID,
+    status:         "Finalizada",
+    checked_out_at: "2026-06-30T18:00:00Z",
+  };
+
+  // ── RN-CK1 ──────────────────────────────────────────────────────────────────
+
+  it("RN-CK1: EnCurso → Finalizada (éxito) — RPC retorna id, status y checked_out_at", async () => {
+    mockGetServiceDb.mockReturnValue(buildDb({ rpcData: checkoutRow }) as never);
+
+    const result = await EstadiaService.checkout(ESTADIA_ID, ctx);
+
+    expect(result).toMatchObject({
+      id:           ESTADIA_ID,
+      status:       "Finalizada",
+      checkedOutAt: checkoutRow.checked_out_at,
+    });
+  });
+
+  it("RN-CK1: Reservada → INVALID_TRANSITION (422) — no hizo check-in", async () => {
+    mockGetServiceDb.mockReturnValue(
+      buildDb({ rpcError: { message: "INVALID_TRANSITION" } }) as never,
+    );
+    await expect(
+      EstadiaService.checkout(ESTADIA_ID, ctx),
+    ).rejects.toMatchObject({ code: ErrorCode.INVALID_TRANSITION, statusCode: 422 });
+  });
+
+  // ── RN-CK4 ──────────────────────────────────────────────────────────────────
+
+  it("RN-CK4: Finalizada → INVALID_TRANSITION (422) — ya está finalizada", async () => {
+    mockGetServiceDb.mockReturnValue(
+      buildDb({ rpcError: { message: "INVALID_TRANSITION" } }) as never,
+    );
+    await expect(
+      EstadiaService.checkout(ESTADIA_ID, ctx),
+    ).rejects.toMatchObject({ code: ErrorCode.INVALID_TRANSITION, statusCode: 422 });
+  });
+
+  // ── RN-CK3 ──────────────────────────────────────────────────────────────────
+
+  it("RN-CK3: checked_out_at presente en la respuesta — cupo liberado implícitamente (Finalizada queda fuera del conteo)", async () => {
+    mockGetServiceDb.mockReturnValue(buildDb({ rpcData: checkoutRow }) as never);
+
+    const result = await EstadiaService.checkout(ESTADIA_ID, ctx);
+
+    expect(result.checkedOutAt).toBe(checkoutRow.checked_out_at);
+    expect(result.status).toBe("Finalizada");
+  });
+
+  // ── RN-CK6 ──────────────────────────────────────────────────────────────────
+
+  it("RN-CK6: éxito → auditoría UPDATE módulo daycare con status Finalizada", async () => {
+    mockGetServiceDb.mockReturnValue(buildDb({ rpcData: checkoutRow }) as never);
+
+    await EstadiaService.checkout(ESTADIA_ID, ctx);
+
+    expect(mockRecordAudit).toHaveBeenCalledTimes(1);
+    expect(mockRecordAudit).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        action:    "UPDATE",
+        module:    "daycare",
+        entityId:  ESTADIA_ID,
+        tenantId:  TENANT_ID,
+        newValues: expect.objectContaining({ status: "Finalizada" }),
+      }),
+    );
+  });
+});
+
 describe("EstadiaService.cupo", () => {
   beforeEach(() => {
     vi.clearAllMocks();
