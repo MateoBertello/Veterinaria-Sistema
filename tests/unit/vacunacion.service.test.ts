@@ -25,6 +25,8 @@ const PET_ID      = "22222222-2222-4222-8222-222222222222";
 const DOSIS_ID    = "33333333-3333-4333-8333-333333333333";
 const TIPO_VAC_ID = "44444444-4444-4444-8444-444444444444";
 const USER_ID     = "55555555-5555-4555-8555-555555555555";
+const PROF_ID     = "66666666-6666-4666-8666-666666666666";
+const EVENT_ID    = "77777777-7777-4777-8777-777777777777";
 
 const ctx = {
   tenantId:     TENANT_ID,
@@ -88,7 +90,9 @@ function buildMockDb(opts: MockOpts = {}) {
     opts.rangeResult ?? { data: [], error: null, count: 0 },
   );
 
-  return { from: vi.fn(() => builder), builder };
+  // .rpc(name, params) devuelve el builder; .single() consume de la misma cola.
+  const rpc = vi.fn(chain);
+  return { from: vi.fn(() => builder), rpc, builder };
 }
 
 beforeEach(() => vi.clearAllMocks());
@@ -411,5 +415,124 @@ describe("VacunacionService.cancelarDosis", () => {
 
     const result = await VacunacionService.cancelarDosis(DOSIS_ID, undefined, ctx);
     expect(result).toEqual({ id: DOSIS_ID, estado: "Cancelada" });
+  });
+});
+
+// ─── marcarDosisAplicada ──────────────────────────────────────────────────────
+// La transacción plan+evento ocurre dentro del RPC marcar_dosis_aplicada (atómica,
+// como la eutanasia). El Service sólo orquesta: valida fecha, invoca el RPC, mapea
+// sus errores y relee la dosis para devolver el DTO. Las guardas RN-PV5/PET_DECEASED
+// y la atomicidad/rollback se prueban en integración (SQL real).
+
+describe("VacunacionService.marcarDosisAplicada", () => {
+  const dtoValido = { professionalId: PROF_ID };
+
+  // Cola: [resultado RPC, relectura de la dosis]
+  function buildAplicarOkDb() {
+    const aplicada = dosisRow({
+      estado:               "Aplicada",
+      evento_aplicacion_id: EVENT_ID,
+      fecha_estimada:       ymd(-1),
+      tipo:                 { nombre: "Antirrábica" },
+    });
+    return buildMockDb({
+      singleResults: [
+        { data: { event_id: EVENT_ID, dosis_id: DOSIS_ID }, error: null }, // RPC
+        { data: aplicada, error: null },                                    // read-back
+      ],
+    });
+  }
+
+  it("RN-PV5: dosis no Pendiente (RPC) → VACCINE_PLAN_ALREADY_APPLIED (422)", async () => {
+    const db = buildMockDb({
+      singleResults: [{ data: null, error: { message: "VACCINE_PLAN_ALREADY_APPLIED" } }],
+    });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    await expect(
+      VacunacionService.marcarDosisAplicada(DOSIS_ID, dtoValido, ctx),
+    ).rejects.toMatchObject({ code: ErrorCode.VACCINE_PLAN_ALREADY_APPLIED, statusCode: 422 });
+  });
+
+  it("dosis inexistente (RPC) → VACCINE_PLAN_NOT_FOUND (404)", async () => {
+    const db = buildMockDb({
+      singleResults: [{ data: null, error: { message: "VACCINE_PLAN_NOT_FOUND" } }],
+    });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    await expect(
+      VacunacionService.marcarDosisAplicada(DOSIS_ID, dtoValido, ctx),
+    ).rejects.toMatchObject({ code: ErrorCode.VACCINE_PLAN_NOT_FOUND, statusCode: 404 });
+  });
+
+  it("mascota Fallecida (RPC) → PET_DECEASED (422)", async () => {
+    const db = buildMockDb({
+      singleResults: [{ data: null, error: { message: "PET_DECEASED" } }],
+    });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    await expect(
+      VacunacionService.marcarDosisAplicada(DOSIS_ID, dtoValido, ctx),
+    ).rejects.toMatchObject({ code: ErrorCode.PET_DECEASED, statusCode: 422 });
+  });
+
+  it("profesional ajeno al tenant (RPC) → FORBIDDEN (403)", async () => {
+    const db = buildMockDb({
+      singleResults: [{ data: null, error: { message: "FORBIDDEN" } }],
+    });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    await expect(
+      VacunacionService.marcarDosisAplicada(DOSIS_ID, dtoValido, ctx),
+    ).rejects.toMatchObject({ code: ErrorCode.FORBIDDEN, statusCode: 403 });
+  });
+
+  it("date futura → VALIDATION_ERROR (422) sin invocar el RPC", async () => {
+    const db = buildMockDb();
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    await expect(
+      VacunacionService.marcarDosisAplicada(DOSIS_ID, { ...dtoValido, date: ymd(1) }, ctx),
+    ).rejects.toMatchObject({ code: ErrorCode.VALIDATION_ERROR, statusCode: 422 });
+    expect(db.rpc).not.toHaveBeenCalled();
+  });
+
+  it("éxito → invoca el RPC con tenant del JWT, dosis, ejecutor, profesional y fecha (default hoy)", async () => {
+    const db = buildAplicarOkDb();
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    await VacunacionService.marcarDosisAplicada(DOSIS_ID, dtoValido, ctx);
+
+    expect(db.rpc).toHaveBeenCalledWith(
+      "marcar_dosis_aplicada",
+      expect.objectContaining({
+        p_tenant_id:       TENANT_ID,
+        p_dosis_id:        DOSIS_ID,
+        p_user_id:         USER_ID,
+        p_professional_id: PROF_ID,
+        p_date:            ymd(0),
+      }),
+    );
+  });
+
+  it("éxito → DosisPublica con estado=Aplicada, estadoVisual=Aplicada y evento enlazado", async () => {
+    const db = buildAplicarOkDb();
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    const dosis = await VacunacionService.marcarDosisAplicada(DOSIS_ID, dtoValido, ctx);
+
+    expect(dosis.estado).toBe("Aplicada");
+    expect(dosis.estadoVisual).toBe("Aplicada");
+    expect(dosis.eventoAplicacionId).toBe(EVENT_ID);
+    expect(dosis.tipoVacunaNombre).toBe("Antirrábica");
+  });
+
+  it("auditoría atómica en el RPC → el Service NO llama recordAudit", async () => {
+    const db = buildAplicarOkDb();
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    await VacunacionService.marcarDosisAplicada(DOSIS_ID, dtoValido, ctx);
+
+    expect(mockRecordAudit).not.toHaveBeenCalled();
   });
 });

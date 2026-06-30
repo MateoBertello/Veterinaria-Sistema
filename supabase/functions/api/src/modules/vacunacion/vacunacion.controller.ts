@@ -5,6 +5,7 @@ import {
   ProgramarDosisSchema,
   EditarDosisSchema,
   CancelarDosisSchema,
+  MarcarAplicadaSchema,
   ListarDosisQuerySchema,
 } from "./vacunacion.schemas.ts";
 import { DomainError, ErrorCode } from "../../shared/errors.ts";
@@ -109,4 +110,21 @@ planVacunacionRouter.patch("/:id/cancelar", manageMedicalHistory, async (c) => {
 
   const result = await VacunacionService.cancelarDosis(idParsed.data, parsed.data.notas, callerCtx(c));
   return c.json(ok(result), 200);
+});
+
+// PATCH /plan-vacunacion/:id/aplicar — Marcar dosis Aplicada (transacción plan+evento; RN-PV5, PV8, PV9)
+planVacunacionRouter.patch("/:id/aplicar", manageMedicalHistory, async (c) => {
+  const id = c.req.param("id");
+  const idParsed = z.string().uuid().safeParse(id);
+  if (!idParsed.success) {
+    throw new DomainError(ErrorCode.VALIDATION_ERROR, 422, "ID de dosis inválido");
+  }
+
+  const parsed = MarcarAplicadaSchema.safeParse(await c.req.json().catch(() => ({})));
+  if (!parsed.success) {
+    throw new DomainError(ErrorCode.VALIDATION_ERROR, 422, "Datos de aplicación inválidos", parsed.error.issues);
+  }
+
+  const dosis = await VacunacionService.marcarDosisAplicada(idParsed.data, parsed.data, callerCtx(c));
+  return c.json(ok(dosis), 200);
 });

@@ -167,6 +167,27 @@ async function getEstadoDosis(dosisId: string): Promise<string> {
   return (data as { estado: string }).estado;
 }
 
+async function getDosis(dosisId: string): Promise<{ estado: string; evento_aplicacion_id: string | null }> {
+  const { data } = await serviceDb
+    .from("plan_vacunacion").select("estado, evento_aplicacion_id").eq("id", dosisId).single();
+  return data as { estado: string; evento_aplicacion_id: string | null };
+}
+
+/** Eventos clínicos 'Vacunación' de una mascota (para verificar atomicidad). */
+async function getEventosVacunacion(petId: string): Promise<{ id: string }[]> {
+  const { data } = await serviceDb
+    .from("historial_clinico").select("id").eq("pet_id", petId).eq("event_type", "Vacunación");
+  return (data ?? []) as { id: string }[];
+}
+
+/** Asientos de auditoría UPDATE sobre una dosis (entity_id = dosisId). */
+async function getAuditoriaDosis(dosisId: string): Promise<{ action: string; user_id: string }[]> {
+  const { data } = await serviceDb
+    .from("registros_auditoria").select("action, user_id")
+    .eq("entity_id", dosisId).eq("module", "medical_records").eq("action", "UPDATE");
+  return (data ?? []) as { action: string; user_id: string }[];
+}
+
 function futureDate(offsetDays = 30): string {
   const d = new Date();
   d.setUTCDate(d.getUTCDate() + offsetDays);
@@ -329,6 +350,147 @@ describeIntegration("Vacunación ↔ Eutanasia: cruce RN-PV4 (dos caras)", () =>
 
     expect(res2.status).toBe(422);
     expect(body2.error.code).toBe("VACCINE_PLAN_ALREADY_APPLIED");
+  });
+});
+
+// ─── Candado 3: marcar dosis Aplicada (transacción plan+evento, atómica) ─────
+
+describeIntegration("Vacunación: marcar dosis Aplicada (transacción plan+evento)", () => {
+  /**
+   * Marcar Aplicada es transaccional como la eutanasia: o quedan la dosis Aplicada
+   * Y el evento clínico 'Vacunación' enlazado (con su asiento de auditoría), o
+   * ninguna de las tres cosas. Lo garantiza el RPC marcar_dosis_aplicada.
+   */
+
+  it("happy path: dosis Aplicada + evento 'Vacunación' enlazado + auditoría, todo atómico", async () => {
+    if (skipIfNoCredentials() || !tenantA.jwt) return;
+
+    const petId   = await crearMascota(tenantA.jwt, tenantA.clienteId, "AplicarOK");
+    const dosisId = await seedDosis(tenantA.tenantId, petId);
+    expect(await getEstadoDosis(dosisId)).toBe("Pendiente");
+
+    const res = await callApp(`/plan-vacunacion/${dosisId}/aplicar`, {
+      method: "PATCH", jwt: tenantA.jwt,
+      body: { professionalId: tenantA.userId, weightKg: 12.5, temperatureC: 38.5, notes: "Sin reacción adversa" },
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json() as { data: { estado: string; estadoVisual: string; eventoAplicacionId: string } };
+    expect(body.data.estado).toBe("Aplicada");
+    expect(body.data.estadoVisual).toBe("Aplicada");
+    expect(body.data.eventoAplicacionId).toBeTruthy();
+
+    // (a) La dosis quedó Aplicada y enlazada al evento.
+    const dosis = await getDosis(dosisId);
+    expect(dosis.estado).toBe("Aplicada");
+    expect(dosis.evento_aplicacion_id).toBe(body.data.eventoAplicacionId);
+
+    // (b) Existe exactamente un evento clínico 'Vacunación' y es el enlazado.
+    const eventos = await getEventosVacunacion(petId);
+    expect(eventos).toHaveLength(1);
+    expect(eventos[0].id).toBe(body.data.eventoAplicacionId);
+
+    // (c) Asiento de auditoría atómico, con el usuario que ejecutó.
+    const asientos = await getAuditoriaDosis(dosisId);
+    expect(asientos).toHaveLength(1);
+    expect(asientos[0].action).toBe("UPDATE");
+    expect(asientos[0].user_id).toBe(tenantA.userId);
+  });
+
+  it("RN-PV5: aplicar una dosis ya Aplicada → 422 VACCINE_PLAN_ALREADY_APPLIED", async () => {
+    if (skipIfNoCredentials() || !tenantA.jwt) return;
+
+    const petId   = await crearMascota(tenantA.jwt, tenantA.clienteId, "AplicarDosVeces");
+    const dosisId = await seedDosis(tenantA.tenantId, petId);
+
+    const res1 = await callApp(`/plan-vacunacion/${dosisId}/aplicar`, {
+      method: "PATCH", jwt: tenantA.jwt, body: { professionalId: tenantA.userId },
+    });
+    expect(res1.status).toBe(200);
+
+    const res2 = await callApp(`/plan-vacunacion/${dosisId}/aplicar`, {
+      method: "PATCH", jwt: tenantA.jwt, body: { professionalId: tenantA.userId },
+    });
+    const body2 = await res2.json() as { error: { code: string } };
+    expect(res2.status).toBe(422);
+    expect(body2.error.code).toBe("VACCINE_PLAN_ALREADY_APPLIED");
+  });
+
+  it("rollback atómico: si falla el INSERT del evento, la dosis NO queda Aplicada (ni evento ni auditoría)", async () => {
+    if (skipIfNoCredentials() || !tenantA.jwt) return;
+
+    const petId   = await crearMascota(tenantA.jwt, tenantA.clienteId, "AplicarRollback");
+    const dosisId = await seedDosis(tenantA.tenantId, petId);
+
+    // Falla determinista: weight_kg fuera del CHECK (BETWEEN 0 AND 200) del evento.
+    // El INSERT en historial_clinico (paso 1) revienta → toda la transacción rollbackea.
+    const { error } = await serviceDb.rpc("marcar_dosis_aplicada", {
+      p_tenant_id:       tenantA.tenantId,
+      p_dosis_id:        dosisId,
+      p_professional_id: tenantA.userId,
+      p_user_id:         tenantA.userId,
+      p_date:            "2026-06-30",
+      p_weight_kg:       9999,
+    });
+
+    // El RPC falló (y no por "función no encontrada" → evita un falso verde).
+    expect(error).toBeTruthy();
+    expect(error?.message ?? "").not.toMatch(/could not find|schema cache/i);
+
+    // (a) La dosis sigue Pendiente y sin evento enlazado.
+    const dosis = await getDosis(dosisId);
+    expect(dosis.estado).toBe("Pendiente");
+    expect(dosis.evento_aplicacion_id).toBeNull();
+
+    // (b) No quedó ningún evento 'Vacunación'.
+    expect(await getEventosVacunacion(petId)).toHaveLength(0);
+
+    // (c) No quedó asiento de auditoría (atómico con la operación).
+    expect(await getAuditoriaDosis(dosisId)).toHaveLength(0);
+  });
+
+  it("cruce RN-PV4: una dosis cancelada por eutanasia NO puede marcarse Aplicada → 422", async () => {
+    if (skipIfNoCredentials() || !tenantA.jwt) return;
+
+    const petId   = await crearMascota(tenantA.jwt, tenantA.clienteId, "AplicarTrasEutanasia");
+    const dosisId = await seedDosis(tenantA.tenantId, petId);
+
+    // Eutanasia (Etapa 5): cancela la dosis Pendiente vía RN-PV4.
+    const resEut = await callApp(`/mascotas/${petId}/eutanasia`, {
+      method: "POST", jwt: tenantA.jwt,
+      body: { date: "2026-07-04", professionalId: tenantA.userId, description: "Cruce aplicar↔eutanasia", euthanasiaConfirmed: true },
+    });
+    expect(resEut.status).toBe(201);
+    expect(await getEstadoDosis(dosisId)).toBe("Cancelada");
+
+    // Intentar aplicar la dosis ya Cancelada → rechazado por RN-PV5.
+    const res = await callApp(`/plan-vacunacion/${dosisId}/aplicar`, {
+      method: "PATCH", jwt: tenantA.jwt, body: { professionalId: tenantA.userId },
+    });
+    const body = await res.json() as { error: { code: string } };
+    expect(res.status).toBe(422);
+    expect(body.error.code).toBe("VACCINE_PLAN_ALREADY_APPLIED");
+
+    // La dosis sigue Cancelada (no se volteó a Aplicada).
+    expect(await getEstadoDosis(dosisId)).toBe("Cancelada");
+  });
+
+  it("aislamiento: B no puede aplicar una dosis de A → 404 VACCINE_PLAN_NOT_FOUND, dosis de A intacta", async () => {
+    if (skipIfNoCredentials() || !tenantA.jwt || !tenantB.jwt) return;
+
+    const petId   = await crearMascota(tenantA.jwt, tenantA.clienteId, "AplicarAjena");
+    const dosisId = await seedDosis(tenantA.tenantId, petId);
+
+    const res = await callApp(`/plan-vacunacion/${dosisId}/aplicar`, {
+      method: "PATCH", jwt: tenantB.jwt, body: { professionalId: tenantB.userId },
+    });
+    const body = await res.json() as { error: { code: string } };
+    expect(res.status).toBe(404);
+    expect(body.error.code).toBe("VACCINE_PLAN_NOT_FOUND");
+
+    // La dosis de A quedó intacta.
+    const dosis = await getDosis(dosisId);
+    expect(dosis.estado).toBe("Pendiente");
+    expect(dosis.evento_aplicacion_id).toBeNull();
   });
 });
 

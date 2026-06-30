@@ -1,7 +1,7 @@
 import { DomainError, ErrorCode } from "../../shared/errors.ts";
 import { recordAudit } from "../../shared/audit.ts";
 import { getServiceDb } from "../../shared/db.ts";
-import type { ProgramarDosisDto, EditarDosisDto } from "./vacunacion.schemas.ts";
+import type { ProgramarDosisDto, EditarDosisDto, MarcarAplicadaDto } from "./vacunacion.schemas.ts";
 
 // ─── DTOs públicos ────────────────────────────────────────────────────────────
 
@@ -45,6 +45,22 @@ function deriveEstadoVisual(
   if (estado === "Aplicada")  return "Aplicada";
   if (estado === "Cancelada") return "Cancelada";
   return fechaEstimada >= today() ? "Proxima" : "Vencida";
+}
+
+/** Mapea las RAISE EXCEPTION del RPC marcar_dosis_aplicada a DomainError tipado. */
+function mapAplicarRpcError(error: { message?: string }): DomainError {
+  const msg = error.message ?? "";
+  if (msg.includes("VACCINE_PLAN_NOT_FOUND"))
+    return new DomainError(ErrorCode.VACCINE_PLAN_NOT_FOUND, 404, "Dosis no encontrada");
+  if (msg.includes("VACCINE_PLAN_ALREADY_APPLIED"))
+    return new DomainError(ErrorCode.VACCINE_PLAN_ALREADY_APPLIED, 422, "Solo se pueden aplicar dosis en estado Pendiente");
+  if (msg.includes("PET_DECEASED"))
+    return new DomainError(ErrorCode.PET_DECEASED, 422, "No se pueden aplicar dosis a una mascota fallecida");
+  if (msg.includes("FORBIDDEN"))
+    return new DomainError(ErrorCode.FORBIDDEN, 403, "El profesional no pertenece a este tenant");
+  if (msg.includes("MASCOTA_NOT_FOUND"))
+    return new DomainError(ErrorCode.MASCOTA_NOT_FOUND, 404, "Mascota no encontrada en este tenant");
+  return new DomainError(ErrorCode.INTERNAL_ERROR, 500, `No se pudo marcar la dosis como aplicada: ${msg}`);
 }
 
 // deno-lint-ignore no-explicit-any
@@ -316,5 +332,59 @@ export class VacunacionService {
 
     // deno-lint-ignore no-explicit-any
     return { id: (row as any).id, estado: "Cancelada" };
+  }
+
+  /**
+   * Marcar una dosis Pendiente como Aplicada (RN-PV5, RN-PV9). Transacción
+   * plan+evento ATÓMICA dentro del RPC marcar_dosis_aplicada (igual que la
+   * eutanasia): crea el evento clínico 'Vacunación', enlaza la dosis y asienta
+   * la auditoría en una sola transacción. El Service sólo orquesta y mapea.
+   * Guardas en el RPC: VACCINE_PLAN_NOT_FOUND → ALREADY_APPLIED → PET_DECEASED → FORBIDDEN.
+   */
+  static async marcarDosisAplicada(
+    id:  string,
+    dto: MarcarAplicadaDto,
+    ctx: CallerContext,
+  ): Promise<DosisPublica> {
+    const fecha = dto.date ?? today();
+
+    // La aplicación ya ocurrió: la fecha no puede ser futura. Se usa
+    // VALIDATION_ERROR para no inventar un código nuevo.
+    if (fecha > today()) {
+      throw new DomainError(ErrorCode.VALIDATION_ERROR, 422, "La fecha de aplicación no puede ser futura");
+    }
+
+    const db = getServiceDb();
+
+    const { error } = await db
+      .rpc("marcar_dosis_aplicada", {
+        p_tenant_id:       ctx.tenantId,
+        p_dosis_id:        id,
+        p_professional_id: dto.professionalId,
+        p_user_id:         ctx.callerUserId,
+        p_date:            fecha,
+        p_weight_kg:       dto.weightKg     ?? null,
+        p_temperature_c:   dto.temperatureC ?? null,
+        p_notes:           dto.notes        ?? null,
+      })
+      .single();
+
+    if (error) throw mapAplicarRpcError(error as { message?: string });
+
+    // Relectura single-row (no N+1) para devolver el DTO completo con el nombre
+    // de la vacuna embebido y estadoVisual derivado.
+    const { data: row, error: readErr } = await db
+      .from("plan_vacunacion")
+      .select("*, tipo:tipos_vacuna!tipo_vacuna_id(nombre)")
+      .eq("id", id)
+      .eq("tenant_id", ctx.tenantId)
+      .single();
+
+    if (readErr || !row) {
+      throw new DomainError(ErrorCode.INTERNAL_ERROR, 500, "Error al releer la dosis aplicada");
+    }
+
+    // deno-lint-ignore no-explicit-any
+    return mapDosisRow(row as any);
   }
 }
