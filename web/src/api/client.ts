@@ -1,4 +1,4 @@
-import type { ApiMeta, ApiResponse, ApiSuccessResponse } from "../types/index.ts";
+import type { ApiErrorResponse, ApiMeta, ApiResponse, ApiSuccessResponse } from "../types/index.ts";
 import { ApiError } from "../types/index.ts";
 import { getToken } from "../lib/session.ts";
 
@@ -89,4 +89,47 @@ export async function apiClientList<T>(
   const body = await request<T[]>(path, options);
   const meta = body.meta ?? { page: 1, limit: body.data.length, total: body.data.length };
   return { items: body.data, meta };
+}
+
+function filenameFromContentDisposition(header: string | null): string | null {
+  if (!header) return null;
+  const match = /filename="?([^"; ]+)"?/.exec(header);
+  return match?.[1] ?? null;
+}
+
+/**
+ * Variante para endpoints que devuelven un archivo binario crudo en éxito (no
+ * el envelope JSON estándar) — p. ej. exportación de historial en PDF/XLSX.
+ * En error, el backend sí responde el envelope JSON de siempre.
+ */
+export async function apiClientBlob(
+  path: string,
+  options: RequestInit = {},
+): Promise<{ blob: Blob; filename: string | null }> {
+  const token = getToken();
+  const headers: Record<string, string> = {
+    ...(options.headers as Record<string, string> | undefined),
+  };
+  if (token) {
+    headers["Authorization"] = `Bearer ${token}`;
+  }
+
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE}${path}`, { ...options, headers });
+  } catch (networkError) {
+    throw new ApiError("NETWORK_ERROR", 0, "No se pudo conectar con el servidor", [networkError]);
+  }
+
+  if (!response.ok) {
+    const body = await response.json() as ApiErrorResponse;
+    if (response.status === 401 && token) {
+      onUnauthorized?.();
+    }
+    throw new ApiError(body.error.code, body.error.statusCode, body.error.message, body.error.details);
+  }
+
+  const blob = await response.blob();
+  const filename = filenameFromContentDisposition(response.headers.get("Content-Disposition"));
+  return { blob, filename };
 }

@@ -241,8 +241,10 @@ export interface FranjaInput {
 
 // ─── Historial Clínico ──────────────────────────────────────────────────────
 
-// RN-EC1: enum de eventos clínicos. "Eutanasia" queda excluida a propósito —
-// se registra por el flujo dedicado de eutanasia (sesión aparte), no por acá.
+// RN-EC1: enum de eventos clínicos (espejo del ENUM de DB). "Eutanasia" no se
+// ofrece en el dropdown de "Registrar evento" (ver TIPOS_EVENTO en
+// EventoClinicoFormDialog) — se registra por el flujo dedicado de eutanasia —
+// pero sí puede volver en el timeline una vez registrada.
 export type TipoEventoClinico =
   | "Consulta"
   | "Vacunación"
@@ -254,6 +256,7 @@ export type TipoEventoClinico =
   | "Control"
   | "Emergencia"
   | "Internación"
+  | "Eutanasia"
   | "Otro";
 
 /** Item del timeline (RN-HC1..HC3): orden desc, dueño histórico, sin detalle. */
@@ -340,6 +343,38 @@ export interface CrearEventoClinicoInput {
   medication?:        string | null;
   notes?:             string | null;
   sendEmailToClient?: boolean;
+}
+
+/** Body de `POST /mascotas/:petId/eutanasia` (espejo de `RegistrarEutanasiaSchema`, RN-EC10). */
+export interface RegistrarEutanasiaInput {
+  date:                 string;
+  professionalId:       string;
+  description:          string;
+  weightKg?:            number | null;
+  temperatureC?:        number | null;
+  diagnosis?:           string | null;
+  notes?:               string | null;
+  euthanasiaConfirmed:  boolean;
+}
+
+/** Respuesta de `POST /mascotas/:petId/eutanasia` (RN-EC11): evento + mascota + dosis canceladas. */
+export interface EutanasiaResultado {
+  evento: {
+    id:               string;
+    petId:            string;
+    date:             string;
+    eventType:        TipoEventoClinico;
+    professionalName: string | null;
+    clientNameAtTime: string;
+  };
+  mascota: {
+    id:             string;
+    name:           string;
+    estado:         EstadoMascota;
+    deceasedDate:   string;
+    deceasedReason: string;
+  };
+  cancelledDoses: number;
 }
 
 // ─── Catálogos globales ─────────────────────────────────────────────────────

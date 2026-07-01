@@ -1,20 +1,39 @@
 import { useCallback, useEffect, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
-import { ArrowLeft, Plus, Stethoscope } from "lucide-react";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
+import { ArrowLeft, FileSpreadsheet, FileText, Loader2, Plus, Stethoscope, TriangleAlert } from "lucide-react";
+import { toast } from "sonner";
 import { Alert, AlertDescription, AlertTitle } from "../components/ui/alert.tsx";
 import { Badge } from "../components/ui/badge.tsx";
 import { Button } from "../components/ui/button.tsx";
 import { Skeleton } from "../components/ui/skeleton.tsx";
 import { EventoTimeline } from "../components/historial/EventoTimeline.tsx";
 import { EventoClinicoFormDialog } from "../components/historial/EventoClinicoFormDialog.tsx";
-import { listarHistorial, resumenClinico } from "../api/historial-clinico.ts";
-import { ApiError, type HistorialItem, type ResumenClinico, type ApiMeta } from "../types/index.ts";
+import { EutanasiaDialog } from "../components/historial/EutanasiaDialog.tsx";
+import { exportarHistorial, listarHistorial, resumenClinico, type FormatoExport } from "../api/historial-clinico.ts";
+import { ApiError, ErrorCode, type HistorialItem, type ResumenClinico, type ApiMeta } from "../types/index.ts";
 
 const PAGE_SIZE = 20;
+
+function descargarBlob(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
 
 export function HistorialClinicoPage() {
   const { mascotaId } = useParams<{ mascotaId: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
+
+  // El origen de la navegación (Mascotas o el selector de Historial Clínico)
+  // determina a dónde vuelve "Volver": por defecto Mascotas (incluye acceso
+  // directo por URL), salvo que se haya llegado desde /historial (RN-HC ux).
+  const vieneDeHistorial = (location.state as { from?: string } | null)?.from === "historial";
 
   const [resumen, setResumen] = useState<ResumenClinico | null>(null);
   const [resumenError, setResumenError] = useState<string | null>(null);
@@ -26,6 +45,8 @@ export function HistorialClinicoPage() {
   const [page, setPage] = useState(1);
 
   const [formOpen, setFormOpen] = useState(false);
+  const [eutanasiaOpen, setEutanasiaOpen] = useState(false);
+  const [exportingFormat, setExportingFormat] = useState<FormatoExport | null>(null);
 
   const cargarResumen = useCallback(async () => {
     if (!mascotaId) return;
@@ -55,16 +76,38 @@ export function HistorialClinicoPage() {
   useEffect(() => { void cargarResumen(); }, [cargarResumen]);
   useEffect(() => { void cargarHistorial(); }, [cargarHistorial]);
 
+  async function handleExport(format: FormatoExport) {
+    if (!mascotaId) return;
+    setExportingFormat(format);
+    try {
+      const { blob, filename } = await exportarHistorial(mascotaId, format);
+      descargarBlob(blob, filename);
+    } catch (err) {
+      if (err instanceof ApiError && err.code === ErrorCode.EMPTY_HISTORY) {
+        toast.error("El historial está vacío; no hay nada para exportar");
+      } else {
+        toast.error(err instanceof ApiError ? err.message : "No se pudo exportar el historial");
+      }
+    } finally {
+      setExportingFormat(null);
+    }
+  }
+
   if (!mascotaId) return null;
 
   const totalPages = Math.max(1, Math.ceil(meta.total / (meta.limit || PAGE_SIZE)));
   const esFallecida = resumen?.estado === "Fallecida";
+  const exportDisabled = loading || meta.total === 0 || exportingFormat !== null;
 
   return (
     <div className="mx-auto max-w-4xl space-y-6">
-      <Button variant="ghost" size="sm" onClick={() => navigate("/mascotas")}>
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={() => navigate(vieneDeHistorial ? "/historial" : "/mascotas")}
+      >
         <ArrowLeft className="size-4" aria-hidden />
-        Volver a mascotas
+        {vieneDeHistorial ? "Volver a Historial Clínico" : "Volver a mascotas"}
       </Button>
 
       <header className="space-y-3">
@@ -99,6 +142,55 @@ export function HistorialClinicoPage() {
         )}
       </header>
 
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            className="border-green-600 text-green-700 hover:bg-green-50 hover:text-green-800"
+            disabled={exportDisabled}
+            onClick={() => void handleExport("xlsx")}
+          >
+            {exportingFormat === "xlsx" ? (
+              <Loader2 className="size-4 animate-spin" aria-hidden />
+            ) : (
+              <FileSpreadsheet className="size-4" aria-hidden />
+            )}
+            Exportar Excel
+          </Button>
+          <Button
+            type="button"
+            disabled={exportDisabled}
+            onClick={() => void handleExport("pdf")}
+          >
+            {exportingFormat === "pdf" ? (
+              <Loader2 className="size-4 animate-spin" aria-hidden />
+            ) : (
+              <FileText className="size-4" aria-hidden />
+            )}
+            Exportar PDF
+          </Button>
+        </div>
+
+        {!esFallecida ? (
+          <div className="flex gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              className="border-destructive/40 text-destructive hover:bg-destructive/5 hover:text-destructive"
+              onClick={() => setEutanasiaOpen(true)}
+            >
+              <TriangleAlert className="size-4" aria-hidden />
+              Registrar eutanasia
+            </Button>
+            <Button onClick={() => setFormOpen(true)}>
+              <Plus className="size-4" aria-hidden />
+              Registrar evento
+            </Button>
+          </div>
+        ) : null}
+      </div>
+
       {esFallecida ? (
         <Alert>
           <AlertTitle>Mascota fallecida</AlertTitle>
@@ -107,14 +199,7 @@ export function HistorialClinicoPage() {
             clínicos. El historial existente sigue disponible para su consulta.
           </AlertDescription>
         </Alert>
-      ) : (
-        <div className="flex justify-end">
-          <Button onClick={() => setFormOpen(true)}>
-            <Plus className="size-4" aria-hidden />
-            Registrar evento
-          </Button>
-        </div>
-      )}
+      ) : null}
 
       <div className="rounded-lg border">
         {loading ? (
@@ -172,6 +257,14 @@ export function HistorialClinicoPage() {
         onOpenChange={setFormOpen}
         petId={mascotaId}
         onSaved={() => { void cargarHistorial(); void cargarResumen(); }}
+      />
+
+      <EutanasiaDialog
+        open={eutanasiaOpen}
+        onOpenChange={setEutanasiaOpen}
+        petId={mascotaId}
+        mascotaName={resumen?.name ?? ""}
+        onSuccess={() => { void cargarHistorial(); void cargarResumen(); }}
       />
     </div>
   );

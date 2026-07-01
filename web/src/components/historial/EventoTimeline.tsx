@@ -31,6 +31,7 @@ const TIPO_EVENTO_CLASSNAME: Record<TipoEventoClinico, string> = {
   "Control":         "bg-amber-100 text-amber-800",
   "Emergencia":      "bg-red-100 text-red-800",
   "Internación":     "bg-red-100 text-red-800",
+  "Eutanasia":       "bg-red-100 text-red-800",
   "Otro":            "bg-gray-100 text-gray-800",
 };
 

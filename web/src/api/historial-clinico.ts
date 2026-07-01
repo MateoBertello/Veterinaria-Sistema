@@ -1,12 +1,14 @@
-import { apiClient, apiClientList } from "./client.ts";
+import { apiClient, apiClientBlob, apiClientList } from "./client.ts";
 import type {
   AdjuntoFirmado,
   AdjuntoMeta,
   ApiMeta,
   CrearEventoClinicoInput,
+  EutanasiaResultado,
   EventoCreado,
   HistorialDetalle,
   HistorialItem,
+  RegistrarEutanasiaInput,
   ResumenClinico,
 } from "../types/index.ts";
 
@@ -62,4 +64,33 @@ export function subirAdjunto(eventoId: string, file: File): Promise<AdjuntoMeta>
 /** GET /adjuntos/{adjuntoId} — signed URL de descarga, válida 5 minutos. */
 export function obtenerAdjuntoFirmado(adjuntoId: string): Promise<AdjuntoFirmado> {
   return apiClient<AdjuntoFirmado>(`/adjuntos/${adjuntoId}`);
+}
+
+/**
+ * POST /mascotas/{petId}/eutanasia — la ÚNICA operación irreversible del
+ * sistema (RN-EC10..EC12): transacción única evento+estado vía RPC
+ * `registrar_eutanasia`, sin endpoint de reversión.
+ */
+export function registrarEutanasia(
+  petId: string,
+  input: RegistrarEutanasiaInput,
+): Promise<EutanasiaResultado> {
+  return apiClient<EutanasiaResultado>(`/mascotas/${petId}/eutanasia`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export type FormatoExport = "pdf" | "xlsx";
+
+/**
+ * GET /mascotas/{petId}/historial/export — exporta el historial completo
+ * (RN-EX1..EX5). Devuelve el archivo binario crudo, no el envelope JSON.
+ */
+export async function exportarHistorial(
+  petId: string,
+  format: FormatoExport,
+): Promise<{ blob: Blob; filename: string }> {
+  const { blob, filename } = await apiClientBlob(`/mascotas/${petId}/historial/export?format=${format}`);
+  return { blob, filename: filename ?? `historial-${petId}.${format}` };
 }

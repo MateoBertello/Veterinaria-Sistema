@@ -10,6 +10,8 @@ vi.mock("../api/historial-clinico.ts", () => ({
   obtenerAdjuntoFirmado:  vi.fn(),
   crearEvento:            vi.fn(),
   subirAdjunto:           vi.fn(),
+  registrarEutanasia:     vi.fn(),
+  exportarHistorial:      vi.fn(),
 }));
 
 vi.mock("../api/doctores.ts", () => ({
@@ -21,10 +23,11 @@ vi.mock("sonner", () => ({
 }));
 
 import { HistorialClinicoPage } from "./HistorialClinicoPage.tsx";
-import { listarHistorial, resumenClinico } from "../api/historial-clinico.ts";
+import { exportarHistorial, listarHistorial, resumenClinico } from "../api/historial-clinico.ts";
 
 const mockListar = vi.mocked(listarHistorial);
 const mockResumen = vi.mocked(resumenClinico);
+const mockExportar = vi.mocked(exportarHistorial);
 
 function makeResumen(over: Partial<ResumenClinico> = {}): ResumenClinico {
   return {
@@ -43,10 +46,12 @@ function makeEvento(over: Partial<HistorialItem> = {}): HistorialItem {
   };
 }
 
-function renderPage() {
+function renderPage(state?: { from?: string }) {
   return render(
-    <MemoryRouter initialEntries={["/historial/m1"]}>
+    <MemoryRouter initialEntries={[{ pathname: "/historial/m1", state }]}>
       <Routes>
+        <Route path="/mascotas" element={<div>Página de mascotas</div>} />
+        <Route path="/historial" element={<div>Selector de historial</div>} />
         <Route path="/historial/:mascotaId" element={<HistorialClinicoPage />} />
       </Routes>
     </MemoryRouter>,
@@ -103,6 +108,70 @@ describe("HistorialClinicoPage", () => {
 
     expect(await screen.findByText(/no se pueden registrar nuevos eventos/i)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Registrar evento/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Registrar eutanasia/i })).not.toBeInTheDocument();
+  });
+
+  it("RN-EC10: el botón de eutanasia solo está disponible con la mascota Activa", async () => {
+    mockResumen.mockResolvedValue(makeResumen({ estado: "Activa" }));
+    mockListar.mockResolvedValue({ items: [makeEvento()], meta: { page: 1, limit: 20, total: 1 } });
+
+    renderPage();
+
+    expect(await screen.findByRole("button", { name: /Registrar eutanasia/i })).toBeInTheDocument();
+  });
+
+  it("RN-EX1: los botones de exportar están deshabilitados si el historial está vacío", async () => {
+    mockResumen.mockResolvedValue(makeResumen());
+    mockListar.mockResolvedValue({ items: [], meta: { page: 1, limit: 20, total: 0 } });
+
+    renderPage();
+
+    expect(await screen.findByRole("button", { name: /Exportar PDF/i })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /Exportar Excel/i })).toBeDisabled();
+  });
+
+  it("RN-EX2: exportar dispara la descarga del archivo devuelto por el backend", async () => {
+    mockResumen.mockResolvedValue(makeResumen());
+    mockListar.mockResolvedValue({ items: [makeEvento()], meta: { page: 1, limit: 20, total: 1 } });
+    mockExportar.mockResolvedValue({ blob: new Blob(["pdf"]), filename: "historial-m1.pdf" });
+
+    const createObjectURL = vi.fn(() => "blob:mock-url");
+    const revokeObjectURL = vi.fn();
+    const originalCreateObjectURL = URL.createObjectURL;
+    const originalRevokeObjectURL = URL.revokeObjectURL;
+    URL.createObjectURL = createObjectURL;
+    URL.revokeObjectURL = revokeObjectURL;
+    const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+
+    try {
+      renderPage();
+
+      const { default: userEvent } = await import("@testing-library/user-event");
+      await userEvent.click(await screen.findByRole("button", { name: /Exportar PDF/i }));
+
+      await waitFor(() => expect(mockExportar).toHaveBeenCalledWith("m1", "pdf"));
+      expect(createObjectURL).toHaveBeenCalled();
+      expect(clickSpy).toHaveBeenCalled();
+    } finally {
+      clickSpy.mockRestore();
+      URL.createObjectURL = originalCreateObjectURL;
+      URL.revokeObjectURL = originalRevokeObjectURL;
+    }
+  });
+
+  it("RN-EX1: EMPTY_HISTORY del backend se muestra como error, no descarga nada", async () => {
+    mockResumen.mockResolvedValue(makeResumen());
+    mockListar.mockResolvedValue({ items: [makeEvento()], meta: { page: 1, limit: 20, total: 1 } });
+    mockExportar.mockRejectedValue(new ApiError("EMPTY_HISTORY", 400, "El historial está vacío; no hay nada para exportar"));
+
+    const { toast } = await import("sonner");
+
+    renderPage();
+
+    const { default: userEvent } = await import("@testing-library/user-event");
+    await userEvent.click(await screen.findByRole("button", { name: /Exportar PDF/i }));
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("El historial está vacío; no hay nada para exportar"));
   });
 
   it("muestra el estado vacío cuando la mascota no tiene eventos", async () => {
@@ -112,6 +181,30 @@ describe("HistorialClinicoPage", () => {
     renderPage();
 
     expect(await screen.findByText(/Todavía no hay eventos clínicos/i)).toBeInTheDocument();
+  });
+
+  it("por defecto (acceso directo o desde Mascotas), 'Volver' navega a /mascotas", async () => {
+    mockResumen.mockResolvedValue(makeResumen());
+    mockListar.mockResolvedValue({ items: [makeEvento()], meta: { page: 1, limit: 20, total: 1 } });
+
+    renderPage();
+
+    const { default: userEvent } = await import("@testing-library/user-event");
+    await userEvent.click(await screen.findByRole("button", { name: /Volver a mascotas/i }));
+
+    expect(await screen.findByText("Página de mascotas")).toBeInTheDocument();
+  });
+
+  it("al llegar desde el selector de Historial Clínico, 'Volver' navega a /historial", async () => {
+    mockResumen.mockResolvedValue(makeResumen());
+    mockListar.mockResolvedValue({ items: [makeEvento()], meta: { page: 1, limit: 20, total: 1 } });
+
+    renderPage({ from: "historial" });
+
+    const { default: userEvent } = await import("@testing-library/user-event");
+    await userEvent.click(await screen.findByRole("button", { name: /Volver a Historial Clínico/i }));
+
+    expect(await screen.findByText("Selector de historial")).toBeInTheDocument();
   });
 
   it("muestra el estado de error con opción de reintentar", async () => {
