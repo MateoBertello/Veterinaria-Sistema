@@ -81,12 +81,40 @@ Es **idempotente**: corrércelo dos veces no duplica ni rompe.
 
 ## Credenciales que deja el seed
 
-Todas con contraseña **`Demo1234!`**:
+Todas con contraseña **`Demo1234!`**. **El login es por _usuario_ (username), NO por email**
+— el endpoint `POST /auth/login` recibe `{ username, password }` y resuelve el email
+internamente:
 
-| Rol           | Email                  |
-| ------------- | ---------------------- |
-| admin         | `admin@demo.local`     |
-| veterinario   | `vet@demo.local`       |
-| recepcionista | `recepcion@demo.local` |
+| Rol           | Usuario (login)  | Email interno          |
+| ------------- | ---------------- | ---------------------- |
+| admin         | `admin_demo`     | `admin@demo.local`     |
+| veterinario   | `vet_demo`       | `vet@demo.local`       |
+| recepcionista | `recepcion_demo` | `recepcion@demo.local` |
 
 Tenant: **Veterinaria Demo** · plan **premium** (los 3 módulos visibles).
+
+## Errores comunes (troubleshooting)
+
+Estos síntomas parecen "login roto" pero casi siempre son del entorno local:
+
+- **Corré TODO (`supabase …` y `npm run seed`) desde `~/Veterinaria-Sistema`.** El CLI de
+  Supabase nombra el proyecto según el **directorio actual** (`supabase_*_<basename>`).
+  Si lo lanzás desde tu home (`~`) levanta un **proyecto fantasma vacío** (sin migraciones
+  ni la función `api`) → `/functions/v1/api/...` responde **`Function not found` (404)** y
+  `npm run seed` falla con `ENOENT package.json`. Verificá: `docker ps | grep supabase`
+  debe mostrar el sufijo **`_Veterinaria-Sistema`**.
+- **No corras `supabase start` sobre una stack ya levantada.** Deja el volumen de Postgres
+  inconsistente → el contenedor `supabase_db_*` entra en **crash-loop** (`Restarting (1)`)
+  y Kong nunca sube (`curl` a `:54321` da `HTTP 000`). Recuperá con
+  `supabase stop --no-backup` → `supabase start` → `npm run seed` (es DEV, se reconstruye).
+- **`{"message":"name resolution failed"}` (503)** en `/functions/v1/*` = el edge runtime no
+  se está sirviendo. Este CLI lo levanta como parte de `supabase start` (no hace falta
+  `functions serve` aparte).
+- **No cambies `[functions.api] verify_jwt` a `true`.** Debe quedar en **`false`**: la función
+  `api` hace su propia autenticación por-ruta (`tenantContext` en lo protegido; `/auth/login`
+  y `/auth/recuperar-*` son **públicas**). Con `verify_jwt = true` el gateway rechaza el login
+  sin token antes de llegar a la app.
+- **Diagnóstico rápido:** `curl` directo a `/functions/v1/api/v1/auth/login` distingue el nivel
+  del fallo — `404` (proyecto/función equivocada) · `503` (runtime caído) · `500` (excepción en
+  la función) · `200` (sano). Y `curl` a GoTrue (`POST /auth/v1/token?grant_type=password` con
+  header `apikey: <publishable>`) aísla si el problema es la credencial.
