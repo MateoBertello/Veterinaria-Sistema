@@ -23,8 +23,12 @@ async function request<T>(
 ): Promise<ApiSuccessResponse<T>> {
   const token = getToken();
 
+  // Con FormData (subida de adjuntos) el browser debe fijar su propio
+  // Content-Type con el boundary del multipart; forzar JSON acá lo rompe.
+  const isFormData = options.body instanceof FormData;
+
   const headers: Record<string, string> = {
-    "Content-Type": "application/json",
+    ...(isFormData ? {} : { "Content-Type": "application/json" }),
     ...(options.headers as Record<string, string> | undefined),
   };
 

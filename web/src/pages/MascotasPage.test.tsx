@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { MemoryRouter } from "react-router-dom";
 import { TooltipProvider } from "../components/ui/tooltip.tsx";
 import { ApiError, type Mascota } from "../types/index.ts";
 
@@ -58,9 +59,11 @@ function makeMascota(over: Partial<Mascota> = {}): Mascota {
 
 function renderPage() {
   return render(
-    <TooltipProvider>
-      <MascotasPage />
-    </TooltipProvider>,
+    <MemoryRouter>
+      <TooltipProvider>
+        <MascotasPage />
+      </TooltipProvider>
+    </MemoryRouter>,
   );
 }
 

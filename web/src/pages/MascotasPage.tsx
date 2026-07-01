@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   ArrowLeftRight,
   PawPrint,
@@ -6,6 +7,7 @@ import {
   Plus,
   Search,
   Skull,
+  Stethoscope,
 } from "lucide-react";
 import {
   Table,
@@ -50,6 +52,8 @@ import {
 const PAGE_SIZE = 20;
 
 export function MascotasPage() {
+  const navigate = useNavigate();
+
   const [mascotas, setMascotas] = useState<Mascota[]>([]);
   const [meta,     setMeta]     = useState<ApiMeta>({ page: 1, limit: PAGE_SIZE, total: 0 });
   const [loading,  setLoading]  = useState(true);
@@ -253,6 +257,20 @@ export function MascotasPage() {
                   </TableCell>
                   <TableCell>
                     <div className="flex justify-end gap-1">
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            aria-label={`Ver historial clínico de ${m.name}`}
+                            onClick={() => navigate(`/historial/${m.id}`)}
+                          >
+                            <Stethoscope className="size-4" aria-hidden />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>Historial clínico</TooltipContent>
+                      </Tooltip>
+
                       <Tooltip>
                         <TooltipTrigger asChild>
                           <Button

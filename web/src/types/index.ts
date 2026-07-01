@@ -59,6 +59,11 @@ export const ErrorCode = {
   STAY_OVERLAP:        "STAY_OVERLAP",
   INVALID_RANGE:       "INVALID_RANGE",
   SCHEDULE_OVERLAP:    "SCHEDULE_OVERLAP",
+  EMPTY_HISTORY:                    "EMPTY_HISTORY",
+  HISTORIAL_NOT_FOUND:              "HISTORIAL_NOT_FOUND",
+  EUTHANASIA_CONFIRMATION_REQUIRED: "EUTHANASIA_CONFIRMATION_REQUIRED",
+  INVALID_FILE_TYPE:                "INVALID_FILE_TYPE",
+  FILE_TOO_LARGE:                   "FILE_TOO_LARGE",
 } as const;
 
 export type ErrorCodeValue = (typeof ErrorCode)[keyof typeof ErrorCode];
@@ -232,6 +237,109 @@ export interface FranjaInput {
   startTime: string;
   endTime:   string;
   active?:   boolean;
+}
+
+// ─── Historial Clínico ──────────────────────────────────────────────────────
+
+// RN-EC1: enum de eventos clínicos. "Eutanasia" queda excluida a propósito —
+// se registra por el flujo dedicado de eutanasia (sesión aparte), no por acá.
+export type TipoEventoClinico =
+  | "Consulta"
+  | "Vacunación"
+  | "Cirugía"
+  | "Análisis"
+  | "Radiografía"
+  | "Ecografía"
+  | "Desparasitación"
+  | "Control"
+  | "Emergencia"
+  | "Internación"
+  | "Otro";
+
+/** Item del timeline (RN-HC1..HC3): orden desc, dueño histórico, sin detalle. */
+export interface HistorialItem {
+  id:               string;
+  date:             string;
+  eventType:        TipoEventoClinico;
+  professionalName: string | null;
+  weightKg:         number | null;
+  temperatureC:     number | null;
+  diagnosis:        string | null;
+  clientNameAtTime: string;
+  isPreviousOwner:  boolean;
+  hasAttachments:   boolean;
+}
+
+export interface AdjuntoMeta {
+  id:       string;
+  fileName: string;
+  fileType: string;
+  fileSize: number;
+}
+
+/** Detalle completo de un evento (`GET /historial/:id`), incluye adjuntos. */
+export interface HistorialDetalle {
+  id:               string;
+  petId:            string;
+  date:             string;
+  eventType:        TipoEventoClinico;
+  professionalName: string | null;
+  weightKg:         number | null;
+  temperatureC:     number | null;
+  description:      string;
+  diagnosis:        string | null;
+  treatment:        string | null;
+  medication:       string | null;
+  notes:            string | null;
+  clientNameAtTime: string;
+  createdAt:        string;
+  adjuntos:         AdjuntoMeta[];
+}
+
+/** Signed URL de un adjunto (`GET /adjuntos/:adjuntoId`), TTL 5 min. */
+export interface AdjuntoFirmado {
+  url:      string;
+  fileName: string;
+  fileType: string;
+  fileSize: number;
+}
+
+/** Cabecera de ficha clínica (`GET /mascotas/:petId/resumen-clinico`). */
+export interface ResumenClinico {
+  id:          string;
+  name:        string;
+  estado:      EstadoMascota;
+  ownerName:   string | null;
+  especieName: string | null;
+  razaName:    string | null;
+  // RN-HC2: último peso derivado del evento más reciente con peso, no un campo aparte.
+  ultimoPeso:  number | null;
+}
+
+/** Respuesta al registrar un evento clínico. */
+export interface EventoCreado {
+  id:               string;
+  petId:            string;
+  date:             string;
+  eventType:        TipoEventoClinico;
+  clientNameAtTime: string;
+  attachmentsCount: number;
+  emailSent:        boolean;
+}
+
+/** Body de `POST /mascotas/:petId/historial` (espejo de `CrearEventoClinicoSchema`). */
+export interface CrearEventoClinicoInput {
+  date:               string;
+  eventType:          TipoEventoClinico;
+  professionalId:     string;
+  description:        string;
+  weightKg?:          number | null;
+  temperatureC?:      number | null;
+  diagnosis?:         string | null;
+  treatment?:         string | null;
+  medication?:        string | null;
+  notes?:             string | null;
+  sendEmailToClient?: boolean;
 }
 
 // ─── Catálogos globales ─────────────────────────────────────────────────────

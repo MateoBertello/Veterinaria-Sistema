@@ -8,6 +8,7 @@ import { ProtectedRoute } from "./auth/ProtectedRoute.tsx";
 import { LoginPage } from "./pages/LoginPage.tsx";
 import { ClientesPage } from "./pages/ClientesPage.tsx";
 import { MascotasPage } from "./pages/MascotasPage.tsx";
+import { HistorialClinicoPage } from "./pages/HistorialClinicoPage.tsx";
 import { ServiciosPage } from "./pages/ServiciosPage.tsx";
 import { ConfiguracionPage } from "./pages/ConfiguracionPage.tsx";
 import { DoctoresPage } from "./pages/DoctoresPage.tsx";
@@ -112,6 +113,7 @@ export function App() {
         <Route path="/" element={<Navigate to="/clientes" replace />} />
         <Route path="/clientes" element={<ClientesPage />} />
         <Route path="/mascotas" element={<MascotasPage />} />
+        <Route path="/historial/:mascotaId" element={<HistorialClinicoPage />} />
         <Route path="/servicios" element={<ServiciosPage />} />
         <Route path="/doctores" element={<DoctoresPage />} />
         <Route path="/horarios" element={<HorariosPage />} />
