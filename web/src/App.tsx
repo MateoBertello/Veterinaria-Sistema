@@ -1,14 +1,19 @@
 import { useEffect, useState } from "react";
-import { NavLink, Navigate, Route, Routes } from "react-router-dom";
-import { PawPrint } from "lucide-react";
+import { NavLink, Navigate, Outlet, Route, Routes } from "react-router-dom";
+import { LogOut, PawPrint } from "lucide-react";
 import { buildNavItems, type NavItem } from "./lib/navigation.ts";
 import { fetchModulosHabilitados } from "./api/modulos.ts";
+import { useAuth } from "./auth/AuthContext.tsx";
+import { ProtectedRoute } from "./auth/ProtectedRoute.tsx";
+import { LoginPage } from "./pages/LoginPage.tsx";
 import { ClientesPage } from "./pages/ClientesPage.tsx";
 import { MascotasPage } from "./pages/MascotasPage.tsx";
+import { Button } from "./components/ui/button.tsx";
 import { cn } from "./components/ui/utils.ts";
 
-/** Sidebar mínimo del shell: ítems base + módulos vendibles habilitados (RN-G2). */
+/** Sidebar del shell: ítems base + módulos vendibles habilitados (RN-G2) + identidad/logout. */
 function Sidebar() {
+  const { user, logout } = useAuth();
   const [items, setItems] = useState<NavItem[]>(buildNavItems([]));
 
   useEffect(() => {
@@ -18,7 +23,7 @@ function Sidebar() {
         if (activo) setItems(buildNavItems(modulos));
       })
       .catch(() => {
-        // Sin sesión/backend: se muestran solo los ítems base.
+        // Sin módulos/backend: se muestran solo los ítems base.
         if (activo) setItems(buildNavItems([]));
       });
     return () => {
@@ -27,12 +32,13 @@ function Sidebar() {
   }, []);
 
   return (
-    <aside className="hidden w-60 shrink-0 border-r bg-sidebar md:flex md:flex-col">
+    <aside className="hidden w-60 shrink-0 flex-col border-r bg-sidebar md:flex">
       <div className="flex items-center gap-2 px-6 py-5">
         <PawPrint className="size-6 text-primary" aria-hidden />
         <span className="text-lg font-semibold text-orange-800">Leo</span>
       </div>
-      <nav className="flex flex-col gap-1 px-3" aria-label="Navegación principal">
+
+      <nav className="flex flex-1 flex-col gap-1 px-3" aria-label="Navegación principal">
         {items.map((item) => (
           <NavLink
             key={item.key}
@@ -51,22 +57,58 @@ function Sidebar() {
           </NavLink>
         ))}
       </nav>
+
+      {user ? (
+        <div className="mt-auto border-t px-3 py-4">
+          <div className="px-3 pb-3">
+            <p className="truncate text-sm font-medium text-sidebar-foreground">
+              {user.fullName}
+            </p>
+            <p className="truncate text-xs text-muted-foreground">{user.roleName}</p>
+          </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="w-full justify-start text-sidebar-foreground"
+            onClick={() => void logout()}
+          >
+            <LogOut aria-hidden />
+            Cerrar sesión
+          </Button>
+        </div>
+      ) : null}
     </aside>
+  );
+}
+
+/** Layout autenticado: sidebar + área de contenido. Se renderiza solo con sesión válida. */
+function Shell() {
+  return (
+    <div className="flex min-h-screen bg-background">
+      <Sidebar />
+      <main className="flex-1 overflow-x-auto px-4 py-6 md:px-8">
+        <Outlet />
+      </main>
+    </div>
   );
 }
 
 export function App() {
   return (
-    <div className="flex min-h-screen bg-background">
-      <Sidebar />
-      <main className="flex-1 overflow-x-auto px-4 py-6 md:px-8">
-        <Routes>
-          <Route path="/" element={<Navigate to="/clientes" replace />} />
-          <Route path="/clientes" element={<ClientesPage />} />
-          <Route path="/mascotas" element={<MascotasPage />} />
-          <Route path="*" element={<Navigate to="/clientes" replace />} />
-        </Routes>
-      </main>
-    </div>
+    <Routes>
+      <Route path="/login" element={<LoginPage />} />
+      <Route
+        element={
+          <ProtectedRoute>
+            <Shell />
+          </ProtectedRoute>
+        }
+      >
+        <Route path="/" element={<Navigate to="/clientes" replace />} />
+        <Route path="/clientes" element={<ClientesPage />} />
+        <Route path="/mascotas" element={<MascotasPage />} />
+        <Route path="*" element={<Navigate to="/clientes" replace />} />
+      </Route>
+    </Routes>
   );
 }

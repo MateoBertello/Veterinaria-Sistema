@@ -1,12 +1,16 @@
 import type { ApiMeta, ApiResponse, ApiSuccessResponse } from "../types/index.ts";
 import { ApiError } from "../types/index.ts";
+import { getToken } from "../lib/session.ts";
 
 const API_BASE = import.meta.env["VITE_API_URL"] ?? "/api/v1";
 
-async function getToken(): Promise<string | null> {
-  // En Etapa 2 se integrará con supabase.auth.getSession().
-  // Por ahora lee de localStorage para poder testear manualmente.
-  return localStorage.getItem("sb-token");
+// Handler de sesión expirada: lo registra el AuthProvider. Se dispara cuando un
+// request AUTENTICADO (había token) recibe 401 → token vencido/inválido. El 401
+// de credenciales en el propio login NO lo dispara (no había token todavía).
+let onUnauthorized: (() => void) | null = null;
+
+export function setUnauthorizedHandler(handler: (() => void) | null): void {
+  onUnauthorized = handler;
 }
 
 /**
@@ -17,7 +21,7 @@ async function request<T>(
   path: string,
   options: RequestInit = {},
 ): Promise<ApiSuccessResponse<T>> {
-  const token = await getToken();
+  const token = getToken();
 
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
@@ -44,6 +48,13 @@ async function request<T>(
 
   if (body.success) {
     return body;
+  }
+
+  // Token vencido/inválido en un request autenticado → limpiar sesión y volver a
+  // login. Solo si HABÍA token al hacer el request: así el 401 de credenciales
+  // inválidas del propio login (sin token aún) no dispara el auto-logout.
+  if (response.status === 401 && token) {
+    onUnauthorized?.();
   }
 
   throw new ApiError(

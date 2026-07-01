@@ -163,6 +163,28 @@ export interface Raza {
   especie_id: string;
 }
 
+// ─── Autenticación / sesión ────────────────────────────────────────────────
+
+/** Usuario autenticado (espejo camelCase de `GET /auth/me` y de `login.user`). */
+export interface AuthUser {
+  id:          string;
+  username:    string;
+  fullName:    string;
+  roleName:    string;
+  permissions: string[];
+}
+
+/** Respuesta de `POST /auth/login`: token JWT + datos del usuario. */
+export interface LoginResult {
+  token: string;
+  user:  AuthUser;
+}
+
+export interface LoginInput {
+  username: string;
+  password: string;
+}
+
 // ─── Módulos vendibles ─────────────────────────────────────────────────────
 
 export type ModuloVendible = "historial_clinico" | "turnos" | "guarderia";
