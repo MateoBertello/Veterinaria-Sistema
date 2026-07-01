@@ -8,28 +8,31 @@ import { ProtectedRoute } from "./auth/ProtectedRoute.tsx";
 import { LoginPage } from "./pages/LoginPage.tsx";
 import { ClientesPage } from "./pages/ClientesPage.tsx";
 import { MascotasPage } from "./pages/MascotasPage.tsx";
+import { ServiciosPage } from "./pages/ServiciosPage.tsx";
+import { ConfiguracionPage } from "./pages/ConfiguracionPage.tsx";
 import { Button } from "./components/ui/button.tsx";
 import { cn } from "./components/ui/utils.ts";
 
 /** Sidebar del shell: ítems base + módulos vendibles habilitados (RN-G2) + identidad/logout. */
 function Sidebar() {
   const { user, logout } = useAuth();
-  const [items, setItems] = useState<NavItem[]>(buildNavItems([]));
+  const permissions = user?.permissions ?? [];
+  const [items, setItems] = useState<NavItem[]>(buildNavItems([], permissions));
 
   useEffect(() => {
     let activo = true;
     fetchModulosHabilitados()
       .then((modulos) => {
-        if (activo) setItems(buildNavItems(modulos));
+        if (activo) setItems(buildNavItems(modulos, permissions));
       })
       .catch(() => {
         // Sin módulos/backend: se muestran solo los ítems base.
-        if (activo) setItems(buildNavItems([]));
+        if (activo) setItems(buildNavItems([], permissions));
       });
     return () => {
       activo = false;
     };
-  }, []);
+  }, [permissions]);
 
   return (
     <aside className="hidden w-60 shrink-0 flex-col border-r bg-sidebar md:flex">
@@ -107,6 +110,8 @@ export function App() {
         <Route path="/" element={<Navigate to="/clientes" replace />} />
         <Route path="/clientes" element={<ClientesPage />} />
         <Route path="/mascotas" element={<MascotasPage />} />
+        <Route path="/servicios" element={<ServiciosPage />} />
+        <Route path="/configuracion" element={<ConfiguracionPage />} />
         <Route path="*" element={<Navigate to="/clientes" replace />} />
       </Route>
     </Routes>

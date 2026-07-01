@@ -53,6 +53,8 @@ export const ErrorCode = {
   PET_DECEASED:        "PET_DECEASED",
   SAME_OWNER:          "SAME_OWNER",
   SERVICE_NOT_FOUND:   "SERVICE_NOT_FOUND",
+  SERVICE_IN_USE:      "SERVICE_IN_USE",
+  CONFIG_NOT_FOUND:    "CONFIG_NOT_FOUND",
   TURNO_SOLAPADO:      "TURNO_SOLAPADO",
   STAY_OVERLAP:        "STAY_OVERLAP",
 } as const;
@@ -148,6 +150,43 @@ export interface MarcarFallecidaInput {
   deceasedReason: string;
   deceasedDate?:  string | null;
   deceasedNotes?: string | null;
+}
+
+// ─── Servicios ──────────────────────────────────────────────────────────────
+
+export type TipoServicio = "clinica" | "peluqueria" | "guarderia" | "cirugia" | "otro";
+
+export interface Servicio {
+  id:                  string;
+  nombre:              string;
+  tipo:                TipoServicio;
+  duracionMinutos:     number;
+  requiereProfesional: boolean;
+  descripcion:         string | null;
+  activo:              boolean;
+  createdAt:           string;
+}
+
+export interface ServicioInput {
+  nombre:              string;
+  tipo:                TipoServicio;
+  duracionMinutos:     number;
+  requiereProfesional: boolean;
+  descripcion?:        string | null;
+}
+
+// ─── Configuración de la Clínica ────────────────────────────────────────────
+
+export interface ConfiguracionTenant {
+  cupoMaximoDiario: number;
+  diasAvisoVacuna:  number;
+  parametrosExtra:  Record<string, unknown>;
+  updatedAt:        string;
+}
+
+export interface ConfiguracionInput {
+  cupoMaximoDiario: number;
+  diasAvisoVacuna:  number;
 }
 
 // ─── Catálogos globales ─────────────────────────────────────────────────────

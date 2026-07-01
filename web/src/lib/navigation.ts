@@ -1,10 +1,12 @@
 import type { ModuloContratado, ModuloVendible } from "../types/index.ts";
 
 export interface NavItem {
-  key:     string;
-  label:   string;
-  href:    string;
-  modulo?: ModuloVendible;
+  key:         string;
+  label:       string;
+  href:        string;
+  modulo?:     ModuloVendible;
+  /** Permiso requerido para ver el ítem (core transversal, no es módulo vendible). */
+  permission?: string;
 }
 
 // Ítems siempre visibles, independientes del licenciamiento de módulos vendibles.
@@ -12,6 +14,12 @@ export const BASE_NAV: NavItem[] = [
   { key: "inicio",   label: "Inicio",   href: "/" },
   { key: "clientes", label: "Clientes", href: "/clientes" },
   { key: "mascotas", label: "Mascotas", href: "/mascotas" },
+];
+
+// Ítems core transversales gateados por permiso (no por módulo vendible/licencia).
+export const PERMISSION_NAV: NavItem[] = [
+  { key: "servicios",     label: "Servicios",     href: "/servicios",     permission: "manage_services" },
+  { key: "configuracion", label: "Configuración", href: "/configuracion", permission: "manage_tenant_settings" },
 ];
 
 // Metadatos de navegación de cada módulo vendible.
@@ -26,11 +34,12 @@ const MODULE_ORDER: ModuloVendible[] = ["historial_clinico", "turnos", "guarderi
 
 /**
  * Construye los ítems de navegación del tenant: ítems base siempre visibles más
- * los módulos vendibles habilitados (RN-G2: oculta los módulos no contratados).
- * Función pura, sin dependencias de React, para poder testear la lógica del
- * sidebar dinámico de forma aislada.
+ * los módulos vendibles habilitados (RN-G2: oculta los módulos no contratados)
+ * más los ítems core transversales cuyo permiso tiene el usuario. Función pura,
+ * sin dependencias de React, para poder testear la lógica del sidebar dinámico
+ * de forma aislada.
  */
-export function buildNavItems(modulos: ModuloContratado[]): NavItem[] {
+export function buildNavItems(modulos: ModuloContratado[], permissions: string[] = []): NavItem[] {
   const habilitados = new Set(
     modulos.filter((m) => m.habilitado).map((m) => m.modulo),
   );
@@ -39,5 +48,9 @@ export function buildNavItems(modulos: ModuloContratado[]): NavItem[] {
     .filter((modulo) => habilitados.has(modulo))
     .map((modulo) => ({ key: modulo, modulo, ...MODULE_NAV[modulo] }));
 
-  return [...BASE_NAV, ...moduleItems];
+  const permissionItems = PERMISSION_NAV.filter(
+    (item) => !item.permission || permissions.includes(item.permission),
+  );
+
+  return [...BASE_NAV, ...moduleItems, ...permissionItems];
 }

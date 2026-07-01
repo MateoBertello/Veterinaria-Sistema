@@ -1,0 +1,41 @@
+import { describe, it, expect } from "vitest";
+import { buildNavItems } from "./navigation.ts";
+import type { ModuloContratado } from "../types/index.ts";
+
+function modulo(over: Partial<ModuloContratado>): ModuloContratado {
+  return { modulo: "historial_clinico", habilitado: false, fechaAlta: null, ...over };
+}
+
+describe("buildNavItems", () => {
+  it("sin módulos ni permisos, devuelve solo los ítems base", () => {
+    const items = buildNavItems([]);
+    expect(items.map((i) => i.key)).toEqual(["inicio", "clientes", "mascotas"]);
+  });
+
+  it("RN-G2: agrega solo los módulos vendibles habilitados", () => {
+    const items = buildNavItems([
+      modulo({ modulo: "historial_clinico", habilitado: true }),
+      modulo({ modulo: "turnos", habilitado: false }),
+    ]);
+    expect(items.map((i) => i.key)).toEqual(["inicio", "clientes", "mascotas", "historial_clinico"]);
+  });
+
+  it("sin permisos, no muestra Servicios ni Configuración", () => {
+    const items = buildNavItems([], []);
+    expect(items.some((i) => i.key === "servicios")).toBe(false);
+    expect(items.some((i) => i.key === "configuracion")).toBe(false);
+  });
+
+  it("con manage_services, muestra Servicios pero no Configuración", () => {
+    const items = buildNavItems([], ["manage_services"]);
+    expect(items.some((i) => i.key === "servicios")).toBe(true);
+    expect(items.some((i) => i.key === "configuracion")).toBe(false);
+  });
+
+  it("con ambos permisos, muestra Servicios y Configuración", () => {
+    const items = buildNavItems([], ["manage_services", "manage_tenant_settings"]);
+    const keys = items.map((i) => i.key);
+    expect(keys).toContain("servicios");
+    expect(keys).toContain("configuracion");
+  });
+});
