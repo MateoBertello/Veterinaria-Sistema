@@ -10,6 +10,8 @@ import { ClientesPage } from "./pages/ClientesPage.tsx";
 import { MascotasPage } from "./pages/MascotasPage.tsx";
 import { ServiciosPage } from "./pages/ServiciosPage.tsx";
 import { ConfiguracionPage } from "./pages/ConfiguracionPage.tsx";
+import { DoctoresPage } from "./pages/DoctoresPage.tsx";
+import { HorariosPage } from "./pages/HorariosPage.tsx";
 import { Button } from "./components/ui/button.tsx";
 import { cn } from "./components/ui/utils.ts";
 
@@ -111,6 +113,8 @@ export function App() {
         <Route path="/clientes" element={<ClientesPage />} />
         <Route path="/mascotas" element={<MascotasPage />} />
         <Route path="/servicios" element={<ServiciosPage />} />
+        <Route path="/doctores" element={<DoctoresPage />} />
+        <Route path="/horarios" element={<HorariosPage />} />
         <Route path="/configuracion" element={<ConfiguracionPage />} />
         <Route path="*" element={<Navigate to="/clientes" replace />} />
       </Route>

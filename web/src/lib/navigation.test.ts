@@ -38,4 +38,16 @@ describe("buildNavItems", () => {
     expect(keys).toContain("servicios");
     expect(keys).toContain("configuracion");
   });
+
+  it("con manage_users, muestra Doctores pero no Horarios", () => {
+    const items = buildNavItems([], ["manage_users"]);
+    expect(items.some((i) => i.key === "doctores")).toBe(true);
+    expect(items.some((i) => i.key === "horarios")).toBe(false);
+  });
+
+  it("con manage_schedules, muestra Horarios pero no Doctores", () => {
+    const items = buildNavItems([], ["manage_schedules"]);
+    expect(items.some((i) => i.key === "horarios")).toBe(true);
+    expect(items.some((i) => i.key === "doctores")).toBe(false);
+  });
 });

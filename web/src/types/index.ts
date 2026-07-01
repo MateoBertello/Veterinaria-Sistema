@@ -57,6 +57,8 @@ export const ErrorCode = {
   CONFIG_NOT_FOUND:    "CONFIG_NOT_FOUND",
   TURNO_SOLAPADO:      "TURNO_SOLAPADO",
   STAY_OVERLAP:        "STAY_OVERLAP",
+  INVALID_RANGE:       "INVALID_RANGE",
+  SCHEDULE_OVERLAP:    "SCHEDULE_OVERLAP",
 } as const;
 
 export type ErrorCodeValue = (typeof ErrorCode)[keyof typeof ErrorCode];
@@ -187,6 +189,49 @@ export interface ConfiguracionTenant {
 export interface ConfiguracionInput {
   cupoMaximoDiario: number;
   diasAvisoVacuna:  number;
+}
+
+// ─── Doctores ───────────────────────────────────────────────────────────────
+
+export interface DoctorUsuario {
+  username: string;
+  fullName: string;
+  active:   boolean;
+}
+
+export interface Doctor {
+  id:            string;
+  userId:        string | null;
+  name:          string;
+  specialty:     string | null;
+  licenseNumber: string | null;
+  available:     boolean;
+  createdAt:     string;
+  usuario:       DoctorUsuario | null;
+}
+
+export interface DoctorInput {
+  specialty?:     string | null;
+  licenseNumber?: string | null;
+  available?:     boolean;
+}
+
+// ─── Horarios (franjas de un doctor) ───────────────────────────────────────
+
+export interface Franja {
+  id:        string;
+  doctorId:  string;
+  dayOfWeek: number; // 0=Domingo ... 6=Sábado
+  startTime: string; // "HH:MM"
+  endTime:   string; // "HH:MM"
+  active:    boolean;
+}
+
+export interface FranjaInput {
+  dayOfWeek: number;
+  startTime: string;
+  endTime:   string;
+  active?:   boolean;
 }
 
 // ─── Catálogos globales ─────────────────────────────────────────────────────

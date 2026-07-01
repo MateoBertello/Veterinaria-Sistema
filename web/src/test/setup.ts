@@ -10,3 +10,13 @@ if (typeof globalThis.ResizeObserver === "undefined") {
     disconnect() {}
   };
 }
+
+// jsdom tampoco implementa hasPointerCapture/scrollIntoView, usados por
+// @radix-ui/react-select al abrir el listbox con click (necesario para testear
+// filtros por Select, no solo por defaultValue).
+if (typeof Element.prototype.hasPointerCapture !== "function") {
+  Element.prototype.hasPointerCapture = () => false;
+}
+if (typeof Element.prototype.scrollIntoView !== "function") {
+  Element.prototype.scrollIntoView = () => {};
+}

@@ -19,6 +19,8 @@ export const BASE_NAV: NavItem[] = [
 // Ítems core transversales gateados por permiso (no por módulo vendible/licencia).
 export const PERMISSION_NAV: NavItem[] = [
   { key: "servicios",     label: "Servicios",     href: "/servicios",     permission: "manage_services" },
+  { key: "doctores",      label: "Doctores",      href: "/doctores",      permission: "manage_users" },
+  { key: "horarios",      label: "Horarios",      href: "/horarios",      permission: "manage_schedules" },
   { key: "configuracion", label: "Configuración", href: "/configuracion", permission: "manage_tenant_settings" },
 ];
 
