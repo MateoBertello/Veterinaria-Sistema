@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { ApiError, type EstadoTurno, type Turno } from "../types/index.ts";
 
 vi.mock("../api/turnos.ts", () => ({
@@ -44,7 +45,14 @@ function makeTurno(over: Partial<Turno> = {}): Turno {
 }
 
 function renderPage() {
-  return render(<TurnosPage />);
+  return render(
+    <MemoryRouter initialEntries={["/turnos"]}>
+      <Routes>
+        <Route path="/turnos" element={<TurnosPage />} />
+        <Route path="/turnos/nuevo" element={<div>Agendar Turno</div>} />
+      </Routes>
+    </MemoryRouter>,
+  );
 }
 
 beforeEach(() => vi.clearAllMocks());
@@ -105,6 +113,16 @@ describe("TurnosPage", () => {
     expect(hoyBtn).toBeEnabled();
     await userEvent.click(hoyBtn);
     await waitFor(() => expect(mockListar).toHaveBeenLastCalledWith(hoyISO()));
+  });
+
+  it("el botón Nuevo turno navega a /turnos/nuevo", async () => {
+    mockListar.mockResolvedValue([]);
+    renderPage();
+    await screen.findByText(/No hay turnos para el/i);
+
+    await userEvent.click(screen.getByRole("button", { name: /Nuevo turno/i }));
+
+    expect(await screen.findByText("Agendar Turno")).toBeInTheDocument();
   });
 
   it.each<EstadoTurno>(["Programado", "Confirmado", "Completado", "Cancelado"])(

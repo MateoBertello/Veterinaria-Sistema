@@ -56,6 +56,8 @@ export const ErrorCode = {
   SERVICE_IN_USE:      "SERVICE_IN_USE",
   CONFIG_NOT_FOUND:    "CONFIG_NOT_FOUND",
   TURNO_SOLAPADO:      "TURNO_SOLAPADO",
+  PAST_DATE:              "PAST_DATE",
+  DUPLICATE_APPOINTMENT:  "DUPLICATE_APPOINTMENT",
   STAY_OVERLAP:        "STAY_OVERLAP",
   INVALID_RANGE:       "INVALID_RANGE",
   SCHEDULE_OVERLAP:    "SCHEDULE_OVERLAP",
@@ -223,6 +225,23 @@ export interface Turno {
   mascota:             TurnoMascota | null;
   cliente:             TurnoCliente | null;
   accionesDisponibles: string[];
+}
+
+export interface SlotDisponible {
+  startTime: string;
+  endTime:   string;
+}
+
+/** Payload de POST /turnos — nombres iguales al CrearTurnoSchema del backend (clientId/petId). */
+export interface CrearTurnoInput {
+  servicioId: string;
+  clientId:   string;
+  petId:      string;
+  doctorId?:  string;
+  date:       string;
+  startTime:  string;
+  reason:     string;
+  notes?:     string;
 }
 
 // ─── Configuración de la Clínica ────────────────────────────────────────────

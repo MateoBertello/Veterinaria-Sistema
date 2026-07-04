@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
-import { CalendarDays, ChevronLeft, ChevronRight } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { CalendarDays, ChevronLeft, ChevronRight, Plus } from "lucide-react";
 import {
   Table,
   TableBody,
@@ -51,6 +52,7 @@ function abrirDetalle(turno: Turno) {
 }
 
 export function TurnosPage() {
+  const navigate = useNavigate();
   const [fecha, setFecha] = useState(hoyISO());
   const [turnos, setTurnos] = useState<Turno[]>([]);
   const [loading, setLoading] = useState(true);
@@ -78,14 +80,20 @@ export function TurnosPage() {
 
   return (
     <div className="mx-auto max-w-6xl space-y-6">
-      <header className="space-y-1">
-        <h1 className="flex items-center gap-2 text-2xl font-semibold text-orange-800">
-          <CalendarDays className="size-6" aria-hidden />
-          Agenda de Turnos
-        </h1>
-        <p className="text-sm text-muted-foreground">
-          Turnos programados y confirmados para la fecha seleccionada.
-        </p>
+      <header className="flex flex-wrap items-start justify-between gap-3">
+        <div className="space-y-1">
+          <h1 className="flex items-center gap-2 text-2xl font-semibold text-orange-800">
+            <CalendarDays className="size-6" aria-hidden />
+            Agenda de Turnos
+          </h1>
+          <p className="text-sm text-muted-foreground">
+            Turnos programados y confirmados para la fecha seleccionada.
+          </p>
+        </div>
+        <Button onClick={() => navigate("/turnos/nuevo")}>
+          <Plus className="size-4" aria-hidden />
+          Nuevo turno
+        </Button>
       </header>
 
       <div className="flex flex-wrap items-center gap-3">

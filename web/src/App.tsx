@@ -15,6 +15,7 @@ import { ConfiguracionPage } from "./pages/ConfiguracionPage.tsx";
 import { DoctoresPage } from "./pages/DoctoresPage.tsx";
 import { HorariosPage } from "./pages/HorariosPage.tsx";
 import { TurnosPage } from "./pages/TurnosPage.tsx";
+import { AgendarTurnoPage } from "./pages/AgendarTurnoPage.tsx";
 import { Button } from "./components/ui/button.tsx";
 import { cn } from "./components/ui/utils.ts";
 
@@ -121,6 +122,7 @@ export function App() {
         <Route path="/doctores" element={<DoctoresPage />} />
         <Route path="/horarios" element={<HorariosPage />} />
         <Route path="/turnos" element={<TurnosPage />} />
+        <Route path="/turnos/nuevo" element={<AgendarTurnoPage />} />
         <Route path="/configuracion" element={<ConfiguracionPage />} />
         <Route path="*" element={<Navigate to="/clientes" replace />} />
       </Route>
