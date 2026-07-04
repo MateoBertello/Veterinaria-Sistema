@@ -182,6 +182,49 @@ export interface ServicioInput {
   descripcion?:        string | null;
 }
 
+// ─── Turnos ─────────────────────────────────────────────────────────────────
+
+export type EstadoTurno = "Programado" | "Confirmado" | "Completado" | "Cancelado";
+
+export interface TurnoServicio {
+  id:              string;
+  nombre:          string;
+  tipo:            TipoServicio;
+  duracionMinutos: number;
+}
+
+export interface TurnoDoctor {
+  id:   string;
+  name: string;
+}
+
+export interface TurnoMascota {
+  id:   string;
+  name: string;
+}
+
+export interface TurnoCliente {
+  id:       string;
+  fullName: string;
+}
+
+export interface Turno {
+  id:                  string;
+  date:                string;
+  startTime:           string;
+  endTime:             string;
+  status:              EstadoTurno;
+  reason:              string;
+  notes:               string | null;
+  cancellationReason:  string | null;
+  cancelledAt:         string | null;
+  servicio:            TurnoServicio | null;
+  doctor:              TurnoDoctor | null;
+  mascota:             TurnoMascota | null;
+  cliente:             TurnoCliente | null;
+  accionesDisponibles: string[];
+}
+
 // ─── Configuración de la Clínica ────────────────────────────────────────────
 
 export interface ConfiguracionTenant {
