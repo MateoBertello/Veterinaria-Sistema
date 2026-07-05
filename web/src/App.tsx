@@ -123,6 +123,7 @@ export function App() {
         <Route path="/horarios" element={<HorariosPage />} />
         <Route path="/turnos" element={<TurnosPage />} />
         <Route path="/turnos/nuevo" element={<AgendarTurnoPage />} />
+        <Route path="/turnos/:id/editar" element={<AgendarTurnoPage />} />
         <Route path="/configuracion" element={<ConfiguracionPage />} />
         <Route path="*" element={<Navigate to="/clientes" replace />} />
       </Route>

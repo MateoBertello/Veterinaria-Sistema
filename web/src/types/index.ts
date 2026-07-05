@@ -56,6 +56,9 @@ export const ErrorCode = {
   SERVICE_IN_USE:      "SERVICE_IN_USE",
   CONFIG_NOT_FOUND:    "CONFIG_NOT_FOUND",
   TURNO_SOLAPADO:      "TURNO_SOLAPADO",
+  TURNO_NOT_FOUND:        "TURNO_NOT_FOUND",
+  APPOINTMENT_LOCKED:     "APPOINTMENT_LOCKED",
+  INVALID_TRANSITION:     "INVALID_TRANSITION",
   PAST_DATE:              "PAST_DATE",
   DUPLICATE_APPOINTMENT:  "DUPLICATE_APPOINTMENT",
   STAY_OVERLAP:        "STAY_OVERLAP",
@@ -242,6 +245,21 @@ export interface CrearTurnoInput {
   startTime:  string;
   reason:     string;
   notes?:     string;
+}
+
+/**
+ * Payload de PUT /turnos/:id — todos opcionales (≥1 requerido). El backend NUNCA
+ * acepta endTime: lo recalcula con la duración vigente del servicio (RN-MC2).
+ */
+export interface ModificarTurnoInput {
+  servicioId?: string;
+  clientId?:   string;
+  petId?:      string;
+  doctorId?:   string | null;
+  date?:       string;
+  startTime?:  string;
+  reason?:     string;
+  notes?:      string | null;
 }
 
 // ─── Configuración de la Clínica ────────────────────────────────────────────

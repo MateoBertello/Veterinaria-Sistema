@@ -25,6 +25,8 @@ vi.mock("../api/doctores.ts", () => ({
 }));
 vi.mock("../api/turnos.ts", () => ({
   crearTurno: vi.fn(),
+  modificarTurno: vi.fn(),
+  obtenerTurno: vi.fn(),
   obtenerSlotsDisponibles: vi.fn(),
 }));
 vi.mock("sonner", () => ({
@@ -36,13 +38,15 @@ import { listarServicios } from "../api/servicios.ts";
 import { listarClientes } from "../api/clientes.ts";
 import { listarMascotas } from "../api/mascotas.ts";
 import { listarDoctores } from "../api/doctores.ts";
-import { crearTurno, obtenerSlotsDisponibles } from "../api/turnos.ts";
+import { crearTurno, modificarTurno, obtenerSlotsDisponibles, obtenerTurno } from "../api/turnos.ts";
 
 const mockListarServicios = vi.mocked(listarServicios);
 const mockListarClientes = vi.mocked(listarClientes);
 const mockListarMascotas = vi.mocked(listarMascotas);
 const mockListarDoctores = vi.mocked(listarDoctores);
 const mockCrearTurno = vi.mocked(crearTurno);
+const mockModificarTurno = vi.mocked(modificarTurno);
+const mockObtenerTurno = vi.mocked(obtenerTurno);
 const mockSlots = vi.mocked(obtenerSlotsDisponibles);
 
 const FECHA_FUTURA = "2099-01-01";
@@ -141,6 +145,17 @@ function renderPage() {
     <MemoryRouter initialEntries={["/turnos/nuevo"]}>
       <Routes>
         <Route path="/turnos/nuevo" element={<AgendarTurnoPage />} />
+        <Route path="/turnos" element={<div>Agenda de turnos</div>} />
+      </Routes>
+    </MemoryRouter>,
+  );
+}
+
+function renderEditPage(turnoId = "t1") {
+  return render(
+    <MemoryRouter initialEntries={[`/turnos/${turnoId}/editar`]}>
+      <Routes>
+        <Route path="/turnos/:id/editar" element={<AgendarTurnoPage />} />
         <Route path="/turnos" element={<div>Agenda de turnos</div>} />
       </Routes>
     </MemoryRouter>,
@@ -378,5 +393,71 @@ describe("AgendarTurnoPage", () => {
     expect(
       await screen.findByText("doctorId es obligatorio para este servicio"),
     ).toBeInTheDocument();
+  });
+
+  describe("modo edición", () => {
+    it("prefila el formulario desde el turno y guarda con PUT (modificarTurno)", async () => {
+      const cliente = makeCliente();
+      const mascota = makeMascota();
+      mockObtenerTurno.mockResolvedValue(makeTurno({ reason: "Control", notes: "Traer estudios" }));
+      mockListarClientes.mockResolvedValue({ items: [cliente], meta: { page: 1, limit: 15, total: 1 } });
+      mockListarMascotas.mockResolvedValue({ items: [mascota], meta: { page: 1, limit: 100, total: 1 } });
+      mockModificarTurno.mockResolvedValue(makeTurno({ reason: "Control post-op" }));
+
+      renderEditPage();
+
+      // Header propio del modo edición y campo prellenado.
+      expect(await screen.findByRole("heading", { name: /Modificar Turno/i })).toBeInTheDocument();
+      expect(await screen.findByDisplayValue("Control")).toBeInTheDocument();
+      expect(mockObtenerTurno).toHaveBeenCalledWith("t1");
+
+      const motivo = screen.getByLabelText("Motivo *");
+      await userEvent.clear(motivo);
+      await userEvent.type(motivo, "Control post-op");
+      await userEvent.click(screen.getByRole("button", { name: "Guardar cambios" }));
+
+      await waitFor(() =>
+        expect(mockModificarTurno).toHaveBeenCalledWith("t1", {
+          servicioId: "s1",
+          clientId: "c1",
+          petId: "m1",
+          doctorId: null,
+          date: FECHA_FUTURA,
+          startTime: "10:00",
+          reason: "Control post-op",
+          notes: "Traer estudios",
+        }),
+      );
+      expect(mockCrearTurno).not.toHaveBeenCalled();
+      expect(await screen.findByText("Agenda de turnos")).toBeInTheDocument();
+    });
+
+    it("muestra APPOINTMENT_LOCKED como toast al modificar un turno bloqueado", async () => {
+      const cliente = makeCliente();
+      const mascota = makeMascota();
+      mockObtenerTurno.mockResolvedValue(makeTurno());
+      mockListarClientes.mockResolvedValue({ items: [cliente], meta: { page: 1, limit: 15, total: 1 } });
+      mockListarMascotas.mockResolvedValue({ items: [mascota], meta: { page: 1, limit: 100, total: 1 } });
+      mockModificarTurno.mockRejectedValue(
+        new ApiError("APPOINTMENT_LOCKED", 422, "El turno ya no puede modificarse"),
+      );
+
+      renderEditPage();
+      await screen.findByDisplayValue("Control");
+      await userEvent.click(screen.getByRole("button", { name: "Guardar cambios" }));
+
+      const { toast } = await import("sonner");
+      await waitFor(() =>
+        expect(vi.mocked(toast.error)).toHaveBeenCalledWith("El turno ya no puede modificarse"),
+      );
+    });
+
+    it("muestra un error si no se puede cargar el turno a editar", async () => {
+      mockObtenerTurno.mockRejectedValue(new ApiError("TURNO_NOT_FOUND", 404, "Turno no encontrado"));
+
+      renderEditPage();
+
+      expect(await screen.findByText("Turno no encontrado")).toBeInTheDocument();
+    });
   });
 });

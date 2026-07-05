@@ -1,48 +1,22 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
-import { ApiError, type EstadoTurno, type Turno } from "../types/index.ts";
 
 vi.mock("../api/turnos.ts", () => ({
-  listarTurnosPorFecha: vi.fn(),
+  listarTurnos: vi.fn(),
+  listarTurnosActivosDelMes: vi.fn(),
+  obtenerTurno: vi.fn(),
+  cancelarTurno: vi.fn(),
+  cambiarEstado: vi.fn(),
+  eliminarTurno: vi.fn(),
 }));
 
 import { TurnosPage } from "./TurnosPage.tsx";
-import { listarTurnosPorFecha } from "../api/turnos.ts";
+import { listarTurnos, listarTurnosActivosDelMes } from "../api/turnos.ts";
 
-const mockListar = vi.mocked(listarTurnosPorFecha);
-
-function hoyISO(): string {
-  return new Date().toISOString().slice(0, 10);
-}
-
-function addDias(iso: string, delta: number): string {
-  const [y, m, d] = iso.split("-").map(Number);
-  const fecha = new Date(Date.UTC(y, m - 1, d));
-  fecha.setUTCDate(fecha.getUTCDate() + delta);
-  return fecha.toISOString().slice(0, 10);
-}
-
-function makeTurno(over: Partial<Turno> = {}): Turno {
-  return {
-    id: "t1",
-    date: hoyISO(),
-    startTime: "10:00",
-    endTime: "10:30",
-    status: "Confirmado",
-    reason: "Control general",
-    notes: null,
-    cancellationReason: null,
-    cancelledAt: null,
-    servicio: { id: "s1", nombre: "Consulta general", tipo: "clinica", duracionMinutos: 30 },
-    doctor: { id: "d1", name: "Dra. Ana Gómez" },
-    mascota: { id: "p1", name: "Max" },
-    cliente: { id: "c1", fullName: "María García" },
-    accionesDisponibles: [],
-    ...over,
-  };
-}
+const mockListar = vi.mocked(listarTurnos);
+const mockMes = vi.mocked(listarTurnosActivosDelMes);
 
 function renderPage() {
   return render(
@@ -55,82 +29,35 @@ function renderPage() {
   );
 }
 
-beforeEach(() => vi.clearAllMocks());
+beforeEach(() => {
+  vi.clearAllMocks();
+  mockListar.mockResolvedValue([]);
+  mockMes.mockResolvedValue([]);
+});
 
-describe("TurnosPage", () => {
-  it("carga y muestra los turnos del día actual", async () => {
-    mockListar.mockResolvedValue([makeTurno()]);
-
+describe("TurnosPage (shell)", () => {
+  it("arranca en la vista día (muestra la navegación de día)", async () => {
     renderPage();
-
-    expect(await screen.findByText("Max")).toBeInTheDocument();
-    expect(screen.getByText("María García")).toBeInTheDocument();
-    expect(screen.getByText("10:00 – 10:30")).toBeInTheDocument();
-    expect(screen.getByText("Consulta general")).toBeInTheDocument();
-    expect(screen.getByText("Dra. Ana Gómez")).toBeInTheDocument();
-    expect(screen.getByText("Confirmado")).toBeInTheDocument();
-    expect(mockListar).toHaveBeenCalledWith(hoyISO());
+    expect(await screen.findByRole("button", { name: "Día siguiente" })).toBeInTheDocument();
   });
 
-  it("muestra el estado vacío cuando no hay turnos", async () => {
-    mockListar.mockResolvedValue([]);
-
+  it("el toggle cambia a la vista mes (calendario)", async () => {
     renderPage();
+    await screen.findByRole("button", { name: "Día siguiente" });
 
-    expect(await screen.findByText(/No hay turnos para el/i)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("radio", { name: "Vista mes" }));
+
+    // La grilla mensual muestra las cabeceras de días de la semana.
+    expect(await screen.findByText("Lun")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Día siguiente" })).not.toBeInTheDocument();
   });
 
-  it("muestra el estado de error con opción de reintentar", async () => {
-    mockListar.mockRejectedValueOnce(new ApiError("INTERNAL_ERROR", 500, "Falló la carga"));
-
+  it("Nuevo turno navega a /turnos/nuevo", async () => {
     renderPage();
-
-    expect(await screen.findByText("Falló la carga")).toBeInTheDocument();
-
-    mockListar.mockResolvedValue([makeTurno()]);
-    await userEvent.click(screen.getByRole("button", { name: /Reintentar/i }));
-
-    expect(await screen.findByText("Max")).toBeInTheDocument();
-  });
-
-  it("el botón Hoy está deshabilitado cuando ya se muestra el día actual", async () => {
-    mockListar.mockResolvedValue([]);
-    renderPage();
-    await screen.findByText(/No hay turnos para el/i);
-
-    expect(screen.getByRole("button", { name: "Hoy" })).toBeDisabled();
-  });
-
-  it("navega al día siguiente y vuelve a Hoy", async () => {
-    mockListar.mockResolvedValue([]);
-    renderPage();
-    await screen.findByText(/No hay turnos para el/i);
-
-    await userEvent.click(screen.getByRole("button", { name: "Día siguiente" }));
-    await waitFor(() => expect(mockListar).toHaveBeenLastCalledWith(addDias(hoyISO(), 1)));
-
-    const hoyBtn = screen.getByRole("button", { name: "Hoy" });
-    expect(hoyBtn).toBeEnabled();
-    await userEvent.click(hoyBtn);
-    await waitFor(() => expect(mockListar).toHaveBeenLastCalledWith(hoyISO()));
-  });
-
-  it("el botón Nuevo turno navega a /turnos/nuevo", async () => {
-    mockListar.mockResolvedValue([]);
-    renderPage();
-    await screen.findByText(/No hay turnos para el/i);
+    await screen.findByRole("button", { name: "Día siguiente" });
 
     await userEvent.click(screen.getByRole("button", { name: /Nuevo turno/i }));
 
     expect(await screen.findByText("Agendar Turno")).toBeInTheDocument();
   });
-
-  it.each<EstadoTurno>(["Programado", "Confirmado", "Completado", "Cancelado"])(
-    "muestra el badge del estado %s",
-    async (status) => {
-      mockListar.mockResolvedValue([makeTurno({ status })]);
-      renderPage();
-      expect(await screen.findByText(status)).toBeInTheDocument();
-    },
-  );
 });

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   Controller,
   useForm,
@@ -8,7 +8,7 @@ import {
   type RegisterOptions,
 } from "react-hook-form";
 import { toast } from "sonner";
-import { ArrowLeft, CalendarPlus, Lock } from "lucide-react";
+import { ArrowLeft, CalendarPlus, Lock, PencilLine } from "lucide-react";
 import { Card, CardContent } from "../components/ui/card.tsx";
 import { Button } from "../components/ui/button.tsx";
 import { Input } from "../components/ui/input.tsx";
@@ -28,7 +28,7 @@ import { ServicioCombobox } from "../components/turnos/ServicioCombobox.tsx";
 import { SlotGrid } from "../components/turnos/SlotGrid.tsx";
 import { listarServicios } from "../api/servicios.ts";
 import { listarMascotas } from "../api/mascotas.ts";
-import { crearTurno, obtenerSlotsDisponibles } from "../api/turnos.ts";
+import { crearTurno, modificarTurno, obtenerSlotsDisponibles, obtenerTurno } from "../api/turnos.ts";
 import {
   ApiError,
   ErrorCode,
@@ -78,8 +78,12 @@ function fieldFromDetail(d: unknown): string | undefined {
 
 export function AgendarTurnoPage() {
   const navigate = useNavigate();
+  const { id: turnoId } = useParams();
+  const modoEdicion = Boolean(turnoId);
 
   const [serviciosCheck, setServiciosCheck] = useState<"cargando" | "vacio" | "ok">("cargando");
+  const [cargandoTurno, setCargandoTurno] = useState(modoEdicion);
+  const [errorTurno, setErrorTurno] = useState<string | null>(null);
 
   const [servicio, setServicio] = useState<Servicio | null>(null);
   const [cliente, setCliente] = useState<Cliente | null>(null);
@@ -99,10 +103,76 @@ export function AgendarTurnoPage() {
     watch,
     setValue,
     setError,
+    reset,
     formState: { errors, isSubmitting },
   } = useForm<FormValues>({ defaultValues: VACIO });
 
   const fecha = watch("date");
+
+  // Modo edición (RN-MC2): carga el turno y prefila el formulario + los estados
+  // auxiliares. `requiereProfesional` se deriva de la presencia de doctor (RN-TU10);
+  // si el usuario cambia el servicio, el combobox aporta el objeto real.
+  useEffect(() => {
+    if (!turnoId) return;
+    let vigente = true;
+    setCargandoTurno(true);
+    setErrorTurno(null);
+    obtenerTurno(turnoId)
+      .then((t) => {
+        if (!vigente) return;
+        setServicio(
+          t.servicio
+            ? {
+                id: t.servicio.id,
+                nombre: t.servicio.nombre,
+                tipo: t.servicio.tipo,
+                duracionMinutos: t.servicio.duracionMinutos,
+                requiereProfesional: t.doctor !== null,
+                descripcion: null,
+                activo: true,
+                createdAt: "",
+              }
+            : null,
+        );
+        setCliente(
+          t.cliente
+            ? {
+                id: t.cliente.id,
+                fullName: t.cliente.fullName,
+                dniCuit: null, phone: null, address: null, email: null,
+                observations: null, createdAt: "", createdBy: null, livePetCount: 0,
+              }
+            : null,
+        );
+        setDoctor(
+          t.doctor
+            ? {
+                id: t.doctor.id, userId: null, name: t.doctor.name,
+                specialty: null, licenseNumber: null, available: true,
+                createdAt: "", usuario: null,
+              }
+            : null,
+        );
+        setSelectedSlot({ startTime: t.startTime, endTime: t.endTime });
+        reset({
+          servicioId: t.servicio?.id ?? "",
+          clientId: t.cliente?.id ?? "",
+          petId: t.mascota?.id ?? "",
+          doctorId: t.doctor?.id ?? "",
+          date: t.date,
+          startTime: t.startTime,
+          reason: t.reason,
+          notes: t.notes ?? "",
+        });
+      })
+      .catch((err) => {
+        if (vigente) setErrorTurno(err instanceof ApiError ? err.message : "No se pudo cargar el turno");
+      })
+      .finally(() => {
+        if (vigente) setCargandoTurno(false);
+      });
+    return () => { vigente = false; };
+  }, [turnoId, reset]);
 
   useEffect(() => {
     listarServicios({ activo: true, limit: 1 })
@@ -144,6 +214,21 @@ export function AgendarTurnoPage() {
 
   async function onSubmit(values: FormValues) {
     try {
+      if (modoEdicion && turnoId) {
+        const turno = await modificarTurno(turnoId, {
+          servicioId: values.servicioId,
+          clientId: values.clientId,
+          petId: values.petId,
+          doctorId: values.doctorId || null,
+          date: values.date,
+          startTime: values.startTime,
+          reason: values.reason.trim(),
+          notes: values.notes.trim() || null,
+        });
+        toast.success(`Turno actualizado: ${turno.date} ${turno.startTime}–${turno.endTime}`);
+        navigate("/turnos");
+        return;
+      }
       const turno = await crearTurno({
         servicioId: values.servicioId,
         clientId: values.clientId,
@@ -158,6 +243,10 @@ export function AgendarTurnoPage() {
       navigate("/turnos");
     } catch (err) {
       if (err instanceof ApiError) {
+        if (err.code === ErrorCode.APPOINTMENT_LOCKED) {
+          toast.error(err.message);
+          return;
+        }
         if (err.code === ErrorCode.SERVICE_NOT_FOUND) {
           setError("servicioId", { type: "server", message: err.message });
           return;
@@ -203,22 +292,45 @@ export function AgendarTurnoPage() {
 
       <header className="space-y-1">
         <h1 className="flex items-center gap-2 text-2xl font-semibold text-orange-800">
-          <CalendarPlus className="size-6" aria-hidden />
-          Agendar Turno
+          {modoEdicion ? (
+            <PencilLine className="size-6" aria-hidden />
+          ) : (
+            <CalendarPlus className="size-6" aria-hidden />
+          )}
+          {modoEdicion ? "Modificar Turno" : "Agendar Turno"}
         </h1>
         <p className="text-sm text-muted-foreground">
-          Los campos marcados con * son obligatorios.
+          {modoEdicion
+            ? "El horario se revalida con la duración vigente del servicio."
+            : "Los campos marcados con * son obligatorios."}
         </p>
       </header>
 
-      {serviciosCheck === "cargando" ? (
+      {modoEdicion && cargandoTurno ? (
+        <Card>
+          <CardContent className="space-y-3 pt-6">
+            <Skeleton className="h-9 w-full" />
+            <Skeleton className="h-9 w-full" />
+            <Skeleton className="h-9 w-full" />
+          </CardContent>
+        </Card>
+      ) : modoEdicion && errorTurno ? (
+        <Card>
+          <CardContent className="space-y-2 py-10 text-center">
+            <p className="text-sm text-destructive">{errorTurno}</p>
+            <Button variant="outline" onClick={() => navigate("/turnos")}>
+              Volver a la agenda
+            </Button>
+          </CardContent>
+        </Card>
+      ) : serviciosCheck === "cargando" ? (
         <Card>
           <CardContent className="space-y-3 pt-6">
             <Skeleton className="h-9 w-full" />
             <Skeleton className="h-9 w-full" />
           </CardContent>
         </Card>
-      ) : serviciosCheck === "vacio" ? (
+      ) : serviciosCheck === "vacio" && !modoEdicion ? (
         <Card>
           <CardContent className="space-y-2 py-10 text-center">
             <p className="text-sm text-muted-foreground">
@@ -449,7 +561,7 @@ export function AgendarTurnoPage() {
 
               <div className="flex justify-end">
                 <Button type="submit" disabled={isSubmitting}>
-                  Agendar y Confirmar
+                  {modoEdicion ? "Guardar cambios" : "Agendar y Confirmar"}
                 </Button>
               </div>
             </form>
