@@ -43,7 +43,7 @@ describe("ClienteFormDialog", () => {
     expect(crear).not.toHaveBeenCalled();
   });
 
-  it("valida el formato del DNI/CUIT (RN-CL2)", async () => {
+  it("valida el formato del DNI/CUIT (RN-CL2/RN-CL6: paridad backend/front)", async () => {
     setup();
 
     await userEvent.type(screen.getByLabelText(/DNI\/CUIT/i), "20-ABC-9");

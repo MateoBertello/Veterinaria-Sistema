@@ -573,6 +573,43 @@ describe("TurnoService.cambiarEstado", () => {
   });
 });
 
+describe("TurnoService.listarTurnos", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("RN-ES2/RN-MC4: sin filtro de status, la query trae solo Programado/Confirmado (excluye Completado y Cancelado)", async () => {
+    const db = makeDb([{ data: [] }]);
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    await TurnoService.listarTurnos({}, ctx);
+
+    expect(db["in"]).toHaveBeenCalledWith("status", ["Programado", "Confirmado"]);
+    const eqCalls = (db["eq"] as ReturnType<typeof vi.fn>).mock.calls;
+    expect(eqCalls.some(([field]) => field === "status")).toBe(false);
+  });
+
+  it("RN-ES2: listarTurnos con status='Completado' explícito no aplica el default (no usa .in)", async () => {
+    const db = makeDb([{ data: [] }]);
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    await TurnoService.listarTurnos({ status: "Completado" }, ctx);
+
+    expect(db["eq"]).toHaveBeenCalledWith("status", "Completado");
+    expect(db["in"]).not.toHaveBeenCalled();
+  });
+
+  it("RN-MC4: listarTurnos con status='Cancelado' explícito no aplica el default (no usa .in)", async () => {
+    const db = makeDb([{ data: [] }]);
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    await TurnoService.listarTurnos({ status: "Cancelado" }, ctx);
+
+    expect(db["eq"]).toHaveBeenCalledWith("status", "Cancelado");
+    expect(db["in"]).not.toHaveBeenCalled();
+  });
+});
+
 describe("TurnoService.slotsDisponibles", () => {
   beforeEach(() => {
     vi.clearAllMocks();

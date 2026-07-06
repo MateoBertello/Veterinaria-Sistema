@@ -7,7 +7,7 @@ function modulo(over: Partial<ModuloContratado>): ModuloContratado {
 }
 
 describe("buildNavItems", () => {
-  it("sin módulos ni permisos, devuelve solo los ítems base", () => {
+  it("RN-G1: sin módulos ni permisos, devuelve solo los ítems base (Core siempre presente)", () => {
     const items = buildNavItems([]);
     expect(items.map((i) => i.key)).toEqual(["inicio", "clientes", "mascotas"]);
   });
