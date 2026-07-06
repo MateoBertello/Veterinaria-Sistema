@@ -121,7 +121,7 @@ describe("TurnoDetalleDialog", () => {
     expect(onSuccess).toHaveBeenCalled();
   });
 
-  it("cancelar exige un motivo y llama cancelarTurno con él", async () => {
+  it("RN-MC5: cancelar exige un motivo y llama cancelarTurno con él", async () => {
     const turno = makeTurno();
     const { api, onSuccess, onOpenChange } = setup(turno);
     await userEvent.click(await screen.findByRole("button", { name: /Cancelar turno/ }));
@@ -186,7 +186,7 @@ describe("TurnoDetalleDialog", () => {
     await waitFor(() => expect(api.obtenerTurno).toHaveBeenCalledTimes(2));
   });
 
-  it("eliminar pide confirmación y llama eliminarTurno", async () => {
+  it("RN-MC5: eliminar pide confirmación y llama eliminarTurno", async () => {
     const turno = makeTurno({ status: "Cancelado", accionesDisponibles: ["eliminar"] });
     const { api, onSuccess, onOpenChange } = setup(turno);
     await userEvent.click(await screen.findByRole("button", { name: /^Eliminar$/ }));

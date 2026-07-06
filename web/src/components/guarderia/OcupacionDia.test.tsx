@@ -147,7 +147,7 @@ describe("OcupacionDia", () => {
     );
   });
 
-  it("Cancelar exige motivo, llama a la API con el motivo y refetea lista+cupo", async () => {
+  it("RN-ME4: Cancelar exige motivo, llama a la API con el motivo y refetea lista+cupo", async () => {
     mockListar.mockResolvedValue([makeEstadia({ status: "Reservada" })]);
     mockCancelar.mockResolvedValue(makeEstadia({ status: "Cancelada" }));
     renderOcupacion();

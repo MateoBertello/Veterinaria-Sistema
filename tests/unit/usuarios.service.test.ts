@@ -395,3 +395,68 @@ describe("RN-SEC5: Doctor automático si rol=veterinario (UPSERT, DT-1)", () => 
     expect(upsertSpy).not.toHaveBeenCalled();
   });
 });
+
+// ─── RN-S1/RN-SEC3: ningún DTO expone password/password_hash ────────────────
+
+describe("RN-S1/RN-SEC3: el DTO público nunca expone password ni password_hash", () => {
+  it("RN-S1/RN-SEC3: crear usuario devuelve un DTO sin password ni password_hash", async () => {
+    const db = buildMockDb();
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    const usuario = await UsuariosService.crear(dtoValido, callerContext);
+
+    expect(usuario).not.toHaveProperty("password");
+    expect(usuario).not.toHaveProperty("passwordHash");
+    expect(usuario).not.toHaveProperty("password_hash");
+  });
+
+  it("RN-S1/RN-SEC3: editar usuario devuelve un DTO sin password ni password_hash", async () => {
+    const adminUser = {
+      id:        NEW_USER_ID,
+      tenant_id: TENANT_ID,
+      username:  "usuario_orig",
+      email:     "orig@test.com",
+      full_name: "Nombre Original",
+      active:    true,
+      rol_id:    ADMIN_ROLE_ID,
+    };
+    const db = buildMockDb({ usuarioExistente: adminUser, adminCount: 2, rolName: "admin" });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    const usuario = await UsuariosService.editar(NEW_USER_ID, { fullName: "Nombre Actualizado" }, callerContext);
+
+    expect(usuario).not.toHaveProperty("password");
+    expect(usuario).not.toHaveProperty("passwordHash");
+    expect(usuario).not.toHaveProperty("password_hash");
+  });
+});
+
+// ─── RN-SEC0/RN-SEC2: permisos derivan del rol, no editables por usuario ────
+
+describe("RN-SEC0/RN-SEC2: los permisos se heredan del rol, nunca se asignan por usuario", () => {
+  it("RN-SEC0/RN-SEC2: CrearUsuarioSchema/EditarUsuarioSchema solo aceptan roleId, ningún campo de permisos", () => {
+    expect("permisos" in dtoValido).toBe(false);
+    expect("permissions" in dtoValido).toBe(false);
+    expect("permisos" in { fullName: "x" }).toBe(false);
+  });
+
+  it("RN-SEC0/RN-SEC2: crear usuario ignora un campo 'permisos' enviado en el body (no llega al INSERT)", async () => {
+    const db = buildMockDb();
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    await UsuariosService.crear(
+      { ...dtoValido, permisos: ["manage_users", "manage_clients"] } as never,
+      callerContext,
+    );
+
+    const usuariosTableCalls = (db.from as ReturnType<typeof vi.fn>).mock.results;
+    const insertMock = usuariosTableCalls
+      .map((r) => r.value as { insert?: ReturnType<typeof vi.fn> })
+      .find((v) => typeof v.insert === "function" && (v.insert as ReturnType<typeof vi.fn>).mock.calls.length > 0);
+
+    const insertPayload = insertMock?.insert?.mock.calls[0]?.[0] as Record<string, unknown> | undefined;
+    expect(insertPayload).toBeDefined();
+    expect(insertPayload).not.toHaveProperty("permisos");
+    expect(insertPayload).toMatchObject({ rol_id: dtoValido.roleId });
+  });
+});

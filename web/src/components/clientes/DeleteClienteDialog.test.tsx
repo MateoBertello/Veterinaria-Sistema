@@ -29,7 +29,7 @@ function setup(eliminar: ReturnType<typeof vi.fn>) {
 }
 
 describe("DeleteClienteDialog", () => {
-  it("confirma la baja y notifica éxito", async () => {
+  it("RN-CL10: confirma la baja y notifica éxito", async () => {
     const eliminar = vi.fn().mockResolvedValue({ id: "c1", deleted: true });
     const { onDeleted } = setup(eliminar);
 
