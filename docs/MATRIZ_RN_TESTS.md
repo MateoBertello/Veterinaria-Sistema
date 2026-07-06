@@ -259,7 +259,7 @@ implícita; esos casos se señalan en la clasificación de brechas.
 | RN-SEC2 | ❌ | — |
 | RN-SEC3 | ❌ | — |
 | RN-SEC4 | ✅ | `tests/unit/usuarios.service.test.ts` |
-| RN-SEC5 | ✅ | `tests/unit/usuarios.service.test.ts` |
+| RN-SEC5 | ✅ | `tests/unit/usuarios.service.test.ts`<br>`tests/integration/doctores.integration.test.ts` |
 | RN-SEC6 | ✅ | `tests/unit/usuarios.service.test.ts` |
 | RN-SEC7 | ✅ | `tests/unit/usuarios.service.test.ts` |
 
