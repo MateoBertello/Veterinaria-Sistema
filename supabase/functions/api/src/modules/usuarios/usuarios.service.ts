@@ -33,6 +33,9 @@ export interface UsuarioPublico {
 
 // ─── Helpers internos ─────────────────────────────────────────────────────────
 
+/** RN-SEC5: especialidad por defecto del perfil profesional creado en el alta. */
+const SPECIALTY_POR_DEFECTO = "Clínica general";
+
 /** Omite campos sensibles de la respuesta (RN-S1) */
 function toPublicUser(row: Record<string, unknown>): UsuarioPublico {
   return {
@@ -178,12 +181,19 @@ export const UsuariosService = {
       .single();
 
     if (rol && (rol as { name: string }).name === "veterinario") {
-      await db.from("doctores").insert({
-        tenant_id: ctx.tenantId,
-        user_id:   authUserId,
-        name:      data.fullName,
-        available: true,
-      });
+      // UPSERT sobre UNIQUE(tenant_id, user_id) con DO NOTHING: si el perfil ya
+      // existe se conserva tal cual (specialty/matrícula/available editadas a
+      // mano en el ABM de Doctores no se pisan). El default solo aplica al alta.
+      await db.from("doctores").upsert(
+        {
+          tenant_id: ctx.tenantId,
+          user_id:   authUserId,
+          name:      data.fullName,
+          specialty: SPECIALTY_POR_DEFECTO,
+          available: true,
+        },
+        { onConflict: "tenant_id,user_id", ignoreDuplicates: true },
+      );
     }
 
     // 7. Auditoría CREATE (RN-SEC7 / RN-S3) — sin password en newValues (RN-S1)
@@ -293,12 +303,18 @@ export const UsuariosService = {
         .eq("id", data.roleId)
         .single();
       if (nuevoRol && (nuevoRol as { name: string }).name === "veterinario") {
-        await db.from("doctores").insert({
-          tenant_id: ctx.tenantId,
-          user_id:   id,
-          name:      data.fullName ?? (usuarioActual as { full_name: string }).full_name,
-          available: true,
-        });
+        // Mismo UPSERT DO NOTHING que en crear(): re-asignar el rol veterinario
+        // a un usuario que ya tiene perfil NO duplica la fila ni la modifica.
+        await db.from("doctores").upsert(
+          {
+            tenant_id: ctx.tenantId,
+            user_id:   id,
+            name:      data.fullName ?? (usuarioActual as { full_name: string }).full_name,
+            specialty: SPECIALTY_POR_DEFECTO,
+            available: true,
+          },
+          { onConflict: "tenant_id,user_id", ignoreDuplicates: true },
+        );
       }
     }
 

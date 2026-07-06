@@ -311,20 +311,23 @@ describe("RN-SEC7: Auditoría de escrituras de usuarios", () => {
 
 // ─── RN-SEC5: Doctor automático ───────────────────────────────────────────────
 
-describe("RN-SEC5: Crear Doctor automáticamente si rol=veterinario", () => {
-  it("RN-SEC5: crear usuario con rol veterinario dispara INSERT en doctores", async () => {
+/** Override de la tabla doctores con un spy de upsert (DT-1: nunca más INSERT crudo). */
+function spyDoctoresUpsert(db: ReturnType<typeof buildMockDb>) {
+  const upsertSpy = vi.fn().mockResolvedValue({ data: [{ id: "doctor-1" }], error: null });
+  const originalFrom = db.from;
+  db.from = vi.fn().mockImplementation((table: string) => {
+    if (table === "doctores") {
+      return { upsert: upsertSpy };
+    }
+    return originalFrom(table);
+  });
+  return upsertSpy;
+}
+
+describe("RN-SEC5: Doctor automático si rol=veterinario (UPSERT, DT-1)", () => {
+  it("RN-SEC5: crear con rol veterinario hace UPSERT en doctores con specialty por defecto", async () => {
     const db = buildMockDb({ rolName: "veterinario" });
-    const insertSpy = vi.fn().mockResolvedValue({ data: [{ id: "doctor-1" }], error: null });
-
-    // Override específico para la tabla doctores
-    const originalFrom = db.from;
-    db.from = vi.fn().mockImplementation((table: string) => {
-      if (table === "doctores") {
-        return { insert: insertSpy };
-      }
-      return originalFrom(table);
-    });
-
+    const upsertSpy = spyDoctoresUpsert(db);
     mockGetServiceDb.mockReturnValue(db as never);
 
     await UsuariosService.crear(
@@ -332,11 +335,63 @@ describe("RN-SEC5: Crear Doctor automáticamente si rol=veterinario", () => {
       callerContext,
     );
 
-    expect(insertSpy).toHaveBeenCalledOnce();
-    const insertArg = insertSpy.mock.calls[0][0];
-    expect(insertArg).toMatchObject({
+    expect(upsertSpy).toHaveBeenCalledOnce();
+    const [payload, opts] = upsertSpy.mock.calls[0];
+    expect(payload).toMatchObject({
       tenant_id: TENANT_ID,
       user_id:   NEW_USER_ID,
+      name:      dtoValido.fullName,
+      specialty: "Clínica general",
+      available: true,
     });
+    // DO NOTHING sobre perfil existente: no pisa specialty/matrícula editadas a mano.
+    expect(opts).toMatchObject({
+      onConflict:       "tenant_id,user_id",
+      ignoreDuplicates: true,
+    });
+  });
+
+  it("RN-SEC5: editar cambiando el rol a veterinario hace UPSERT (no duplica perfil existente)", async () => {
+    const usuario = {
+      id:        NEW_USER_ID,
+      tenant_id: TENANT_ID,
+      username:  "vet_existente",
+      email:     "vet@test.com",
+      full_name: "Vet Existente",
+      active:    true,
+      rol_id:    ADMIN_ROLE_ID,
+    };
+    const db = buildMockDb({ usuarioExistente: usuario, rolName: "veterinario" });
+    const upsertSpy = spyDoctoresUpsert(db);
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    await UsuariosService.editar(
+      NEW_USER_ID,
+      { roleId: VET_ROLE_ID },
+      callerContext,
+    );
+
+    expect(upsertSpy).toHaveBeenCalledOnce();
+    const [payload, opts] = upsertSpy.mock.calls[0];
+    expect(payload).toMatchObject({
+      tenant_id: TENANT_ID,
+      user_id:   NEW_USER_ID,
+      specialty: "Clínica general",
+      available: true,
+    });
+    expect(opts).toMatchObject({
+      onConflict:       "tenant_id,user_id",
+      ignoreDuplicates: true,
+    });
+  });
+
+  it("RN-SEC5: crear con rol no-veterinario NO toca doctores", async () => {
+    const db = buildMockDb({ rolName: "admin" });
+    const upsertSpy = spyDoctoresUpsert(db);
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    await UsuariosService.crear(dtoValido, callerContext);
+
+    expect(upsertSpy).not.toHaveBeenCalled();
   });
 });
