@@ -1,0 +1,395 @@
+# Matriz RN → Test — Etapa 9 / S1
+
+**Fecha:** 2026-07-06 · **Generada por:** sub-sesión S1 (diagnóstico de hardening).
+
+## Método
+
+Se extrajeron todos los códigos `RN-xx` del Documento Maestro v1.0 + Addendum v1.1 y se
+cruzaron contra los **títulos** de tests (`it(...)` / `test(...)` / `describe(...)`) de
+`tests/unit`, `tests/integration` y `web/src/**/*.test.tsx`, siguiendo la convención de
+CLAUDE.md (nombre del test = código RN). Una RN sin cita en título puede tener cobertura
+implícita; esos casos se señalan en la clasificación de brechas.
+
+## Estado de las suites al momento del corte (todas en verde)
+
+| Suite | Resultado |
+| :-- | :-- |
+| Typecheck (`tsc` API + web) | ✅ sin errores |
+| Unit (`vitest run tests/unit`) | ✅ 345 tests / 26 archivos |
+| Integración (`vitest run tests/integration`, stack local) | ✅ 137 tests / 11 archivos (incluye RLS/aislamiento bloqueantes) |
+| Componentes web (`vitest run` en `web/`) | ✅ 247 tests / 34 archivos |
+
+## Resumen
+
+| Total RN en docs | Con test (título) | Sin test | Cobertura |
+| :-: | :-: | :-: | :-: |
+| 167 | 123 | 44 | 73,7 % |
+
+---
+
+## Tabla completa por prefijo
+
+#### RN-AUD
+| RN | Test | Archivos |
+| :-- | :-: | :-- |
+| RN-AUD1 | ✅ | `tests/unit/auditoria.service.test.ts` |
+| RN-AUD2 | ✅ | `tests/unit/auditoria.service.test.ts` |
+| RN-AUD3 | ❌ | — |
+| RN-AUD4 | ❌ | — |
+| RN-AUD5 | ✅ | `tests/unit/auditoria.service.test.ts` |
+
+#### RN-AUT
+| RN | Test | Archivos |
+| :-- | :-: | :-- |
+| RN-AUT1 | ✅ | `tests/integration/auth.integration.test.ts`<br>`tests/unit/auth.service.test.ts` |
+| RN-AUT2 | ❌ | — |
+| RN-AUT3 | ✅ | `tests/unit/auth.service.test.ts` |
+| RN-AUT4 | ✅ | `tests/integration/auth.integration.test.ts`<br>`tests/unit/auth.service.test.ts` |
+| RN-AUT5 | ✅ | `tests/unit/auth.service.test.ts` |
+
+#### RN-CD
+| RN | Test | Archivos |
+| :-- | :-: | :-- |
+| RN-CD1 | ✅ | `tests/integration/mascotas.integration.test.ts`<br>`tests/unit/mascotas.service.test.ts` |
+| RN-CD2 | ✅ | `tests/integration/mascotas.integration.test.ts`<br>`tests/unit/mascotas.service.test.ts` |
+| RN-CD3 | ✅ | `tests/unit/mascotas.service.test.ts` |
+| RN-CD4 | ✅ | `tests/unit/mascotas.service.test.ts` |
+| RN-CD5 | ✅ | `tests/unit/mascotas.service.test.ts` |
+
+#### RN-CF
+| RN | Test | Archivos |
+| :-- | :-: | :-- |
+| RN-CF1 | ✅ | `tests/unit/configuracion.service.test.ts`<br>`web/src/pages/ConfiguracionPage.test.tsx` |
+| RN-CF2 | ✅ | `tests/unit/configuracion.service.test.ts`<br>`web/src/pages/ConfiguracionPage.test.tsx` |
+| RN-CF3 | ✅ | `tests/unit/configuracion.service.test.ts`<br>`web/src/pages/ConfiguracionPage.test.tsx` |
+| RN-CF4 | ❌ | — |
+| RN-CF5 | ✅ | `tests/unit/configuracion.service.test.ts` |
+
+#### RN-CK
+| RN | Test | Archivos |
+| :-- | :-: | :-- |
+| RN-CK1 | ✅ | `tests/unit/guarderia.service.test.ts` |
+| RN-CK2 | ✅ | `tests/unit/guarderia.service.test.ts` |
+| RN-CK3 | ✅ | `tests/unit/guarderia.service.test.ts` |
+| RN-CK4 | ✅ | `tests/unit/guarderia.service.test.ts` |
+| RN-CK5 | ❌ | — |
+| RN-CK6 | ✅ | `tests/unit/guarderia.service.test.ts` |
+
+#### RN-CL
+| RN | Test | Archivos |
+| :-- | :-: | :-- |
+| RN-CL1 | ✅ | `tests/unit/clientes.service.test.ts`<br>`web/src/components/clientes/ClienteFormDialog.test.tsx` |
+| RN-CL2 | ✅ | `tests/unit/clientes.service.test.ts`<br>`web/src/components/clientes/ClienteFormDialog.test.tsx` |
+| RN-CL3 | ✅ | `tests/unit/clientes.service.test.ts`<br>`web/src/components/clientes/ClienteFormDialog.test.tsx` |
+| RN-CL4 | ✅ | `tests/unit/clientes.service.test.ts` |
+| RN-CL5 | ✅ | `tests/unit/clientes.service.test.ts` |
+| RN-CL6 | ❌ | — |
+| RN-CL7 | ✅ | `tests/unit/clientes.service.test.ts` |
+| RN-CL8 | ✅ | `tests/unit/clientes.service.test.ts`<br>`web/src/components/clientes/DeleteClienteDialog.test.tsx`<br>`web/src/pages/ClientesPage.test.tsx` |
+| RN-CL9 | ✅ | `tests/unit/clientes.service.test.ts` |
+| RN-CL10 | ❌ | — |
+| RN-CL11 | ❌ | — |
+
+#### RN-EC
+| RN | Test | Archivos |
+| :-- | :-: | :-- |
+| RN-EC1 | ✅ | `tests/unit/historial.service.test.ts`<br>`web/src/components/historial/EventoClinicoFormDialog.test.tsx` |
+| RN-EC2 | ❌ | — |
+| RN-EC3 | ✅ | `tests/integration/historial-storage.integration.test.ts`<br>`tests/unit/historial.service.test.ts`<br>`web/src/components/historial/EutanasiaDialog.test.tsx`<br>`web/src/pages/HistorialClinicoPage.test.tsx` |
+| RN-EC4 | ✅ | `tests/integration/historial-storage.integration.test.ts`<br>`tests/unit/historial.service.test.ts` |
+| RN-EC5 | ✅ | `tests/unit/historial.service.test.ts` |
+| RN-EC6 | ✅ | `tests/unit/historial.service.test.ts`<br>`web/src/components/historial/EventoClinicoFormDialog.test.tsx` |
+| RN-EC7 | ❌ | — |
+| RN-EC8 | ❌ | — |
+| RN-EC9 | ✅ | `tests/unit/historial.service.test.ts` |
+| RN-EC10 | ✅ | `tests/unit/historial.service.test.ts`<br>`web/src/components/historial/EutanasiaDialog.test.tsx`<br>`web/src/pages/HistorialClinicoPage.test.tsx` |
+| RN-EC11 | ✅ | `tests/unit/historial.service.test.ts` |
+| RN-EC12 | ❌ | — |
+
+#### RN-ES
+| RN | Test | Archivos |
+| :-- | :-: | :-- |
+| RN-ES1 | ✅ | `tests/unit/turnos.service.test.ts` |
+| RN-ES2 | ❌ | — |
+| RN-ES3 | ✅ | `tests/unit/turnos.service.test.ts` |
+| RN-ES4 | ❌ | — |
+| RN-ES5 | ✅ | `tests/unit/turnos.service.test.ts` |
+
+#### RN-EX
+| RN | Test | Archivos |
+| :-- | :-: | :-- |
+| RN-EX1 | ✅ | `tests/unit/historial-export.service.test.ts`<br>`web/src/pages/HistorialClinicoPage.test.tsx` |
+| RN-EX2 | ✅ | `tests/unit/historial-export.service.test.ts`<br>`web/src/pages/HistorialClinicoPage.test.tsx` |
+| RN-EX3 | ✅ | `tests/unit/historial-export.service.test.ts` |
+| RN-EX4 | ✅ | `tests/unit/historial-export.service.test.ts` |
+| RN-EX5 | ❌ | — |
+
+#### RN-G
+| RN | Test | Archivos |
+| :-- | :-: | :-- |
+| RN-G1 | ❌ | — |
+| RN-G2 | ✅ | `tests/unit/navigation.test.ts`<br>`web/src/lib/navigation.test.ts` |
+
+#### RN-GU
+| RN | Test | Archivos |
+| :-- | :-: | :-- |
+| RN-GU1 | ✅ | `tests/unit/guarderia.service.test.ts` |
+| RN-GU2 | ✅ | `tests/unit/guarderia.service.test.ts` |
+| RN-GU3 | ✅ | `tests/unit/guarderia.service.test.ts` |
+| RN-GU4 | ✅ | `tests/unit/guarderia.service.test.ts` |
+| RN-GU5 | ✅ | `tests/unit/guarderia.service.test.ts` |
+| RN-GU6 | ❌ | — |
+| RN-GU7 | ✅ | `tests/unit/guarderia.service.test.ts` |
+
+#### RN-HC
+| RN | Test | Archivos |
+| :-- | :-: | :-- |
+| RN-HC1 | ✅ | `tests/unit/historial.service.test.ts`<br>`web/src/pages/HistorialClinicoPage.test.tsx` |
+| RN-HC2 | ✅ | `tests/unit/historial.service.test.ts`<br>`web/src/pages/HistorialClinicoPage.test.tsx` |
+| RN-HC3 | ✅ | `tests/unit/historial.service.test.ts`<br>`web/src/pages/HistorialClinicoPage.test.tsx` |
+| RN-HC4 | ✅ | `tests/unit/historial.service.test.ts` |
+| RN-HC5 | ❌ | — |
+
+#### RN-HOR
+| RN | Test | Archivos |
+| :-- | :-: | :-- |
+| RN-HOR1 | ✅ | `tests/unit/horarios.service.test.ts`<br>`web/src/components/horarios/FranjaFormDialog.test.tsx` |
+| RN-HOR2 | ✅ | `tests/unit/horarios.service.test.ts`<br>`web/src/components/horarios/FranjaFormDialog.test.tsx`<br>`web/src/pages/HorariosPage.test.tsx` |
+| RN-HOR3 | ❌ | — |
+| RN-HOR4 | ✅ | `tests/unit/horarios.service.test.ts` |
+| RN-HOR5 | ❌ | — |
+| RN-HOR6 | ✅ | `tests/unit/horarios.service.test.ts` |
+
+#### RN-MA
+| RN | Test | Archivos |
+| :-- | :-: | :-- |
+| RN-MA1 | ✅ | `tests/unit/mascotas.service.test.ts` |
+| RN-MA2 | ✅ | `tests/unit/mascotas.service.test.ts` |
+| RN-MA3 | ❌ | — |
+| RN-MA4 | ✅ | `tests/unit/mascotas.service.test.ts`<br>`web/src/components/mascotas/MascotaFormDialog.test.tsx` |
+| RN-MA5 | ❌ | — |
+| RN-MA6 | ✅ | `tests/unit/mascotas.service.test.ts` |
+| RN-MA7 | ✅ | `tests/unit/mascotas.service.test.ts` |
+| RN-MA8 | ✅ | `tests/integration/mascotas.integration.test.ts`<br>`tests/unit/mascotas.service.test.ts` |
+| RN-MA9 | ✅ | `tests/unit/mascotas.service.test.ts` |
+| RN-MA10 | ✅ | `tests/integration/mascotas.integration.test.ts`<br>`tests/unit/mascotas.service.test.ts` |
+
+#### RN-MC
+| RN | Test | Archivos |
+| :-- | :-: | :-- |
+| RN-MC1 | ✅ | `tests/unit/turnos.service.test.ts` |
+| RN-MC2 | ✅ | `tests/unit/turnos.service.test.ts` |
+| RN-MC3 | ✅ | `tests/unit/turnos.service.test.ts` |
+| RN-MC4 | ❌ | — |
+| RN-MC5 | ❌ | — |
+| RN-MC6 | ✅ | `tests/unit/turnos.service.test.ts` |
+| RN-MC7 | ✅ | `tests/unit/turnos.service.test.ts` |
+
+#### RN-ME
+| RN | Test | Archivos |
+| :-- | :-: | :-- |
+| RN-ME1 | ✅ | `tests/unit/guarderia.service.test.ts` |
+| RN-ME2 | ✅ | `tests/unit/guarderia.service.test.ts` |
+| RN-ME3 | ✅ | `tests/unit/guarderia.service.test.ts` |
+| RN-ME4 | ❌ | — |
+| RN-ME5 | ❌ | — |
+| RN-ME6 | ✅ | `tests/unit/guarderia.service.test.ts` |
+
+#### RN-MF
+| RN | Test | Archivos |
+| :-- | :-: | :-- |
+| RN-MF1 | ✅ | `tests/integration/mascotas.integration.test.ts`<br>`tests/unit/mascotas.service.test.ts` |
+| RN-MF2 | ✅ | `tests/integration/mascotas.integration.test.ts`<br>`tests/unit/mascotas.service.test.ts` |
+| RN-MF3 | ❌ | — |
+| RN-MF4 | ✅ | `tests/integration/mascotas.integration.test.ts` |
+| RN-MF5 | ✅ | `tests/unit/mascotas.service.test.ts` |
+
+#### RN-NT
+| RN | Test | Archivos |
+| :-- | :-: | :-- |
+| RN-NT1 | ✅ | `tests/unit/notificaciones.service.test.ts` |
+| RN-NT2 | ✅ | `tests/unit/notificaciones.service.test.ts` |
+| RN-NT3 | ✅ | `tests/unit/notificaciones.service.test.ts` |
+| RN-NT4 | ✅ | `tests/unit/notificaciones.service.test.ts` |
+| RN-NT5 | ❌ | — |
+| RN-NT6 | ✅ | `tests/unit/notificaciones.service.test.ts` |
+
+#### RN-PV
+| RN | Test | Archivos |
+| :-- | :-: | :-- |
+| RN-PV1 | ✅ | `tests/integration/vacunacion.integration.test.ts`<br>`tests/unit/vacunacion.service.test.ts` |
+| RN-PV2 | ✅ | `tests/unit/vacunacion.service.test.ts` |
+| RN-PV3 | ✅ | `tests/unit/vacunacion.service.test.ts` |
+| RN-PV4 | ✅ | `tests/integration/vacunacion.integration.test.ts`<br>`tests/unit/historial.service.test.ts`<br>`tests/unit/vacunacion.service.test.ts` |
+| RN-PV5 | ✅ | `tests/integration/vacunacion.integration.test.ts`<br>`tests/unit/vacunacion.service.test.ts` |
+| RN-PV6 | ✅ | `tests/unit/vacunacion-avisos.service.test.ts` |
+| RN-PV7 | ✅ | `tests/unit/vacunacion-avisos.service.test.ts` |
+| RN-PV8 | ✅ | `tests/unit/vacunacion-avisos.service.test.ts` |
+| RN-PV9 | ✅ | `tests/unit/vacunacion.service.test.ts` |
+
+#### RN-REC
+| RN | Test | Archivos |
+| :-- | :-: | :-- |
+| RN-REC1 | ❌ | — |
+| RN-REC2 | ❌ | — |
+| RN-REC3 | ❌ | — |
+| RN-REC4 | ❌ | — |
+
+#### RN-S
+| RN | Test | Archivos |
+| :-- | :-: | :-- |
+| RN-S1 | ❌ | — |
+| RN-S2 | ❌ | — |
+| RN-S3 | ✅ | `tests/unit/historial.service.test.ts` |
+
+#### RN-SA
+| RN | Test | Archivos |
+| :-- | :-: | :-- |
+| RN-SA1 | ✅ | `tests/integration/admin.integration.test.ts`<br>`tests/unit/tenants.service.test.ts` |
+| RN-SA2 | ✅ | `tests/integration/admin.integration.test.ts`<br>`tests/unit/tenants.service.test.ts` |
+| RN-SA3 | ✅ | `tests/integration/admin.integration.test.ts`<br>`tests/unit/requireActiveTenant.test.ts` |
+| RN-SA4 | ✅ | `tests/integration/admin.integration.test.ts`<br>`tests/unit/tenants.service.test.ts` |
+| RN-SA5 | ✅ | `tests/unit/tenants.service.test.ts` |
+
+#### RN-SEC
+| RN | Test | Archivos |
+| :-- | :-: | :-- |
+| RN-SEC0 | ❌ | — |
+| RN-SEC1 | ✅ | `tests/unit/usuarios.service.test.ts` |
+| RN-SEC2 | ❌ | — |
+| RN-SEC3 | ❌ | — |
+| RN-SEC4 | ✅ | `tests/unit/usuarios.service.test.ts` |
+| RN-SEC5 | ✅ | `tests/unit/usuarios.service.test.ts` |
+| RN-SEC6 | ✅ | `tests/unit/usuarios.service.test.ts` |
+| RN-SEC7 | ✅ | `tests/unit/usuarios.service.test.ts` |
+
+#### RN-SM
+| RN | Test | Archivos |
+| :-- | :-: | :-- |
+| RN-SM1 | ❌ | — |
+| RN-SM2 | ✅ | `tests/integration/modulos.integration.test.ts`<br>`tests/unit/modulos.service.test.ts` |
+| RN-SM3 | ✅ | `tests/integration/modulos.integration.test.ts`<br>`tests/unit/modulos.service.test.ts` |
+| RN-SM4 | ✅ | `tests/integration/modulos.integration.test.ts`<br>`tests/unit/modulos.service.test.ts` |
+
+#### RN-SV
+| RN | Test | Archivos |
+| :-- | :-: | :-- |
+| RN-SV1 | ✅ | `tests/unit/servicios.service.test.ts`<br>`web/src/components/servicios/ServicioFormSheet.test.tsx` |
+| RN-SV2 | ✅ | `tests/unit/servicios.service.test.ts`<br>`web/src/components/servicios/ServicioFormSheet.test.tsx` |
+| RN-SV3 | ✅ | `tests/unit/servicios.service.test.ts`<br>`web/src/components/servicios/DesactivarServicioDialog.test.tsx` |
+| RN-SV4 | ✅ | `tests/unit/servicios.service.test.ts` |
+| RN-SV5 | ✅ | `tests/unit/servicios.service.test.ts` |
+| RN-SV6 | ✅ | `tests/unit/servicios.service.test.ts` |
+| RN-SV7 | ❌ | — |
+
+#### RN-TU
+| RN | Test | Archivos |
+| :-- | :-: | :-- |
+| RN-TU1 | ✅ | `tests/unit/turnos.service.test.ts` |
+| RN-TU2 | ✅ | `tests/unit/turnos.service.test.ts` |
+| RN-TU3 | ✅ | `tests/unit/turnos.service.test.ts` |
+| RN-TU4 | ✅ | `tests/unit/turnos.service.test.ts` |
+| RN-TU5 | ✅ | `tests/unit/turnos.service.test.ts` |
+| RN-TU6 | ✅ | `tests/unit/turnos.service.test.ts` |
+| RN-TU7 | ❌ | — |
+| RN-TU8 | ✅ | `tests/unit/turnos.service.test.ts` |
+| RN-TU9 | ✅ | `tests/unit/turnos.service.test.ts` |
+| RN-TU10 | ✅ | `tests/unit/turnos.service.test.ts`<br>`web/src/pages/AgendarTurnoPage.test.tsx` |
+
+#### RN-UX
+| RN | Test | Archivos |
+| :-- | :-: | :-- |
+| RN-UX1 | ❌ | — |
+| RN-UX2 | ❌ | — |
+| RN-UX3 | ❌ | — |
+| RN-UX4 | ❌ | — |
+
+---
+
+## Clasificación de las 44 brechas
+
+### A. Test directo — se escriben en S5 (36 RN)
+
+**A1. Permisos por endpoint (11).** `requirePermission.ts` existe pero **no tiene unit test
+propio**, y ningún test del repo ejercita el 403 por falta de permiso (RN-S2). Es la causa raíz
+del grupo. Cobertura propuesta: un test paramétrico del middleware (RN-S2) + un caso 403 por
+controller que cite la RN de su módulo.
+
+| RN | Regla |
+| :-- | :-- |
+| RN-S2 | Todo endpoint valida JWT y luego el permiso del rol (middleware) |
+| RN-AUD3 | Auditoría solo con `view_audit` |
+| RN-CF4 | Configuración requiere `manage_tenant_settings` |
+| RN-CK5 | Check-in/out requiere `manage_appointments`/`manage_daycare` |
+| RN-EC7 | Evento clínico requiere `manage_medical_history` |
+| RN-ES4 | Estados de turno requieren `manage_appointments` |
+| RN-EX5 | Export requiere al menos `view_medical_history` |
+| RN-GU6 | Guardería requiere `manage_appointments`/`manage_daycare` |
+| RN-HOR5 | Horarios restringidos a Administrador |
+| RN-ME5 | Modificar estadía requiere `manage_appointments`/`manage_daycare` |
+| RN-TU7 | Turnos requieren `manage_appointments` |
+
+**A2. Auditoría por módulo (5).** La escritura de `registros_auditoria` está implementada en
+los services, pero ningún test la fija con el código RN: RN-CL11 (DELETE clients), RN-SV7
+(services), RN-EC8 (CREATE medical_records + EXPORT del envío), RN-REC4 (solicitud de
+recuperación en security), RN-UX4 (regla transversal — un test representativo).
+
+**A3. Recuperación de cuenta (3).** Los endpoints `POST /auth/recuperar-usuario` y
+`POST /auth/recuperar-password` están implementados (`auth.controller.ts:63-86`) pero **sin
+ningún test**: RN-REC1 (email válido), RN-REC2 (respuesta anti-enumeración), RN-REC3 (token
+con expiración, nunca password en claro).
+
+**A4. Reglas funcionales sin test (9).**
+
+| RN | Regla | Dónde testearla |
+| :-- | :-- | :-- |
+| RN-EC2 / RN-MA3 | Peso vive en historial; ficha muestra "último peso" derivado | `historial.service` / `mascotas.service` |
+| RN-MA5 | Edad derivada en tiempo real, no persistida | util de front + service |
+| RN-EC12 | Irreversibilidad: NO existe vía para revertir `Fallecida` (test negativo) | integración eutanasia |
+| RN-ES2 | Turno Completado se excluye de agenda activa | `turnos.service` |
+| RN-MC4 | Turno Cancelado se excluye de agenda activa | `turnos.service` |
+| RN-HC5 | Timeline paginado por mascota (el índice `(pet_id, date)` ya existe en DDL; verificación de plan → S10) | `historial.service` |
+| RN-CL6 | Validación dual front/back (un caso representativo Zod ↔ inline) | schema + component test |
+| RN-G1 | Dependencia de módulos vendibles respecto del Core (gating de navegación) | `navigation.test` |
+
+**A5. Confirmaciones destructivas en UI (4).** Los AlertDialog existen y varios tienen test,
+pero sin citar la RN: RN-CL10 (eliminar cliente), RN-MC5 (cancelar/eliminar turno), RN-ME4
+(cancelar estadía), RN-MF3 (marcar fallecida con advertencia explícita). Component tests.
+
+**A6. Modelo de seguridad (4).** RN-S1/RN-SEC3 (ningún DTO expone hash/password — test de
+serialización), RN-SEC0/RN-SEC2 (permisos derivan del rol vía `RolPermiso`, no editables por
+usuario), RN-AUT2 (login emite JWT con expiración — delegado a Supabase Auth; test de
+integración liviano que decodifica `exp`).
+
+### B. Cubiertas por otra sub-sesión (4)
+
+| RN | Sub-sesión | Nota |
+| :-- | :-- | :-- |
+| RN-NT5 | S6 (cron) | El disparo manual ya está testeado (RN-NT1..4,6); falta la ejecución periódica real |
+| RN-UX2 | S8 | Toasts: hay asserts en component tests sin citar la RN; S8 los nombra |
+| RN-UX3 | S8 | Panel de preferencias: feature nueva + sus tests |
+| RN-UX1 | S9 | ≤3 clics por acción frecuente: heurística verificable en E2E, no unit |
+
+### C. Cubiertas por cruce — solo renombrar/anotar (2)
+
+- **RN-HOR3** (generación de slots): implementada y testeada bajo **RN-TU2**
+  (`turnos.service.test.ts:576-594`, `TurnoService.slotsDisponibles`). En S5 se agrega la cita
+  cruzada en el título.
+- **RN-SM1** (verificación por request): es exactamente `requireModule`, testeado en
+  `tests/unit/requireModule.test.ts` y en integración de módulos bajo RN-SM2..4. Cita cruzada.
+
+### D. No implementada — decisión de producto (2)
+
+- **RN-AUD4** (retención de auditoría): los índices por fecha/módulo se verifican en S10, pero
+  la **política de retención** (N registros / X meses) no está implementada. Registrada como
+  DT-9 en TODO.md; decidir en S11 si entra al MVP o queda post-MVP documentada.
+- **RN-SEC0** figura también en A6: la parte modelada (roles N:M) existe; lo que falta es el
+  test. La decisión de arquitectura en sí ya está tomada y documentada.
+
+## Verificaciones colaterales de esta sesión
+
+- **No hay `console.log` de debug en tests** (unit, integración ni componentes): el ítem de
+  limpieza que figuraba como deuda ya está resuelto — no se registra DT.
+- **RN-EC9 (envío real de resumen por email) está implementado** (`CanalEmailResend` en
+  `historial.service.ts`); la línea suelta de TODO.md era obsoleta y se eliminó.
+- Ninguna RN citada en tests es inexistente en los docs (0 códigos inventados).
