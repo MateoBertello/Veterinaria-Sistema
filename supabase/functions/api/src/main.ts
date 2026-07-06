@@ -22,6 +22,7 @@ import {
 } from "./modules/historial/historial.controller.ts";
 import { turnosRouter } from "./modules/turnos/turnos.controller.ts";
 import { notificacionesRouter } from "./modules/notificaciones/notificaciones.controller.ts";
+import { cronNotificacionesRouter } from "./modules/notificaciones/cron.controller.ts";
 import { guarderiaRouter } from "./modules/guarderia/guarderia.controller.ts";
 import {
   planVacunacionRouter,
@@ -92,6 +93,11 @@ app.route("/mascotas", planVacunacionMascotaRouter);
 app.route("/plan-vacunacion", planVacunacionRouter);
 // avisosVacunacionRouter: disparo manual de avisos → /notificaciones/vacunas/procesar (RN-PV6/PV7)
 app.route("/notificaciones/vacunas", avisosVacunacionRouter);
+
+// ─── Cron de notificaciones (sistema, fuera de tenant — Etapa 9 / RN-NT5) ────────
+// Disparado por pg_cron→pg_net (no por un usuario); protegido por X-Cron-Secret.
+// Barre todos los tenants activos con el módulo licenciado (turnos + vacunas).
+app.route("/internal/notificaciones", cronNotificacionesRouter);
 
 // ─── Consola Super Admin (fuera de tenant) ──────────────────────────────────────
 // Montado en /api/v1/admin/tenants; el router NO repite el segmento /tenants.

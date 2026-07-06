@@ -366,6 +366,28 @@ describe("NotificacionService", () => {
     expect(calls.from).toContain("tenants");
   });
 
+  it("RN-NT5: cron solo procesa tenants con el módulo licenciado (barrido filtrado)", async () => {
+    // tenantsList vacío = el embed !inner sobre modulos_contratados no devolvió ninguno
+    // (ningún tenant activo con 'turnos' habilitado) → no se consultan turnos ni se envía.
+    const db = makeDb({
+      configRow: { parametros_extra: { notificacionesTurnos: configHabilitada } },
+      tenantsList: [],
+      turnosList: [turnoRow()],
+    });
+    mockGetServiceDb.mockReturnValue(db as never);
+    const canal = fakeCanalEmail();
+
+    const res = await NotificacionService.procesarRecordatoriosTurnos(
+      {}, { canales: { email: canal }, now: NOW },
+    );
+
+    const calls = (db["_calls"] as { from: string[] });
+    expect(calls.from).toContain("tenants");     // hace el barrido...
+    expect(calls.from).not.toContain("turnos");  // ...pero ninguno licenciado → no procesa
+    expect(canal.enviar).not.toHaveBeenCalled();
+    expect(res).toMatchObject({ processed: 0, sent: 0 });
+  });
+
   // ── Config: defaults, validación y merge ──────────────────────────────────────
 
   it("obtenerConfig devuelve defaults cuando el tenant no guardó nada", async () => {

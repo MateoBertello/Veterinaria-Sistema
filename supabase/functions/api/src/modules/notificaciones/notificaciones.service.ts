@@ -313,13 +313,13 @@ export const NotificacionService = {
 
     const result: ResultadoProcesamiento = { processed: 0, sent: 0, failed: 0, skipped: 0 };
 
-    // Determinar el universo de tenants a procesar.
+    // Determinar el universo de tenants a procesar (RN-NT5: barrido solo de los que
+    // tienen el módulo 'turnos' licenciado; el disparo manual no pasa por acá).
     let tenantIds: string[];
     if (opts.tenantId) {
       tenantIds = [opts.tenantId];
     } else {
-      const { data: tenants } = await db.from("tenants").select("id").eq("activo", true);
-      tenantIds = ((tenants as unknown[]) ?? []).map((t) => (t as Record<string, unknown>)["id"] as string);
+      tenantIds = await this._tenantsActivosConModulo(db, "turnos");
     }
 
     for (const tenantId of tenantIds) {
@@ -409,13 +409,13 @@ export const NotificacionService = {
 
     const result: ResultadoProcesamiento = { processed: 0, sent: 0, failed: 0, skipped: 0 };
 
-    // Determinar el universo de tenants a procesar.
+    // Determinar el universo de tenants a procesar (RN-NT5: barrido solo de los que tienen
+    // el módulo 'historial_clinico' licenciado; el disparo manual no pasa por acá).
     let tenantIds: string[];
     if (opts.tenantId) {
       tenantIds = [opts.tenantId];
     } else {
-      const { data: tenants } = await db.from("tenants").select("id").eq("activo", true);
-      tenantIds = ((tenants as unknown[]) ?? []).map((t) => (t as Record<string, unknown>)["id"] as string);
+      tenantIds = await this._tenantsActivosConModulo(db, "historial_clinico");
     }
 
     for (const tenantId of tenantIds) {
@@ -596,6 +596,27 @@ export const NotificacionService = {
         .eq("id", notifId);
       return "failed";
     }
+  },
+
+  /**
+   * RN-NT5: universo de tenants a barrer en el cron (opts.tenantId ausente): tenants
+   * ACTIVOS que además tienen el módulo licenciado (`modulos_contratados.habilitado`).
+   * Una sola consulta con embed `!inner` (sin N+1). El disparo manual (opts.tenantId
+   * presente) NO pasa por acá: mantiene su semántica single-tenant intacta.
+   */
+  async _tenantsActivosConModulo(
+    db: ReturnType<typeof getServiceDb>,
+    modulo: "turnos" | "historial_clinico",
+  ): Promise<string[]> {
+    const { data: tenants } = await db
+      .from("tenants")
+      .select("id, modulos_contratados!inner(modulo, habilitado)")
+      .eq("activo", true)
+      .eq("modulos_contratados.modulo", modulo)
+      .eq("modulos_contratados.habilitado", true);
+    return ((tenants as unknown[]) ?? []).map(
+      (t) => (t as Record<string, unknown>)["id"] as string,
+    );
   },
 
   /** RN-PV7: ventana de aviso del tenant (config). Default 7 si faltara la fila. */

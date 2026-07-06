@@ -30,11 +30,16 @@ Estado al corte de S1:
 **Actualizado en Etapa 9 — S5:** se escribieron/citaron los 36 RN del grupo A + RN-UX4 (cubierta
 junto con RN-MA7 como caso representativo de A2, ver nota en esa sección) + los 2 del grupo C
 (cita cruzada), 39 filas en total pasadas de ❌ a ✅. Quedan sin test los 4 del grupo B
-(diferidos a S6/S8/S9) y RN-AUD4 del grupo D (diferida a S11):
+(diferidos a S6/S8/S9) y RN-AUD4 del grupo D (diferida a S11).
+
+**Actualizado en Etapa 9 — S6:** se cerró RN-NT5 (ejecución periódica del cron de
+notificaciones): migración pg_cron/pg_net + endpoint interno del barrido + test de
+integración que prueba "dispara y NO spamea" (UNIQUE de `notificaciones`) y el filtro por
+módulo licenciado. 1 fila más pasada de ❌ a ✅:
 
 | Total RN en docs | Con test (título) | Sin test | Cobertura |
 | :-: | :-: | :-: | :-: |
-| 167 | 162 | 5 | 97,0 % |
+| 167 | 163 | 4 | 97,6 % |
 
 ---
 
@@ -222,7 +227,7 @@ junto con RN-MA7 como caso representativo de A2, ver nota en esa sección) + los
 | RN-NT2 | ✅ | `tests/unit/notificaciones.service.test.ts` |
 | RN-NT3 | ✅ | `tests/unit/notificaciones.service.test.ts` |
 | RN-NT4 | ✅ | `tests/unit/notificaciones.service.test.ts` |
-| RN-NT5 | ❌ | — |
+| RN-NT5 | ✅ | `tests/integration/notificaciones-cron.integration.test.ts`<br>`tests/unit/notificaciones.service.test.ts` |
 | RN-NT6 | ✅ | `tests/unit/notificaciones.service.test.ts` |
 
 #### RN-PV
@@ -378,11 +383,11 @@ serialización), RN-SEC0/RN-SEC2 (permisos derivan del rol vía `RolPermiso`, no
 usuario), RN-AUT2 (login emite JWT con expiración — delegado a Supabase Auth; test de
 integración liviano que decodifica `exp`). ✅ Cubierto en S5, sin hallazgos de producto.
 
-### B. Cubiertas por otra sub-sesión (4)
+### B. Cubiertas por otra sub-sesión (3) — RN-NT5 ✅ RESUELTA (Etapa 9 — S6)
 
 | RN | Sub-sesión | Nota |
 | :-- | :-- | :-- |
-| RN-NT5 | S6 (cron) | El disparo manual ya está testeado (RN-NT1..4,6); falta la ejecución periódica real |
+| ~~RN-NT5~~ | ~~S6 (cron)~~ | ✅ RESUELTA en S6: cron pg_cron/pg_net + `notificaciones-cron.integration.test.ts` (dispara y no spamea) |
 | RN-UX2 | S8 | Toasts: hay asserts en component tests sin citar la RN; S8 los nombra |
 | RN-UX3 | S8 | Panel de preferencias: feature nueva + sus tests |
 | RN-UX1 | S9 | ≤3 clics por acción frecuente: heurística verificable en E2E, no unit |
@@ -412,6 +417,27 @@ integración liviano que decodifica `exp`). ✅ Cubierto en S5, sin hallazgos de
 - **RN-EC9 (envío real de resumen por email) está implementado** (`CanalEmailResend` en
   `historial.service.ts`); la línea suelta de TODO.md era obsoleta y se eliminó.
 - Ninguna RN citada en tests es inexistente en los docs (0 códigos inventados).
+
+## Etapa 9 — S6 (cron de notificaciones — RN-NT5)
+
+- **Migración** `20260706000003_cron_notificaciones.sql`: habilita `pg_cron` + `pg_net`,
+  crea la función wrapper `public.disparar_notificaciones()` (lee URL + secreto de **Vault**,
+  no hardcodeados) y programa el job `notificaciones-hourly` (`0 * * * *`). Frecuencia horaria
+  = la ventana más fina (recordatorio de turno 24 h); el UNIQUE hace idempotente re-correr.
+- **Decisión pg_net vs SQL:** se eligió **pg_net (HTTP)** para reusar la lógica del Edge
+  Function (canales/Resend, config por tenant, auditoría), en vez de duplicarla en plpgsql.
+- **Entrada del barrido:** nuevo endpoint interno `POST /internal/notificaciones/procesar`
+  (guard `requireCronSecret` por `X-Cron-Secret`, fuera de `tenantContext`) que corre ambos
+  barridos masivos. El barrido ahora **filtra por módulo licenciado** (`_tenantsActivosConModulo`,
+  embed `!inner` sobre `modulos_contratados`, una sola consulta).
+- **RN-NT5 fijada** por `tests/integration/notificaciones-cron.integration.test.ts`: dos
+  corridas del barrido → cada aviso queda 1 sola vez (UNIQUE), el tenant sin el módulo no se
+  notifica, y el endpoint interno responde 401 sin secreto / 200 con él.
+- **Smoke real (stack local):** `SELECT disparar_notificaciones()` ×2 → pg_net POST al
+  endpoint (HTTP 200 ×2) → `notificaciones` con 1 sola fila (el UNIQUE evitó el duplicado).
+- **Deploy (S11):** setear el env `CRON_SECRET` del Edge Function y cargar en Vault los
+  secrets `cron_notif_url` (URL del endpoint) y `cron_notif_secret` (== `CRON_SECRET`). Ver
+  el comentario de setup en la migración.
 
 ## Etapa 9 — S5 (cierre de brechas grupo A + C)
 
