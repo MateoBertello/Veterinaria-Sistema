@@ -29,6 +29,25 @@ export const CupoQuerySchema = z.object({
   path:    ["dateTo"],
 });
 
+/**
+ * Listado de estadías: GET /estadias — alimenta la ocupación por día y por mes.
+ * Acepta O BIEN `date` (un día) O BIEN `dateFrom`+`dateTo` (rango inclusivo, para
+ * la vista mensual, una sola consulta). Exactamente una de las dos formas.
+ */
+export const ListarEstadiasQuerySchema = z.object({
+  date:     z.string().regex(YMD, "date debe ser YYYY-MM-DD").optional(),
+  dateFrom: z.string().regex(YMD, "dateFrom debe ser YYYY-MM-DD").optional(),
+  dateTo:   z.string().regex(YMD, "dateTo debe ser YYYY-MM-DD").optional(),
+})
+  .refine(
+    (d) => (d.date != null) !== (d.dateFrom != null && d.dateTo != null),
+    { message: "Enviá 'date' (un día) o 'dateFrom'+'dateTo' (rango), no ambos" },
+  )
+  .refine(
+    (d) => d.dateFrom == null || d.dateTo == null || d.dateTo >= d.dateFrom,
+    { message: "dateTo debe ser posterior o igual a dateFrom", path: ["dateTo"] },
+  );
+
 /** Modificar Estadía (Etapa 7; RN-ME1..ME2). Todos los campos son opcionales
  *  en el schema; el controller pre-rellena los valores vigentes antes de llamar
  *  al service, que los envía al RPC siempre completos. */
@@ -46,5 +65,6 @@ export const CancelarEstadiaSchema = z.object({
 
 export type CrearEstadiaDto    = z.infer<typeof CrearEstadiaSchema>;
 export type CupoQuery          = z.infer<typeof CupoQuerySchema>;
+export type ListarEstadiasQuery = z.infer<typeof ListarEstadiasQuerySchema>;
 export type ModificarEstadiaDto = z.infer<typeof ModificarEstadiaSchema>;
 export type CancelarEstadiaDto  = z.infer<typeof CancelarEstadiaSchema>;

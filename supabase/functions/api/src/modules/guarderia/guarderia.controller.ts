@@ -4,6 +4,7 @@ import { EstadiaService, type CallerContext, type CheckinResponse, type Checkout
 import {
   CrearEstadiaSchema,
   CupoQuerySchema,
+  ListarEstadiasQuerySchema,
   ModificarEstadiaSchema,
   CancelarEstadiaSchema,
 } from "./guarderia.schemas.ts";
@@ -46,6 +47,24 @@ guarderiaRouter.get("/cupo", async (c) => {
   const { dateFrom, dateTo } = parsed.data;
   const cupo = await EstadiaService.cupo(dateFrom, dateTo, callerCtx(c));
   return c.json(ok(cupo), 200);
+});
+
+// GET /estadias — estadías que ocupan un día (`date`) o un rango (`dateFrom`+`dateTo`,
+// vista mensual). Alimenta la ocupación y las acciones de check-in/out.
+guarderiaRouter.get("/", async (c) => {
+  const parsed = ListarEstadiasQuerySchema.safeParse({
+    date:     c.req.query("date"),
+    dateFrom: c.req.query("dateFrom"),
+    dateTo:   c.req.query("dateTo"),
+  });
+  if (!parsed.success) {
+    throw new DomainError(ErrorCode.VALIDATION_ERROR, 422, "Parámetros de fecha inválidos", parsed.error.issues);
+  }
+  const { date, dateFrom, dateTo } = parsed.data;
+  const estadias = date != null
+    ? await EstadiaService.listar(date, callerCtx(c))
+    : await EstadiaService.listarRango(dateFrom!, dateTo!, callerCtx(c));
+  return c.json(ok(estadias), 200);
 });
 
 // POST /estadias — Registrar Estadía (RN-GU1..GU5, RN-GU7).

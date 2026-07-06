@@ -554,6 +554,97 @@ describe("EstadiaService.checkout", () => {
   });
 });
 
+describe("EstadiaService.listar", () => {
+  beforeEach(() => { vi.clearAllMocks(); });
+
+  const filaEmbed = {
+    id:             ESTADIA_ID,
+    client_id:      CLIENT_ID,
+    pet_id:         PET_ID,
+    check_in_date:  "2026-07-06", // lunes
+    check_out_date: "2026-07-10", // viernes
+    status:         "Reservada",
+    reason:         "Vacaciones",
+    notes:          "Trae su alimento",
+    checked_in_at:  null,
+    checked_out_at: null,
+    created_at:     "2026-07-01T10:00:00Z",
+    mascota:        { name: "Firulais", tamano: "Mediano", alimento_dieta: "Sin granos" },
+    cliente:        { full_name: "Juan Pérez" },
+  };
+
+  it("mapea el embed (mascota/cliente anidados) a EstadiaPublica en UNA sola query", async () => {
+    const db = buildDb({ selectData: [filaEmbed] });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    const result = await EstadiaService.listar("2026-07-08", ctx); // miércoles, dentro del rango
+
+    expect(db.from).toHaveBeenCalledTimes(1);
+    expect(db.from).toHaveBeenCalledWith("estadias");
+    expect(result).toEqual([
+      {
+        id:           ESTADIA_ID,
+        clientId:     CLIENT_ID,
+        petId:        PET_ID,
+        checkInDate:  "2026-07-06",
+        checkOutDate: "2026-07-10",
+        status:       "Reservada",
+        reason:       "Vacaciones",
+        notes:        "Trae su alimento",
+        createdAt:    "2026-07-01T10:00:00Z",
+        checkedInAt:  null,
+        checkedOutAt: null,
+        petName:      "Firulais",
+        petTamano:    "Mediano",
+        petDieta:     "Sin granos",
+        clientName:   "Juan Pérez",
+      },
+    ]);
+  });
+
+  it("solape inclusivo: consulta el día con check_in ≤ date ≤ check_out (una estadía Lun→Vie aparece cada día)", async () => {
+    // El filtro real corre en Postgres; acá verificamos que el Service arma la
+    // ventana correcta (lte check_in_date, gte check_out_date sobre `date`).
+    const db = buildDb({ selectData: [filaEmbed] });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    for (const date of ["2026-07-06", "2026-07-08", "2026-07-10"]) {
+      db.lte.mockClear();
+      db.gte.mockClear();
+      await EstadiaService.listar(date, ctx);
+      expect(db.lte).toHaveBeenCalledWith("check_in_date", date);
+      expect(db.gte).toHaveBeenCalledWith("check_out_date", date);
+    }
+  });
+
+  it("excluye Cancelada del listado (status IN Reservada/EnCurso/Finalizada)", async () => {
+    const db = buildDb({ selectData: [] });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    await EstadiaService.listar("2026-07-08", ctx);
+
+    expect(db.in).toHaveBeenCalledWith("status", ["Reservada", "EnCurso", "Finalizada"]);
+    expect(db.eq).toHaveBeenCalledWith("tenant_id", TENANT_ID);
+  });
+
+  it("listarRango: solape del rango (check_in ≤ dateTo AND check_out ≥ dateFrom) en UNA query", async () => {
+    // La semana Lun→Vie se trae completa con una sola consulta al rango; el cliente
+    // la agrupa por día (sin N+1).
+    const db = buildDb({ selectData: [filaEmbed] });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    const result = await EstadiaService.listarRango("2027-10-18", "2027-10-22", ctx);
+
+    expect(db.from).toHaveBeenCalledTimes(1);
+    expect(db.from).toHaveBeenCalledWith("estadias");
+    expect(db.lte).toHaveBeenCalledWith("check_in_date", "2027-10-22"); // ≤ dateTo
+    expect(db.gte).toHaveBeenCalledWith("check_out_date", "2027-10-18"); // ≥ dateFrom
+    expect(db.eq).toHaveBeenCalledWith("tenant_id", TENANT_ID);
+    expect(result).toHaveLength(1);
+    expect(result[0].petName).toBe("Firulais");
+  });
+});
+
 describe("EstadiaService.cupo", () => {
   beforeEach(() => {
     vi.clearAllMocks();

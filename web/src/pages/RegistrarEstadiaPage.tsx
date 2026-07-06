@@ -6,8 +6,9 @@ import {
   type FieldErrors,
   type RegisterOptions,
 } from "react-hook-form";
+import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { BedDouble, Ruler, Utensils } from "lucide-react";
+import { ArrowLeft, BedDouble, Ruler, Utensils } from "lucide-react";
 import { Card, CardContent } from "../components/ui/card.tsx";
 import { Badge } from "../components/ui/badge.tsx";
 import { Button } from "../components/ui/button.tsx";
@@ -61,6 +62,7 @@ function fieldFromDetail(d: unknown): string | undefined {
 }
 
 export function RegistrarEstadiaPage() {
+  const navigate = useNavigate();
   const [cliente, setCliente] = useState<Cliente | null>(null);
   const [mascotaSeleccionada, setMascotaSeleccionada] = useState<Mascota | null>(null);
 
@@ -151,6 +153,11 @@ export function RegistrarEstadiaPage() {
 
   return (
     <div className="mx-auto max-w-2xl space-y-6">
+      <Button variant="ghost" size="sm" onClick={() => navigate("/guarderia")}>
+        <ArrowLeft className="size-4" aria-hidden />
+        Volver a Ocupación de guardería
+      </Button>
+
       <header className="space-y-1">
         <h1 className="flex items-center gap-2 text-2xl font-semibold text-orange-800">
           <BedDouble className="size-6" aria-hidden />

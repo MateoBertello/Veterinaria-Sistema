@@ -28,6 +28,8 @@ export interface EstadiaPublica {
   reason:        string;
   notes:         string | null;
   createdAt:     string;
+  checkedInAt:   string | null;    // marca de check-in (RN-CK2); null si aún Reservada
+  checkedOutAt:  string | null;    // marca de check-out (RN-CK3); null si aún no finalizada
   // Tarjeta de mascota (Addendum v1.1 pantalla 3): tamaño + dieta + dueño.
   petName:       string;
   petTamano:     string;
@@ -138,10 +140,40 @@ function toPublic(row: Record<string, unknown>): EstadiaPublica {
     reason:       row["reason"]         as string,
     notes:        (row["notes"]         as string | null) ?? null,
     createdAt:    row["created_at"]     as string,
+    checkedInAt:  (row["checked_in_at"]  as string | null) ?? null,
+    checkedOutAt: (row["checked_out_at"] as string | null) ?? null,
     petName:      row["pet_name"]       as string,
     petTamano:    row["pet_tamano"]     as string,
     petDieta:     (row["pet_dieta"]     as string | null) ?? null,
     clientName:   row["client_name"]    as string,
+  };
+}
+
+/**
+ * Mapea una fila del listado (GET /estadias) donde la mascota y el cliente vienen
+ * embebidos por PostgREST (`mascota:mascotas(...)`, `cliente:clientes(...)`), a
+ * `EstadiaPublica`. A diferencia de `toPublic` (que consume el shape plano de los
+ * RPCs), acá los datos de la tarjeta llegan anidados.
+ */
+function toPublicFromEmbed(row: Record<string, unknown>): EstadiaPublica {
+  const mascota = (row["mascota"] ?? {}) as Record<string, unknown>;
+  const cliente = (row["cliente"] ?? {}) as Record<string, unknown>;
+  return {
+    id:           row["id"]             as string,
+    clientId:     row["client_id"]      as string,
+    petId:        row["pet_id"]         as string,
+    checkInDate:  row["check_in_date"]  as string,
+    checkOutDate: row["check_out_date"] as string,
+    status:       row["status"]         as string,
+    reason:       row["reason"]         as string,
+    notes:        (row["notes"]         as string | null) ?? null,
+    createdAt:    row["created_at"]     as string,
+    checkedInAt:  (row["checked_in_at"]  as string | null) ?? null,
+    checkedOutAt: (row["checked_out_at"] as string | null) ?? null,
+    petName:      mascota["name"]           as string,
+    petTamano:    mascota["tamano"]         as string,
+    petDieta:     (mascota["alimento_dieta"] as string | null) ?? null,
+    clientName:   cliente["full_name"]      as string,
   };
 }
 
@@ -413,6 +445,60 @@ export class EstadiaService {
     });
 
     return result;
+  }
+
+  /**
+   * Listado de estadías que ocupan un día dado (GET /estadias?date=).
+   *
+   * Devuelve las estadías cuya ventana [check_in, check_out] contiene `date`
+   * (inclusive), en estados que ocupan o cerraron ese día (Reservada/EnCurso/
+   * Finalizada); Cancelada se excluye. Alimenta la vista de ocupación y las
+   * acciones de check-in/out.
+   *
+   * Sin N+1 (CLAUDE.md): UNA sola query con resource embedding trae la tarjeta de
+   * mascota (nombre/tamaño/dieta) y el dueño. El aislamiento por tenant lo garantiza
+   * el filtro `tenant_id` del Service (getServiceDb usa service_role y no aplica RLS).
+   */
+  static async listar(date: string, ctx: CallerContext): Promise<EstadiaPublica[]> {
+    return await EstadiaService.queryOverlap(date, date, ctx);
+  }
+
+  /**
+   * Estadías que solapan el rango [dateFrom, dateTo] (GET /estadias?dateFrom=&dateTo=).
+   * Alimenta la vista de ocupación mensual: una sola query trae todas las estadías
+   * del mes visible y el cliente las agrupa por día (sin N+1).
+   */
+  static async listarRango(dateFrom: string, dateTo: string, ctx: CallerContext): Promise<EstadiaPublica[]> {
+    return await EstadiaService.queryOverlap(dateFrom, dateTo, ctx);
+  }
+
+  /**
+   * Query base de solape (una sola consulta con embed). Una estadía solapa el rango
+   * [from, to] si `check_in_date <= to AND check_out_date >= from` (inclusivo ⇒ una
+   * estadía Lun→Vie aparece los 5 días; mismo criterio que `cupo`). Excluye Cancelada.
+   * El aislamiento por tenant lo garantiza el filtro `tenant_id` (getServiceDb no aplica RLS).
+   */
+  private static async queryOverlap(from: string, to: string, ctx: CallerContext): Promise<EstadiaPublica[]> {
+    const db = getServiceDb();
+
+    const { data, error } = await db
+      .from("estadias")
+      .select(
+        "id, client_id, pet_id, check_in_date, check_out_date, status, reason, notes, " +
+          "checked_in_at, checked_out_at, created_at, " +
+          "mascota:mascotas(name, tamano, alimento_dieta), cliente:clientes(full_name)",
+      )
+      .eq("tenant_id", ctx.tenantId)
+      .in("status", ["Reservada", "EnCurso", "Finalizada"])
+      .lte("check_in_date", to)
+      .gte("check_out_date", from)
+      .order("check_in_date", { ascending: true });
+
+    if (error) {
+      throw new DomainError(ErrorCode.INTERNAL_ERROR, 500, "Error al consultar las estadías");
+    }
+
+    return ((data ?? []) as unknown as Array<Record<string, unknown>>).map(toPublicFromEmbed);
   }
 
   /**

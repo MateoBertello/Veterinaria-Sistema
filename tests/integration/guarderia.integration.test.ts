@@ -877,6 +877,111 @@ describeIntegration("Guardería: endurecimiento de RPCs hacer_checkin y hacer_ch
   });
 });
 
+// ─── Listado de ocupación GET /estadias?date= (aislamiento + solape inclusivo) ────
+//
+// El listado usa getServiceDb (bypasa RLS): el aislamiento lo garantiza el filtro
+// EXPLÍCITO de tenant_id del Service. Además valida que el filtro de solape es
+// inclusivo (una estadía Lun→Vie aparece cada uno de los 5 días).
+
+describeIntegration("Guardería: GET /estadias?date= — aislamiento y solape (bloqueante)", () => {
+  it("B no ve las estadías de A (aislamiento por tenant vía HTTP)", async () => {
+    if (skipIfNoCredentials() || !tenantA.jwt || !tenantB.jwt) return;
+
+    await setCupo(tenantA.tenantId, 10);
+    const dia = "2027-10-10";
+
+    // A crea una estadía ese día.
+    const petDeA = await crearMascota(tenantA, "ListadoAisladoA");
+    await crearEstadiaRpc(tenantA.tenantId, tenantA.clienteId, petDeA, dia, dia);
+
+    // A la ve.
+    const resA = await callApp(`/estadias?date=${dia}`, { jwt: tenantA.jwt });
+    const bodyA = await resA.json() as { data: Array<{ id: string }> };
+    expect(resA.status).toBe(200);
+    expect(bodyA.data.length).toBeGreaterThanOrEqual(1);
+
+    // B, para el mismo día, NO ve ninguna estadía de A.
+    const resB = await callApp(`/estadias?date=${dia}`, { jwt: tenantB.jwt });
+    const bodyB = await resB.json() as { data: Array<{ id: string }> };
+    expect(resB.status).toBe(200);
+    expect(bodyB.data.length).toBe(0);
+  });
+
+  it("solape inclusivo: una estadía Lun→Vie aparece en el listado los 5 días", async () => {
+    if (skipIfNoCredentials() || !tenantA.jwt) return;
+
+    await setCupo(tenantA.tenantId, 10);
+    const dias = ["2027-10-18", "2027-10-19", "2027-10-20", "2027-10-21", "2027-10-22"]; // lun..vie
+
+    const petSemana = await crearMascota(tenantA, "ListadoSemana");
+    const idSemana  = await crearEstadiaRpc(tenantA.tenantId, tenantA.clienteId, petSemana, dias[0], dias[4]);
+
+    for (const dia of dias) {
+      const res = await callApp(`/estadias?date=${dia}`, { jwt: tenantA.jwt });
+      const body = await res.json() as { data: Array<{ id: string; petName: string }> };
+      expect(res.status).toBe(200);
+      const fila = body.data.find((e) => e.id === idSemana);
+      expect(fila, `la estadía debe aparecer el ${dia}`).toBeTruthy();
+      expect(fila?.petName).toBe("ListadoSemana");
+    }
+
+    // El día siguiente (fuera del rango) NO la incluye.
+    const resFuera = await callApp(`/estadias?date=2027-10-23`, { jwt: tenantA.jwt });
+    const bodyFuera = await resFuera.json() as { data: Array<{ id: string }> };
+    expect(bodyFuera.data.find((e) => e.id === idSemana)).toBeUndefined();
+  });
+
+  it("excluye las Cancelada del listado del día", async () => {
+    if (skipIfNoCredentials() || !tenantA.jwt) return;
+
+    await setCupo(tenantA.tenantId, 10);
+    const dia = "2027-10-28";
+
+    const petCanc = await crearMascota(tenantA, "ListadoCancelada");
+    const idCanc  = await crearEstadiaRpc(tenantA.tenantId, tenantA.clienteId, petCanc, dia, dia);
+    await serviceDb.rpc("cancelar_estadia", cancelarRpcParams(tenantA.tenantId, idCanc));
+
+    const res = await callApp(`/estadias?date=${dia}`, { jwt: tenantA.jwt });
+    const body = await res.json() as { data: Array<{ id: string }> };
+    expect(res.status).toBe(200);
+    expect(body.data.find((e) => e.id === idCanc)).toBeUndefined();
+  });
+
+  it("rango dateFrom/dateTo: una sola consulta trae las estadías que solapan el rango (vista mes)", async () => {
+    if (skipIfNoCredentials() || !tenantA.jwt || !tenantB.jwt) return;
+
+    await setCupo(tenantA.tenantId, 10);
+    // Estadía a mitad del rango del mes.
+    const petMes = await crearMascota(tenantA, "ListadoRangoMes");
+    const idMes  = await crearEstadiaRpc(tenantA.tenantId, tenantA.clienteId, petMes, "2027-11-10", "2027-11-14");
+
+    const res = await callApp(`/estadias?dateFrom=2027-11-01&dateTo=2027-11-30`, { jwt: tenantA.jwt });
+    const body = await res.json() as { data: Array<{ id: string }> };
+    expect(res.status).toBe(200);
+    expect(body.data.find((e) => e.id === idMes)).toBeTruthy();
+
+    // Aislamiento: B no ve la estadía de A en el rango.
+    const resB = await callApp(`/estadias?dateFrom=2027-11-01&dateTo=2027-11-30`, { jwt: tenantB.jwt });
+    const bodyB = await resB.json() as { data: Array<{ id: string }> };
+    expect(resB.status).toBe(200);
+    expect(bodyB.data.find((e) => e.id === idMes)).toBeUndefined();
+
+    // Un rango que no solapa (mes anterior) no la trae.
+    const resFuera = await callApp(`/estadias?dateFrom=2027-10-01&dateTo=2027-10-31`, { jwt: tenantA.jwt });
+    const bodyFuera = await resFuera.json() as { data: Array<{ id: string }> };
+    expect(bodyFuera.data.find((e) => e.id === idMes)).toBeUndefined();
+  });
+
+  it("rechaza combinar date con dateFrom/dateTo → 422", async () => {
+    if (skipIfNoCredentials() || !tenantA.jwt) return;
+
+    const res = await callApp(`/estadias?date=2027-11-10&dateFrom=2027-11-01&dateTo=2027-11-30`, { jwt: tenantA.jwt });
+    const body = await res.json() as { error: { code: string } };
+    expect(res.status).toBe(422);
+    expect(body.error.code).toBe("VALIDATION_ERROR");
+  });
+});
+
 // ─── Aislamiento de tenant en modificar / cancelar (bloqueante) ──────────────────
 
 describeIntegration("Guardería: aislamiento tenant en modificar/cancelar (bloqueante)", () => {

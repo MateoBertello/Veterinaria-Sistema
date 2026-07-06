@@ -83,6 +83,8 @@ function makeEstadia(over: Partial<Estadia> = {}): Estadia {
     reason: "Vacaciones",
     notes: null,
     createdAt: "2026-01-01T00:00:00Z",
+    checkedInAt: null,
+    checkedOutAt: null,
     petName: "Firulais",
     petTamano: "Grande",
     petDieta: "Balanceado sin sal",

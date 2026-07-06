@@ -297,6 +297,8 @@ export interface Estadia {
   reason:        string;
   notes:         string | null;
   createdAt:     string;
+  checkedInAt:   string | null;
+  checkedOutAt:  string | null;
   petName:       string;
   petTamano:     string;
   petDieta:      string | null;
