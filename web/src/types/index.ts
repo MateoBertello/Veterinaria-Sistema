@@ -62,6 +62,9 @@ export const ErrorCode = {
   PAST_DATE:              "PAST_DATE",
   DUPLICATE_APPOINTMENT:  "DUPLICATE_APPOINTMENT",
   STAY_OVERLAP:        "STAY_OVERLAP",
+  STAY_LOCKED:         "STAY_LOCKED",
+  ESTADIA_NOT_FOUND:   "ESTADIA_NOT_FOUND",
+  CUPO_GUARDERIA_AGOTADO: "CUPO_GUARDERIA_AGOTADO",
   INVALID_RANGE:       "INVALID_RANGE",
   SCHEDULE_OVERLAP:    "SCHEDULE_OVERLAP",
   EMPTY_HISTORY:                    "EMPTY_HISTORY",
@@ -274,6 +277,48 @@ export interface ConfiguracionTenant {
 export interface ConfiguracionInput {
   cupoMaximoDiario: number;
   diasAvisoVacuna:  number;
+}
+
+// ─── Guardería / Estadías ───────────────────────────────────────────────────
+
+/**
+ * Espejo de `EstadiaPublica` del backend. `status` no se tipa como union cerrado
+ * porque el backend tampoco lo hace (queda abierto a Reservada/EnCurso/Finalizada/
+ * Cancelada sin narrow); las tarjetas `petTamano`/`petDieta`/`petName`/`clientName`
+ * vienen ya embebidas (snapshot) al crear (Addendum v1.1 pantalla 3).
+ */
+export interface Estadia {
+  id:            string;
+  clientId:      string;
+  petId:         string;
+  checkInDate:   string;
+  checkOutDate:  string;
+  status:        string;
+  reason:        string;
+  notes:         string | null;
+  createdAt:     string;
+  petName:       string;
+  petTamano:     string;
+  petDieta:      string | null;
+  clientName:    string;
+}
+
+/** Body de `POST /estadias` (espejo de `CrearEstadiaSchema`). Nunca se envía `status`. */
+export interface CrearEstadiaInput {
+  clientId:     string;
+  petId:        string;
+  checkInDate:  string;
+  checkOutDate: string;
+  reason:       string;
+  notes?:       string;
+}
+
+/** Item de `GET /estadias/cupo` (RN-GU4): ocupación vs cupo configurado, por día. */
+export interface CupoDia {
+  date:       string;
+  ocupados:   number;
+  cupo:       number;
+  disponible: number;
 }
 
 // ─── Doctores ───────────────────────────────────────────────────────────────
