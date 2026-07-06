@@ -101,7 +101,7 @@ describe("RN-CL1: Campos obligatorios", () => {
 // ─── RN-CL2: formato DNI/CUIT ──────────────────────────────────────────────────
 
 describe("RN-CL2: Formato DNI/CUIT", () => {
-  it("RN-CL2: dniCuit con letras → VALIDATION_ERROR", async () => {
+  it("RN-CL2/RN-CL6: dniCuit con letras → VALIDATION_ERROR (paridad backend/front)", async () => {
     const db = buildMockDb();
     mockGetServiceDb.mockReturnValue(db as never);
 
@@ -240,7 +240,7 @@ describe("RN-CL8: No eliminar cliente con mascotas vivas", () => {
 // ─── RN-CL9: baja lógica ───────────────────────────────────────────────────────
 
 describe("RN-CL9: Baja lógica", () => {
-  it("RN-CL9: eliminar marca deleted/deleted_at/deleted_by y audita DELETE", async () => {
+  it("RN-CL9/RN-CL11: eliminar marca deleted/deleted_at/deleted_by y audita DELETE en módulo clients", async () => {
     const db = buildMockDb({
       singleResults: [
         { data: dbRow(), error: null },          // carga del cliente

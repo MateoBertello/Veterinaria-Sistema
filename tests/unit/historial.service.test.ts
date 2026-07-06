@@ -182,7 +182,7 @@ describe("listarHistorial", () => {
     ).rejects.toMatchObject({ code: ErrorCode.MASCOTA_NOT_FOUND, statusCode: 404 });
   });
 
-  it("listarHistorial: paginacion calcula range correcto para page=2 limit=10", async () => {
+  it("RN-HC5: paginacion calcula range correcto para page=2 limit=10", async () => {
     const db = buildMockDb({
       singleResults: [{ data: mascotaExistente, error: null }],
       rangeResult: { data: [], error: null, count: 0 },
@@ -249,7 +249,7 @@ describe("obtenerEventoPorId", () => {
 // ─── resumenClinico ───────────────────────────────────────────────────────────
 
 describe("resumenClinico", () => {
-  it("RN-HC2: resumenClinico deriva ultimo peso del evento mas reciente con peso", async () => {
+  it("RN-HC2/RN-EC2: resumenClinico deriva ultimo peso del evento mas reciente con peso", async () => {
     const db = buildMockDb({
       singleResults: [
         { data: mascotaResumen, error: null },
@@ -399,6 +399,25 @@ describe("crearRegistro", () => {
     );
     expect(evento.clientNameAtTime).toBe("Juan Pérez");
     expect(evento.attachmentsCount).toBe(0);
+  });
+
+  it("RN-EC8/RN-UX4: crearRegistro registra auditoría CREATE en módulo medical_records", async () => {
+    const db = buildMockDb({
+      singleResults: [
+        { data: mascotaViva, error: null },
+        { data: { id: PROF_ID }, error: null },
+        { data: { id: EVENT_ID, date: "2026-06-04", event_type: "Consulta" }, error: null },
+      ],
+    });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    await HistorialService.crearRegistro(PET_ID, dtoBase() as never, CTX);
+
+    expect(mockRecordAudit).toHaveBeenCalledOnce();
+    const auditArg = mockRecordAudit.mock.calls[0][1];
+    expect(auditArg.action).toBe("CREATE");
+    expect(auditArg.module).toBe("medical_records");
+    expect(auditArg.entityId).toBe(EVENT_ID);
   });
 
   it("RN-EC6: peso fuera de rango (>200) → VALIDATION_ERROR", async () => {

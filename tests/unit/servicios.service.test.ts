@@ -266,4 +266,43 @@ describe("ServicioService", () => {
     expect(auditArg.tenantId).toBe(TENANT_ID);
     expect(auditArg.entityId).toBe(SVC_ID);
   });
+
+  it("RN-SV7: actualizar servicio llama recordAudit con module='services' y action='UPDATE'", async () => {
+    const filaDb = {
+      id: SVC_ID, tenant_id: TENANT_ID, nombre: "Consulta General",
+      tipo: "clinica", duracion_minutos: 30, requiere_profesional: true,
+      descripcion: "Revisación básica", activo: true, created_at: "2026-06-22T00:00:00Z",
+    };
+    const db = buildDbChain({ singleData: filaDb });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    await ServicioService.actualizar(SVC_ID, { descripcion: "Nueva descripción" }, ctx);
+
+    expect(mockRecordAudit).toHaveBeenCalledOnce();
+    const auditArg = mockRecordAudit.mock.calls[0][1];
+    expect(auditArg.module).toBe("services");
+    expect(auditArg.action).toBe("UPDATE");
+    expect(auditArg.entityId).toBe(SVC_ID);
+  });
+
+  // El dominio de servicios no tiene DELETE físico: la baja es soft-disable vía
+  // cambiarEstado(false) (ya cubierto en RN-SV3), auditado como UPDATE. Este caso
+  // cubre el camino feliz de reactivar (activo=true), sin turnos futuros a chequear.
+  it("RN-SV3/RN-SV7: cambiarEstado(true) reactiva y llama recordAudit con action='UPDATE'", async () => {
+    const filaDb = {
+      id: SVC_ID, tenant_id: TENANT_ID, nombre: "Consulta General",
+      tipo: "clinica", duracion_minutos: 30, requiere_profesional: true,
+      descripcion: null, activo: false, created_at: "2026-06-22T00:00:00Z",
+    };
+    const db = buildDbChain({ singleData: filaDb });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    await ServicioService.cambiarEstado(SVC_ID, true, ctx);
+
+    expect(mockRecordAudit).toHaveBeenCalledOnce();
+    const auditArg = mockRecordAudit.mock.calls[0][1];
+    expect(auditArg.module).toBe("services");
+    expect(auditArg.action).toBe("UPDATE");
+    expect(auditArg.entityId).toBe(SVC_ID);
+  });
 });

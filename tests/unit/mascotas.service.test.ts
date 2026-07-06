@@ -235,12 +235,86 @@ describe("RN-MA4: Fecha de nacimiento inmutable", () => {
     expect(payload).not.toHaveProperty("birth_date");
     expect(payload).toMatchObject({ tamano: "Grande" });
   });
+
+  // RN-MA3: el peso NO es un atributo de Mascota (vive en el Historial Clínico).
+  // EditarMascotaSchema no declara peso/weight: aunque venga en el body, Zod lo
+  // descarta silenciosamente y nunca llega al update ni a la respuesta pública.
+  it("RN-MA3: editar nunca incluye peso/weight en el payload de update ni en la respuesta", async () => {
+    const db = buildMockDb({
+      singleResults: [
+        { data: dbRow(), error: null },
+        { data: dbRow({ tamano: "Grande" }), error: null },
+      ],
+    });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    const mascota = await MascotasService.editar(
+      PET_ID,
+      { tamano: "Grande", peso: 15, weight: 15 } as never,
+      ctx,
+    );
+
+    const payload = (db.builder["update"] as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(payload).not.toHaveProperty("peso");
+    expect(payload).not.toHaveProperty("weight");
+    expect(mascota).not.toHaveProperty("peso");
+    expect(mascota).not.toHaveProperty("weight");
+    // El único dato de peso expuesto es el derivado del Historial (RN-MA3).
+    expect(mascota.ultimoPeso).toBeNull();
+  });
+
+  // RN-MA5: la edad se calcula en tiempo real (frontend) a partir de birthDate;
+  // el backend nunca persiste ni devuelve un campo edad/age.
+  it("RN-MA5: el DTO de mascota solo incluye birthDate, nunca un campo edad/age persistido", async () => {
+    const db = buildMockDb({
+      singleResults: [
+        { data: dbRow(), error: null },
+        { data: dbRow({ tamano: "Grande" }), error: null },
+      ],
+    });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    const mascota = await MascotasService.editar(
+      PET_ID,
+      { tamano: "Grande", edad: 5, age: 5 } as never,
+      ctx,
+    );
+
+    const payload = (db.builder["update"] as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(payload).not.toHaveProperty("edad");
+    expect(payload).not.toHaveProperty("age");
+    expect(mascota).not.toHaveProperty("edad");
+    expect(mascota).not.toHaveProperty("age");
+    expect(mascota).toHaveProperty("birthDate");
+  });
+
+  // RN-EC12: irreversibilidad de 'Fallecida'. EditarMascotaSchema no declara
+  // 'estado' (se omite de CrearMascotaSchema junto con clientId/birthDate), por
+  // lo que no existe ninguna vía en editar() para revertir el estado, ni siquiera
+  // enviándolo explícitamente en el body.
+  it("RN-EC12: editar no expone ninguna vía para revertir estado='Fallecida' a 'Activa'", async () => {
+    const db = buildMockDb({
+      singleResults: [
+        { data: dbRow({ estado: "Fallecida", deceased_date: "2026-01-01" }), error: null },
+        { data: dbRow({ estado: "Fallecida", deceased_date: "2026-01-01", tamano: "Grande" }), error: null },
+      ],
+    });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    await MascotasService.editar(PET_ID, { tamano: "Grande", estado: "Activa" } as never, ctx);
+
+    const payload = (db.builder["update"] as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(payload).not.toHaveProperty("estado");
+  });
 });
 
 // ─── RN-MA7: auditoría módulo pets ─────────────────────────────────────────────
 
 describe("RN-MA7: Auditoría de alta y edición (módulo pets)", () => {
-  it("RN-MA7: crear registra auditoría CREATE en módulo pets", async () => {
+  // RN-UX4 (regla transversal): dtoValido no tiene ningún campo para "pedir"
+  // auditoría — el sólo hecho de que recordAudit se haya llamado, sin que el
+  // llamante lo solicite explícitamente, demuestra que la auditoría es implícita.
+  it("RN-MA7/RN-UX4: crear registra auditoría CREATE en módulo pets sin que el usuario lo solicite explícitamente", async () => {
     const db = buildMockDb({
       singleResults: [
         { data: { id: CLIENT_ID }, error: null },
@@ -249,6 +323,9 @@ describe("RN-MA7: Auditoría de alta y edición (módulo pets)", () => {
       ],
     });
     mockGetServiceDb.mockReturnValue(db as never);
+
+    expect("recordAudit" in dtoValido).toBe(false);
+    expect("audit" in dtoValido).toBe(false);
 
     await MascotasService.crear(dtoValido, ctx);
 

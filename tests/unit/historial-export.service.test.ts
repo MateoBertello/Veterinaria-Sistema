@@ -163,7 +163,7 @@ describe("exportarHistorial", () => {
     expect(data.length - 1).toBe(2); // 2 filas de datos
   });
 
-  it("RN-EX4: registra auditoría con action=EXPORT y entityId=petId", async () => {
+  it("RN-EX4/RN-EC8: registra auditoría con action=EXPORT y entityId=petId", async () => {
     const db = buildExportDb({ mascota: mascotaRow, records: [historialRow()] });
     mockGetServiceDb.mockReturnValue(db as never);
 
