@@ -28,7 +28,7 @@ const mockDoctores = vi.mocked(listarDoctores);
 
 function makeDoctor(over: Partial<Doctor> = {}): Doctor {
   return {
-    id: "d1", userId: null, name: "Dra. García", specialty: null,
+    id: "d1", userId: "u1", name: "Dra. García", specialty: null,
     licenseNumber: null, available: true, createdAt: "2026-01-01T00:00:00Z", usuario: null,
     ...over,
   };
@@ -69,6 +69,15 @@ beforeEach(() => {
 });
 
 describe("EventoClinicoFormDialog", () => {
+  it("DT-3: pide al backend solo doctores seleccionables como profesional (professional=true)", async () => {
+    setup();
+
+    await waitFor(() => expect(mockDoctores).toHaveBeenCalledTimes(1));
+    expect(mockDoctores).toHaveBeenCalledWith(
+      expect.objectContaining({ available: true, professional: true }),
+    );
+  });
+
   it("RN-EC1: campos obligatorios vacíos bloquean el envío", async () => {
     setup();
 
@@ -91,7 +100,7 @@ describe("EventoClinicoFormDialog", () => {
       expect.objectContaining({
         date: "2026-06-01",
         eventType: "Consulta",
-        professionalId: "d1",
+        professionalId: "u1",
         description: "Control anual, buen estado",
         weightKg: null,
         temperatureC: null,

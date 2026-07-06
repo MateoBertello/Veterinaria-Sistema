@@ -72,7 +72,9 @@ export function EutanasiaDialog({ open, onOpenChange, petId, mascotaName, onSucc
   useEffect(() => {
     if (!open) return;
     reset({ ...VACIO, date: hoy });
-    listarDoctores({ available: true, limit: 100 })
+    // professional=true: el backend devuelve solo doctores con usuario
+    // vinculado, los únicos válidos como professional_id (DT-2/DT-3).
+    listarDoctores({ available: true, professional: true, limit: 100 })
       .then(({ items }) => setDoctores(items))
       .catch(() => setDoctores([]));
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -160,9 +162,15 @@ export function EutanasiaDialog({ open, onOpenChange, petId, mascotaName, onSucc
                       <SelectValue placeholder="Seleccionar..." />
                     </SelectTrigger>
                     <SelectContent>
-                      {doctores.map((d) => (
-                        <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>
-                      ))}
+                      {/* professional_id es FK a usuarios(id): el valor es el
+                          usuario logeable (d.userId), no el PK del doctor.
+                          El backend ya filtra con professional=true; este
+                          filter es defensa en profundidad y type-guard. */}
+                      {doctores
+                        .filter((d) => d.userId)
+                        .map((d) => (
+                          <SelectItem key={d.id} value={d.userId!}>{d.name}</SelectItem>
+                        ))}
                     </SelectContent>
                   </Select>
                 )}

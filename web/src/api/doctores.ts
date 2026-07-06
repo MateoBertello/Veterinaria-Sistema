@@ -4,6 +4,12 @@ import type { ApiMeta, Doctor, DoctorInput } from "../types/index.ts";
 export interface ListarDoctoresParams {
   search?:    string;
   available?: boolean;
+  /**
+   * professional=true: solo doctores seleccionables como profesional clínico
+   * (con usuario vinculado — el backend filtra user_id IS NOT NULL). Usar en
+   * los selects de historial/vacunación, que envían `Doctor.userId` (DT-2/DT-3).
+   */
+  professional?: boolean;
   page?:      number;
   limit?:     number;
 }
@@ -15,6 +21,7 @@ export function listarDoctores(
   const qs = new URLSearchParams();
   if (params.search) qs.set("search", params.search);
   if (params.available !== undefined) qs.set("available", String(params.available));
+  if (params.professional !== undefined) qs.set("professional", String(params.professional));
   if (params.page)  qs.set("page", String(params.page));
   if (params.limit) qs.set("limit", String(params.limit));
 

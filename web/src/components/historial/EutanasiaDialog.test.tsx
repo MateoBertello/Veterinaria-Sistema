@@ -26,7 +26,7 @@ const mockDoctores = vi.mocked(listarDoctores);
 
 function makeDoctor(over: Partial<Doctor> = {}): Doctor {
   return {
-    id: "d1", userId: null, name: "Dra. García", specialty: null,
+    id: "d1", userId: "u1", name: "Dra. García", specialty: null,
     licenseNumber: null, available: true, createdAt: "2026-01-01T00:00:00Z", usuario: null,
     ...over,
   };
@@ -68,6 +68,15 @@ beforeEach(() => {
 });
 
 describe("EutanasiaDialog", () => {
+  it("DT-3: pide al backend solo doctores seleccionables como profesional (professional=true)", async () => {
+    setup();
+
+    await waitFor(() => expect(mockDoctores).toHaveBeenCalledTimes(1));
+    expect(mockDoctores).toHaveBeenCalledWith(
+      expect.objectContaining({ available: true, professional: true }),
+    );
+  });
+
   it("RN-EC10: el botón de confirmar está deshabilitado hasta marcar el checkbox de confirmación explícita", async () => {
     setup();
     await completarCamposClinicos();
@@ -100,7 +109,7 @@ describe("EutanasiaDialog", () => {
     expect(mockRegistrar).toHaveBeenCalledWith(
       "pet1",
       expect.objectContaining({
-        professionalId: "d1",
+        professionalId: "u1",
         description: "Eutanasia por enfermedad terminal",
         euthanasiaConfirmed: true,
       }),

@@ -340,6 +340,13 @@ export interface DoctorUsuario {
   active:   boolean;
 }
 
+/**
+ * Contrato del "profesional" (DT-2) — dos claves, cada consumidor usa la suya:
+ * - `id`: PK de `doctores` → es el `doctorId` de Turnos y Horarios.
+ * - `userId`: `usuarios.id` del usuario vinculado (nullable) → es el
+ *   `professionalId` que esperan Historial Clínico y Vacunación.
+ * Los selects de historial listan con `professional: true` y envían `userId`.
+ */
 export interface Doctor {
   id:            string;
   userId:        string | null;
