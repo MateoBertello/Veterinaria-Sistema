@@ -105,7 +105,7 @@ guarderiaRouter.put("/:id", async (c) => {
     .single();
 
   if (fetchErr || !vigente) {
-    throw new DomainError(ErrorCode.ESTADIA_NOT_FOUND, 404, "Estadía no encontrada");
+    throw new DomainError(ErrorCode.STAY_NOT_FOUND, 404, "Estadía no encontrada");
   }
 
   const v = vigente as Record<string, unknown>;

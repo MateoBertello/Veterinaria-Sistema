@@ -117,7 +117,7 @@ function mapEstadiaRpcError(error: { message?: string }, fallbackMsg = "operaci�
   if (msg.includes("STAY_LOCKED"))
     return new DomainError(ErrorCode.STAY_LOCKED, 422, "La estadía no puede modificarse en su estado actual");
   if (msg.includes("ESTADIA_NOT_FOUND"))
-    return new DomainError(ErrorCode.ESTADIA_NOT_FOUND, 404, "Estadía no encontrada");
+    return new DomainError(ErrorCode.STAY_NOT_FOUND, 404, "Estadía no encontrada");
   if (msg.includes("STAY_OVERLAP"))
     return new DomainError(ErrorCode.STAY_OVERLAP, 409, "La mascota ya tiene una estadía que se superpone con ese rango");
   if (msg.includes("PET_DECEASED"))

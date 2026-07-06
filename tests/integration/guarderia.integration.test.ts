@@ -819,7 +819,7 @@ describeIntegration("Guardería: aislamiento tenant en check-in/out (bloqueante)
     expect(rowDb?.status).toBe("EnCurso");
   });
 
-  it("B no puede hacer check-in/out vía HTTP con JWT de B sobre estadía de A → 404 ESTADIA_NOT_FOUND", async () => {
+  it("B no puede hacer check-in/out vía HTTP con JWT de B sobre estadía de A → 404 STAY_NOT_FOUND", async () => {
     if (skipIfNoCredentials() || !tenantA.jwt || !tenantB.jwt) return;
 
     await setCupo(tenantA.tenantId, 10);
@@ -833,7 +833,7 @@ describeIntegration("Guardería: aislamiento tenant en check-in/out (bloqueante)
     });
     const bodyCheckin = await resCheckin.json() as { error: { code: string } };
     expect(resCheckin.status).toBe(404);
-    expect(bodyCheckin.error.code).toBe("ESTADIA_NOT_FOUND");
+    expect(bodyCheckin.error.code).toBe("STAY_NOT_FOUND");
 
     // La estadía de A sigue Reservada (B no pudo hacer check-in).
     // Hacemos check-in legítimo con JWT de A para probar el check-out cross-tenant.
@@ -845,7 +845,7 @@ describeIntegration("Guardería: aislamiento tenant en check-in/out (bloqueante)
     });
     const bodyCheckout = await resCheckout.json() as { error: { code: string } };
     expect(resCheckout.status).toBe(404);
-    expect(bodyCheckout.error.code).toBe("ESTADIA_NOT_FOUND");
+    expect(bodyCheckout.error.code).toBe("STAY_NOT_FOUND");
 
     // La estadía de A sigue EnCurso (B no pudo hacer check-out).
     const { data: rowDb } = await serviceDb
@@ -1034,7 +1034,7 @@ describeIntegration("Guardería: aislamiento tenant en modificar/cancelar (bloqu
     expect(rowDb?.status).toBe("Reservada");
   });
 
-  it("B no puede modificar ni cancelar vía HTTP con JWT de B sobre estadía de A → 404 ESTADIA_NOT_FOUND", async () => {
+  it("B no puede modificar ni cancelar vía HTTP con JWT de B sobre estadía de A → 404 STAY_NOT_FOUND", async () => {
     if (skipIfNoCredentials() || !tenantA.jwt || !tenantB.jwt) return;
 
     await setCupo(tenantA.tenantId, 10);
@@ -1049,7 +1049,7 @@ describeIntegration("Guardería: aislamiento tenant en modificar/cancelar (bloqu
     });
     const bodyMod = await resMod.json() as { error: { code: string } };
     expect(resMod.status).toBe(404);
-    expect(bodyMod.error.code).toBe("ESTADIA_NOT_FOUND");
+    expect(bodyMod.error.code).toBe("STAY_NOT_FOUND");
 
     // Cancelar con JWT de B.
     const resCan = await callApp(`/estadias/${idDeA}/cancelar`, {
@@ -1058,7 +1058,7 @@ describeIntegration("Guardería: aislamiento tenant en modificar/cancelar (bloqu
     });
     const bodyCan = await resCan.json() as { error: { code: string } };
     expect(resCan.status).toBe(404);
-    expect(bodyCan.error.code).toBe("ESTADIA_NOT_FOUND");
+    expect(bodyCan.error.code).toBe("STAY_NOT_FOUND");
 
     // La estadía de A no fue tocada.
     const { data: rowDb } = await serviceDb
