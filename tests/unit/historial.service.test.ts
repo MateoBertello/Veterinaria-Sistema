@@ -360,10 +360,28 @@ describe("crearRegistro", () => {
     ).rejects.toMatchObject({ code: ErrorCode.MASCOTA_NOT_FOUND, statusCode: 404 });
   });
 
+  it("DT-2: professionalId que no es usuario del tenant → FORBIDDEN (403)", async () => {
+    const db = buildMockDb({
+      singleResults: [
+        { data: mascotaViva, error: null },
+        { data: null, error: null },   // usuarios: el profesional no existe en este tenant
+      ],
+    });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    await expect(
+      HistorialService.crearRegistro(PET_ID, dtoBase() as never, CTX),
+    ).rejects.toMatchObject({ code: ErrorCode.FORBIDDEN, statusCode: 403 });
+
+    // La validación corta ANTES del insert: nada se persiste.
+    expect(db.builder["insert"]).not.toHaveBeenCalled();
+  });
+
   it("RN-EC5: persiste clientIdAtTime/clientNameAtTime del dueño vigente", async () => {
     const db = buildMockDb({
       singleResults: [
         { data: mascotaViva, error: null },
+        { data: { id: PROF_ID }, error: null },
         { data: { id: EVENT_ID, date: "2026-06-04", event_type: "Consulta" }, error: null },
       ],
     });
@@ -401,6 +419,7 @@ describe("crearRegistro", () => {
     const db = buildMockDb({
       singleResults: [
         { data: mascotaViva, error: null },
+        { data: { id: PROF_ID }, error: null },
         { data: { id: EVENT_ID, date: "2026-06-04", event_type: "Consulta" }, error: null },
       ],
     });
@@ -422,6 +441,7 @@ describe("crearRegistro", () => {
     const db = buildMockDb({
       singleResults: [
         { data: { ...mascotaViva, cliente: { full_name: "Juan Pérez", email: null } }, error: null },
+        { data: { id: PROF_ID }, error: null },
         { data: { id: EVENT_ID, date: "2026-06-04", event_type: "Consulta" }, error: null },
       ],
     });
@@ -440,6 +460,7 @@ describe("crearRegistro", () => {
     const db = buildMockDb({
       singleResults: [
         { data: mascotaViva, error: null },
+        { data: { id: PROF_ID }, error: null },
         { data: { id: EVENT_ID, date: "2026-06-04", event_type: "Consulta" }, error: null },
       ],
     });
@@ -459,6 +480,7 @@ describe("crearRegistro", () => {
     const db = buildMockDb({
       singleResults: [
         { data: mascotaViva, error: null },
+        { data: { id: PROF_ID }, error: null },
         { data: { id: EVENT_ID, date: "2026-06-04", event_type: "Consulta" }, error: null },
       ],
     });

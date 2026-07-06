@@ -66,6 +66,7 @@ function buildDbChain(overrides: {
   chain["insert"] = vi.fn().mockReturnValue(chain);
   chain["update"] = vi.fn().mockReturnValue(chain);
   chain["eq"]     = vi.fn().mockReturnValue(chain);
+  chain["not"]    = vi.fn().mockReturnValue(chain);
   chain["ilike"]  = vi.fn().mockReturnValue(chain);
   chain["order"]  = vi.fn().mockReturnValue(chain);
   chain["range"]  = rangeFn;
@@ -119,6 +120,31 @@ describe("DoctorService", () => {
 
     const eqCalls = (db["eq"] as ReturnType<typeof vi.fn>).mock.calls;
     expect(eqCalls).toContainEqual(["available", true]);
+  });
+
+  it("DT-2: professional=true excluye server-side a los doctores sin usuario vinculado", async () => {
+    const db = buildDbChain({ countData: [filaDb], count: 1 });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    await DoctorService.buscarPaginado(
+      { page: 1, limit: 20, search: undefined, available: undefined, professional: true },
+      TENANT_ID,
+    );
+
+    // El contrato del profesional (professionalId = usuarios.id) exige user_id NOT NULL.
+    expect(db["not"]).toHaveBeenCalledWith("user_id", "is", null);
+  });
+
+  it("DT-2: sin professional=true el listado NO filtra por user_id (Turnos/Horarios ven todos)", async () => {
+    const db = buildDbChain({ countData: [filaDb], count: 1 });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    await DoctorService.buscarPaginado(
+      { page: 1, limit: 20, search: undefined, available: undefined },
+      TENANT_ID,
+    );
+
+    expect(db["not"]).not.toHaveBeenCalled();
   });
 
   // ── Detalle: guard de tenant ────────────────────────────────────────────────

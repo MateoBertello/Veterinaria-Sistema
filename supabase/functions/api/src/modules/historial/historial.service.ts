@@ -538,6 +538,21 @@ export class HistorialService {
       );
     }
 
+    // DT-2: professional_id es FK a usuarios(id); validar acá que el profesional
+    // pertenezca al tenant convierte la violación de FK (500 opaco) en un rechazo
+    // limpio y cierra la referencia cross-tenant. Mismo contrato que el RPC de
+    // eutanasia (FORBIDDEN).
+    const { data: profesional } = await db
+      .from("usuarios")
+      .select("id")
+      .eq("id", data.professionalId)
+      .eq("tenant_id", ctx.tenantId)
+      .maybeSingle();
+
+    if (!profesional) {
+      throw new DomainError(ErrorCode.FORBIDDEN, 403, "El profesional no pertenece a este tenant");
+    }
+
     const payload = {
       tenant_id:           ctx.tenantId,
       pet_id:              petId,

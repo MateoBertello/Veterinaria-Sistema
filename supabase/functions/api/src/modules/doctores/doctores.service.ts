@@ -22,6 +22,20 @@ export interface UsuarioEmbed {
   active:   boolean;
 }
 
+/**
+ * Contrato del "profesional" (DT-2) — el objeto expone DOS claves y cada
+ * consumidor debe usar la que corresponde:
+ *
+ * - `id`: PK de `doctores`. Es la clave de Turnos y Horarios
+ *   (`turnos.doctor_id`, `horarios_doctor.doctor_id`).
+ * - `userId`: `usuarios.id` del usuario logueable vinculado (nullable por
+ *   `ON DELETE SET NULL`). Es la clave que Historial Clínico y Vacunación
+ *   esperan como `professionalId` (FK `historial_clinico.professional_id`
+ *   → `usuarios(id)`, y los RPCs de eutanasia/vacunación).
+ *
+ * Los selects de historial deben listar con `professional=true` (solo
+ * doctores con `userId`) y enviar `userId`, nunca `id`.
+ */
 export interface DoctorPublico {
   id:            string;
   userId:        string | null;
@@ -79,6 +93,10 @@ export const DoctorService = {
 
     if (opts.available !== undefined) {
       query = query.eq("available", opts.available);
+    }
+    if (opts.professional) {
+      // DT-2: seleccionables como profesional clínico ⇒ usuario vinculado.
+      query = query.not("user_id", "is", null);
     }
     if (opts.search) {
       const term = opts.search.replace(/[%,]/g, " ");

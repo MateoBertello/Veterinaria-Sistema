@@ -32,15 +32,16 @@ doctoresRouter.get("/", async (c) => {
   const { tenantId } = getTenantContext(c);
 
   const parsed = ListarDoctoresQuerySchema.safeParse({
-    search:    c.req.query("search"),
-    available: c.req.query("available"),
-    page:      c.req.query("page"),
-    limit:     c.req.query("limit"),
+    search:       c.req.query("search"),
+    available:    c.req.query("available"),
+    professional: c.req.query("professional"),
+    page:         c.req.query("page"),
+    limit:        c.req.query("limit"),
   });
 
   const opts = parsed.success
     ? parsed.data
-    : { page: 1, limit: 20, search: undefined, available: undefined };
+    : { page: 1, limit: 20, search: undefined, available: undefined, professional: undefined };
 
   const { items, total } = await DoctorService.buscarPaginado(opts, tenantId);
   return c.json(ok(items, { page: opts.page, limit: opts.limit, total }), 200);

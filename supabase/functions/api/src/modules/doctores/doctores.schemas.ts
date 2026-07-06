@@ -17,6 +17,14 @@ export const ListarDoctoresQuerySchema = z.object({
     .string()
     .optional()
     .transform((v) => (v === undefined ? undefined : v === "true")),
+  // professional=true: solo doctores seleccionables como profesional clínico
+  // (user_id vinculado). Es el filtro que consumen los selects de historial:
+  // professional_id es FK a usuarios(id), así que un doctor sin usuario no es
+  // un profesional válido (DT-2).
+  professional: z
+    .string()
+    .optional()
+    .transform((v) => (v === undefined ? undefined : v === "true")),
   page:  z.coerce.number().int().min(1).default(1),
   limit: z.coerce.number().int().min(1).max(100).default(20),
 });
