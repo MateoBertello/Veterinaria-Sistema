@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
-import { ApiError, type HistorialItem, type ResumenClinico } from "../types/index.ts";
+import { ApiError, type DosisVacunacion, type HistorialItem, type ResumenClinico } from "../types/index.ts";
 
 vi.mock("../api/historial-clinico.ts", () => ({
   listarHistorial:        vi.fn(),
@@ -14,6 +14,10 @@ vi.mock("../api/historial-clinico.ts", () => ({
   exportarHistorial:      vi.fn(),
 }));
 
+vi.mock("../api/vacunacion.ts", () => ({
+  listarPlanVacunacion: vi.fn(),
+}));
+
 vi.mock("../api/doctores.ts", () => ({
   listarDoctores: vi.fn().mockResolvedValue({ items: [], meta: { page: 1, limit: 100, total: 0 } }),
 }));
@@ -24,10 +28,12 @@ vi.mock("sonner", () => ({
 
 import { HistorialClinicoPage } from "./HistorialClinicoPage.tsx";
 import { exportarHistorial, listarHistorial, resumenClinico } from "../api/historial-clinico.ts";
+import { listarPlanVacunacion } from "../api/vacunacion.ts";
 
 const mockListar = vi.mocked(listarHistorial);
 const mockResumen = vi.mocked(resumenClinico);
 const mockExportar = vi.mocked(exportarHistorial);
+const mockListarDosis = vi.mocked(listarPlanVacunacion);
 
 function makeResumen(over: Partial<ResumenClinico> = {}): ResumenClinico {
   return {
@@ -42,6 +48,15 @@ function makeEvento(over: Partial<HistorialItem> = {}): HistorialItem {
     id: "e1", date: "2026-06-01", eventType: "Consulta", professionalName: "Dra. García",
     weightKg: 12.5, temperatureC: 38.2, diagnosis: null,
     clientNameAtTime: "Juan Pérez", isPreviousOwner: false, hasAttachments: false,
+    ...over,
+  };
+}
+
+function makeDosis(over: Partial<DosisVacunacion> = {}): DosisVacunacion {
+  return {
+    id: "d1", petId: "m1", tipoVacunaId: "t1", tipoVacunaNombre: "Antirrábica",
+    eventoOrigenId: null, eventoAplicacionId: null, fechaEstimada: "2026-07-01",
+    estado: "Pendiente", estadoVisual: "Proxima", notas: null, createdAt: "2026-06-01T00:00:00.000Z",
     ...over,
   };
 }
@@ -220,5 +235,92 @@ describe("HistorialClinicoPage", () => {
     await userEvent.click(screen.getByRole("button", { name: /Reintentar/i }));
 
     await waitFor(() => expect(screen.queryByText("Falló la carga")).not.toBeInTheDocument());
+  });
+
+  describe("pestaña Plan de Vacunación", () => {
+    async function abrirPestanaVacunacion() {
+      const { default: userEvent } = await import("@testing-library/user-event");
+      await userEvent.click(await screen.findByRole("tab", { name: /Plan de Vacunación/i }));
+    }
+
+    it("no llama a listarPlanVacunacion hasta que se activa la pestaña (lazy load)", async () => {
+      mockResumen.mockResolvedValue(makeResumen());
+      mockListar.mockResolvedValue({ items: [makeEvento()], meta: { page: 1, limit: 20, total: 1 } });
+
+      renderPage();
+
+      await screen.findByText("Firulais");
+      expect(mockListarDosis).not.toHaveBeenCalled();
+    });
+
+    it("al activar la pestaña, lista las dosis con su badge de estadoVisual", async () => {
+      mockResumen.mockResolvedValue(makeResumen());
+      mockListar.mockResolvedValue({ items: [makeEvento()], meta: { page: 1, limit: 20, total: 1 } });
+      mockListarDosis.mockResolvedValue({
+        items: [makeDosis({ tipoVacunaNombre: "Antirrábica", estadoVisual: "Vencida" })],
+        meta: { page: 1, limit: 20, total: 1 },
+      });
+
+      renderPage();
+      await abrirPestanaVacunacion();
+
+      expect(mockListarDosis).toHaveBeenCalledWith("m1", { page: 1, limit: 20 });
+      expect(await screen.findByText("Antirrábica")).toBeInTheDocument();
+      expect(screen.getByText("Vencida")).toBeInTheDocument();
+    });
+
+    it("muestra el estado vacío cuando no hay dosis en el plan", async () => {
+      mockResumen.mockResolvedValue(makeResumen());
+      mockListar.mockResolvedValue({ items: [makeEvento()], meta: { page: 1, limit: 20, total: 1 } });
+      mockListarDosis.mockResolvedValue({ items: [], meta: { page: 1, limit: 20, total: 0 } });
+
+      renderPage();
+      await abrirPestanaVacunacion();
+
+      expect(await screen.findByText(/Todavía no hay dosis registradas/i)).toBeInTheDocument();
+    });
+
+    it("muestra el estado de error del plan con opción de reintentar", async () => {
+      mockResumen.mockResolvedValue(makeResumen());
+      mockListar.mockResolvedValue({ items: [makeEvento()], meta: { page: 1, limit: 20, total: 1 } });
+      mockListarDosis.mockRejectedValueOnce(new ApiError("INTERNAL_ERROR", 500, "Falló la carga del plan"));
+
+      renderPage();
+      await abrirPestanaVacunacion();
+
+      expect(await screen.findByText("Falló la carga del plan")).toBeInTheDocument();
+
+      mockListarDosis.mockResolvedValue({ items: [makeDosis()], meta: { page: 1, limit: 20, total: 1 } });
+      const { default: userEvent } = await import("@testing-library/user-event");
+      await userEvent.click(screen.getByRole("button", { name: /Reintentar/i }));
+
+      await waitFor(() => expect(screen.queryByText("Falló la carga del plan")).not.toBeInTheDocument());
+    });
+
+    it("no muestra botones de acción de historial (exportar/registrar/eutanasia) en la pestaña de vacunación", async () => {
+      mockResumen.mockResolvedValue(makeResumen({ estado: "Activa" }));
+      mockListar.mockResolvedValue({ items: [makeEvento()], meta: { page: 1, limit: 20, total: 1 } });
+      mockListarDosis.mockResolvedValue({ items: [makeDosis()], meta: { page: 1, limit: 20, total: 1 } });
+
+      renderPage();
+      await abrirPestanaVacunacion();
+      await screen.findByText("Antirrábica");
+
+      expect(screen.queryByRole("button", { name: /Registrar evento/i })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /Registrar eutanasia/i })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /Exportar/i })).not.toBeInTheDocument();
+    });
+
+    it("el banner de mascota fallecida sigue visible en la pestaña de vacunación", async () => {
+      mockResumen.mockResolvedValue(makeResumen({ estado: "Fallecida" }));
+      mockListar.mockResolvedValue({ items: [makeEvento()], meta: { page: 1, limit: 20, total: 1 } });
+      mockListarDosis.mockResolvedValue({ items: [makeDosis()], meta: { page: 1, limit: 20, total: 1 } });
+
+      renderPage();
+      await abrirPestanaVacunacion();
+      await screen.findByText("Antirrábica");
+
+      expect(screen.getByText(/Mascota fallecida/i)).toBeInTheDocument();
+    });
   });
 });

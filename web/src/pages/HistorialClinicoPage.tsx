@@ -1,16 +1,19 @@
 import { useCallback, useEffect, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
-import { ArrowLeft, FileSpreadsheet, FileText, Loader2, Plus, Stethoscope, TriangleAlert } from "lucide-react";
+import { ArrowLeft, FileSpreadsheet, FileText, Loader2, Plus, Stethoscope, Syringe, TriangleAlert } from "lucide-react";
 import { toast } from "sonner";
 import { Alert, AlertDescription, AlertTitle } from "../components/ui/alert.tsx";
 import { Badge } from "../components/ui/badge.tsx";
 import { Button } from "../components/ui/button.tsx";
 import { Skeleton } from "../components/ui/skeleton.tsx";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs.tsx";
 import { EventoTimeline } from "../components/historial/EventoTimeline.tsx";
 import { EventoClinicoFormDialog } from "../components/historial/EventoClinicoFormDialog.tsx";
 import { EutanasiaDialog } from "../components/historial/EutanasiaDialog.tsx";
+import { PlanVacunacionTimeline } from "../components/vacunacion/PlanVacunacionTimeline.tsx";
 import { exportarHistorial, listarHistorial, resumenClinico, type FormatoExport } from "../api/historial-clinico.ts";
-import { ApiError, ErrorCode, type HistorialItem, type ResumenClinico, type ApiMeta } from "../types/index.ts";
+import { listarPlanVacunacion } from "../api/vacunacion.ts";
+import { ApiError, ErrorCode, type HistorialItem, type ResumenClinico, type ApiMeta, type DosisVacunacion } from "../types/index.ts";
 
 const PAGE_SIZE = 20;
 
@@ -48,6 +51,13 @@ export function HistorialClinicoPage() {
   const [eutanasiaOpen, setEutanasiaOpen] = useState(false);
   const [exportingFormat, setExportingFormat] = useState<FormatoExport | null>(null);
 
+  const [activeTab, setActiveTab] = useState<"historial" | "vacunacion">("historial");
+  const [dosis, setDosis] = useState<DosisVacunacion[]>([]);
+  const [dosisMeta, setDosisMeta] = useState<ApiMeta>({ page: 1, limit: PAGE_SIZE, total: 0 });
+  const [dosisLoading, setDosisLoading] = useState(false);
+  const [dosisError, setDosisError] = useState<string | null>(null);
+  const [dosisPage, setDosisPage] = useState(1);
+
   const cargarResumen = useCallback(async () => {
     if (!mascotaId) return;
     setResumenError(null);
@@ -73,8 +83,28 @@ export function HistorialClinicoPage() {
     }
   }, [mascotaId, page]);
 
+  const cargarPlanVacunacion = useCallback(async () => {
+    if (!mascotaId) return;
+    setDosisLoading(true);
+    setDosisError(null);
+    try {
+      const { items, meta } = await listarPlanVacunacion(mascotaId, { page: dosisPage, limit: PAGE_SIZE });
+      setDosis(items);
+      setDosisMeta(meta);
+    } catch (err) {
+      setDosisError(err instanceof ApiError ? err.message : "No se pudo cargar el plan de vacunación");
+    } finally {
+      setDosisLoading(false);
+    }
+  }, [mascotaId, dosisPage]);
+
   useEffect(() => { void cargarResumen(); }, [cargarResumen]);
   useEffect(() => { void cargarHistorial(); }, [cargarHistorial]);
+
+  useEffect(() => {
+    if (activeTab !== "vacunacion") return;
+    void cargarPlanVacunacion();
+  }, [activeTab, cargarPlanVacunacion]);
 
   async function handleExport(format: FormatoExport) {
     if (!mascotaId) return;
@@ -142,55 +172,6 @@ export function HistorialClinicoPage() {
         )}
       </header>
 
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex gap-2">
-          <Button
-            type="button"
-            variant="outline"
-            className="border-green-600 text-green-700 hover:bg-green-50 hover:text-green-800"
-            disabled={exportDisabled}
-            onClick={() => void handleExport("xlsx")}
-          >
-            {exportingFormat === "xlsx" ? (
-              <Loader2 className="size-4 animate-spin" aria-hidden />
-            ) : (
-              <FileSpreadsheet className="size-4" aria-hidden />
-            )}
-            Exportar Excel
-          </Button>
-          <Button
-            type="button"
-            disabled={exportDisabled}
-            onClick={() => void handleExport("pdf")}
-          >
-            {exportingFormat === "pdf" ? (
-              <Loader2 className="size-4 animate-spin" aria-hidden />
-            ) : (
-              <FileText className="size-4" aria-hidden />
-            )}
-            Exportar PDF
-          </Button>
-        </div>
-
-        {!esFallecida ? (
-          <div className="flex gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              className="border-destructive/40 text-destructive hover:bg-destructive/5 hover:text-destructive"
-              onClick={() => setEutanasiaOpen(true)}
-            >
-              <TriangleAlert className="size-4" aria-hidden />
-              Registrar eutanasia
-            </Button>
-            <Button onClick={() => setFormOpen(true)}>
-              <Plus className="size-4" aria-hidden />
-              Registrar evento
-            </Button>
-          </div>
-        ) : null}
-      </div>
-
       {esFallecida ? (
         <Alert>
           <AlertTitle>Mascota fallecida</AlertTitle>
@@ -201,56 +182,173 @@ export function HistorialClinicoPage() {
         </Alert>
       ) : null}
 
-      <div className="rounded-lg border">
-        {loading ? (
-          <div className="space-y-3 p-4">
-            {Array.from({ length: 4 }).map((_, i) => (
-              <Skeleton key={i} className="h-10 w-full" />
-            ))}
-          </div>
-        ) : error ? (
-          <div className="py-10 text-center">
-            <p className="text-sm text-destructive">{error}</p>
-            <Button variant="outline" className="mt-3" onClick={() => void cargarHistorial()}>
-              Reintentar
-            </Button>
-          </div>
-        ) : eventos.length === 0 ? (
-          <p className="py-10 text-center text-sm text-muted-foreground">
-            Todavía no hay eventos clínicos registrados para esta mascota.
-          </p>
-        ) : (
-          <div className="px-4">
-            <EventoTimeline eventos={eventos} />
-          </div>
-        )}
-      </div>
+      <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as "historial" | "vacunacion")}>
+        <TabsList className="bg-orange-50">
+          <TabsTrigger value="historial">
+            <Stethoscope className="size-4" aria-hidden />
+            Historial Clínico
+          </TabsTrigger>
+          <TabsTrigger value="vacunacion">
+            <Syringe className="size-4" aria-hidden />
+            Plan de Vacunación
+          </TabsTrigger>
+        </TabsList>
 
-      {!loading && !error && eventos.length > 0 ? (
-        <div className="flex items-center justify-between">
-          <p className="text-sm text-muted-foreground">
-            {meta.total} evento{meta.total === 1 ? "" : "s"} · Página {meta.page} de {totalPages}
-          </p>
-          <div className="flex gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={page <= 1}
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
-            >
-              Anterior
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={page >= totalPages}
-              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-            >
-              Siguiente
-            </Button>
+        <TabsContent value="historial" className="space-y-6">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                className="border-green-600 text-green-700 hover:bg-green-50 hover:text-green-800"
+                disabled={exportDisabled}
+                onClick={() => void handleExport("xlsx")}
+              >
+                {exportingFormat === "xlsx" ? (
+                  <Loader2 className="size-4 animate-spin" aria-hidden />
+                ) : (
+                  <FileSpreadsheet className="size-4" aria-hidden />
+                )}
+                Exportar Excel
+              </Button>
+              <Button
+                type="button"
+                disabled={exportDisabled}
+                onClick={() => void handleExport("pdf")}
+              >
+                {exportingFormat === "pdf" ? (
+                  <Loader2 className="size-4 animate-spin" aria-hidden />
+                ) : (
+                  <FileText className="size-4" aria-hidden />
+                )}
+                Exportar PDF
+              </Button>
+            </div>
+
+            {!esFallecida ? (
+              <div className="flex gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="border-destructive/40 text-destructive hover:bg-destructive/5 hover:text-destructive"
+                  onClick={() => setEutanasiaOpen(true)}
+                >
+                  <TriangleAlert className="size-4" aria-hidden />
+                  Registrar eutanasia
+                </Button>
+                <Button onClick={() => setFormOpen(true)}>
+                  <Plus className="size-4" aria-hidden />
+                  Registrar evento
+                </Button>
+              </div>
+            ) : null}
           </div>
-        </div>
-      ) : null}
+
+          <div className="rounded-lg border">
+            {loading ? (
+              <div className="space-y-3 p-4">
+                {Array.from({ length: 4 }).map((_, i) => (
+                  <Skeleton key={i} className="h-10 w-full" />
+                ))}
+              </div>
+            ) : error ? (
+              <div className="py-10 text-center">
+                <p className="text-sm text-destructive">{error}</p>
+                <Button variant="outline" className="mt-3" onClick={() => void cargarHistorial()}>
+                  Reintentar
+                </Button>
+              </div>
+            ) : eventos.length === 0 ? (
+              <p className="py-10 text-center text-sm text-muted-foreground">
+                Todavía no hay eventos clínicos registrados para esta mascota.
+              </p>
+            ) : (
+              <div className="px-4">
+                <EventoTimeline eventos={eventos} />
+              </div>
+            )}
+          </div>
+
+          {!loading && !error && eventos.length > 0 ? (
+            <div className="flex items-center justify-between">
+              <p className="text-sm text-muted-foreground">
+                {meta.total} evento{meta.total === 1 ? "" : "s"} · Página {meta.page} de {totalPages}
+              </p>
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={page <= 1}
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                >
+                  Anterior
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={page >= totalPages}
+                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                >
+                  Siguiente
+                </Button>
+              </div>
+            </div>
+          ) : null}
+        </TabsContent>
+
+        <TabsContent value="vacunacion" className="space-y-6">
+          <div className="rounded-lg border">
+            {dosisLoading ? (
+              <div className="space-y-3 p-4">
+                {Array.from({ length: 4 }).map((_, i) => (
+                  <Skeleton key={i} className="h-10 w-full" />
+                ))}
+              </div>
+            ) : dosisError ? (
+              <div className="py-10 text-center">
+                <p className="text-sm text-destructive">{dosisError}</p>
+                <Button variant="outline" className="mt-3" onClick={() => void cargarPlanVacunacion()}>
+                  Reintentar
+                </Button>
+              </div>
+            ) : dosis.length === 0 ? (
+              <p className="py-10 text-center text-sm text-muted-foreground">
+                Todavía no hay dosis registradas en el plan de vacunación de esta mascota.
+              </p>
+            ) : (
+              <div className="px-4">
+                <PlanVacunacionTimeline dosis={dosis} />
+              </div>
+            )}
+          </div>
+
+          {!dosisLoading && !dosisError && dosis.length > 0 ? (
+            <div className="flex items-center justify-between">
+              <p className="text-sm text-muted-foreground">
+                {dosisMeta.total} dosis · Página {dosisMeta.page} de {Math.max(1, Math.ceil(dosisMeta.total / (dosisMeta.limit || PAGE_SIZE)))}
+              </p>
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={dosisPage <= 1}
+                  onClick={() => setDosisPage((p) => Math.max(1, p - 1))}
+                >
+                  Anterior
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={dosisPage >= Math.max(1, Math.ceil(dosisMeta.total / (dosisMeta.limit || PAGE_SIZE)))}
+                  onClick={() => setDosisPage((p) => p + 1)}
+                >
+                  Siguiente
+                </Button>
+              </div>
+            </div>
+          ) : null}
+        </TabsContent>
+      </Tabs>
 
       <EventoClinicoFormDialog
         open={formOpen}

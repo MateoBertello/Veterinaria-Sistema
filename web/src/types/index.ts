@@ -513,6 +513,30 @@ export interface EutanasiaResultado {
   cancelledDoses: number;
 }
 
+// ─── Plan de Vacunación ─────────────────────────────────────────────────────
+
+// RN-PV1: estado persistido (server); "Aplicada"/"Cancelada" son terminales.
+export type EstadoDosisVacunacion = "Pendiente" | "Aplicada" | "Cancelada";
+
+// RN-PV1: estadoVisual se deriva 100% en el backend comparando fechaEstimada
+// con "hoy" — el frontend NO debe recalcularlo, solo pintarlo.
+export type EstadoVisualDosis = "Proxima" | "Vencida" | "Aplicada" | "Cancelada";
+
+/** Item del timeline de vacunación (`GET /mascotas/:petId/plan-vacunacion`), orden asc por fechaEstimada. */
+export interface DosisVacunacion {
+  id:                 string;
+  petId:              string;
+  tipoVacunaId:       string;
+  tipoVacunaNombre:   string | null;
+  eventoOrigenId:     string | null;
+  eventoAplicacionId: string | null;
+  fechaEstimada:      string;
+  estado:             EstadoDosisVacunacion;
+  estadoVisual:       EstadoVisualDosis;
+  notas:              string | null;
+  createdAt:          string;
+}
+
 // ─── Catálogos globales ─────────────────────────────────────────────────────
 
 export interface Especie {
