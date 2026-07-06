@@ -197,9 +197,14 @@ async function ensureUser(tenantId, spec) {
     const existing = await findAuthUserByEmail(spec.email);
     if (!existing) die(`Auth dice que ${spec.email} ya existe pero no pude localizarlo`);
     authUserId = existing.id;
-    // Asegurar que el app_metadata.tenant_id sea el correcto.
-    await db.auth.admin.updateUserById(authUserId, { app_metadata: { tenant_id: tenantId } });
-    console.log(`• Auth user ${spec.email} ya existía — reuso ${authUserId}`);
+    // Re-setear password + email_confirm + tenant_id: re-correr el seed siempre debe dejar
+    // credenciales usables, aunque la password haya cambiado o el mail haya quedado sin confirmar.
+    await db.auth.admin.updateUserById(authUserId, {
+      app_metadata: { tenant_id: tenantId },
+      password: PASSWORD,
+      email_confirm: true,
+    });
+    console.log(`• Auth user ${spec.email} ya existía — reuso ${authUserId} (password/email_confirm re-seteados)`);
   } else {
     authUserId = created.user.id;
     console.log(`✓ Auth user ${spec.email} creado → ${authUserId}`);
