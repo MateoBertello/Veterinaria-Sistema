@@ -13,7 +13,8 @@ vi.mock("../../supabase/functions/api/src/shared/audit.ts", () => ({
 import { getDb, getServiceDb } from "../../supabase/functions/api/src/shared/db.ts";
 import { recordAudit } from "../../supabase/functions/api/src/shared/audit.ts";
 import { AuthService } from "../../supabase/functions/api/src/modules/auth/auth.service.ts";
-import { DomainError, ErrorCode } from "../../supabase/functions/api/src/shared/errors.ts";
+import { ErrorCode } from "../../supabase/functions/api/src/shared/errors.ts";
+import { RecuperarUsuarioSchema, RecuperarPasswordSchema } from "../../supabase/functions/api/src/modules/auth/auth.schemas.ts";
 
 const mockGetServiceDb = vi.mocked(getServiceDb);
 const mockGetDb        = vi.mocked(getDb);
@@ -25,10 +26,11 @@ const USER_ID   = "user-uuid-1";
 // ─── Builder de mocks de Supabase ─────────────────────────────────────────────
 
 function buildChain(overrides?: {
-  single?: () => Promise<unknown>;
-  signIn?:  () => Promise<unknown>;
-  signOut?: () => Promise<unknown>;
-  update?:  () => Promise<unknown>;
+  single?:               () => Promise<unknown>;
+  signIn?:               () => Promise<unknown>;
+  signOut?:              () => Promise<unknown>;
+  update?:               () => Promise<unknown>;
+  resetPasswordForEmail?: () => Promise<unknown>;
 }) {
   const chain = {
     from:   vi.fn().mockReturnThis(),
@@ -39,11 +41,12 @@ function buildChain(overrides?: {
     single: overrides?.single ?? vi.fn().mockResolvedValue({ data: null, error: null }),
     count:  vi.fn().mockResolvedValue({ count: 0, error: null }),
     auth: {
-      signInWithPassword: overrides?.signIn  ?? vi.fn().mockResolvedValue({ data: null, error: null }),
+      signInWithPassword:    overrides?.signIn  ?? vi.fn().mockResolvedValue({ data: null, error: null }),
       admin: {
         signOut: overrides?.signOut ?? vi.fn().mockResolvedValue({ error: null }),
       },
-      updateUser: overrides?.update ?? vi.fn().mockResolvedValue({ data: null, error: null }),
+      updateUser:            overrides?.update ?? vi.fn().mockResolvedValue({ data: null, error: null }),
+      resetPasswordForEmail: overrides?.resetPasswordForEmail ?? vi.fn().mockResolvedValue({ data: {}, error: null }),
     },
   };
   return chain;
@@ -244,5 +247,146 @@ describe("RN-AUT5: Rate limiting", () => {
     await expect(attempt()).rejects.toMatchObject({
       statusCode: 429,
     });
+  });
+});
+
+// ─── RN-REC1: email inválido ─────────────────────────────────────────────────
+
+describe("RN-REC1: se valida el formato del email antes de procesar", () => {
+  it("RN-REC1: RecuperarUsuarioSchema rechaza un email con formato inválido", () => {
+    expect(RecuperarUsuarioSchema.safeParse({ email: "no-es-un-email" }).success).toBe(false);
+  });
+
+  it("RN-REC1: RecuperarPasswordSchema rechaza un email con formato inválido", () => {
+    expect(RecuperarPasswordSchema.safeParse({ email: "no-es-un-email" }).success).toBe(false);
+  });
+});
+
+// ─── RN-REC2: anti-enumeración ───────────────────────────────────────────────
+
+describe("RN-REC2: la respuesta es genérica, no revela si el email existe", () => {
+  it("RN-REC2: recuperarUsuario con email inexistente resuelve sin error, igual que con email existente", async () => {
+    const serviceDb = buildChain({
+      single: vi.fn().mockResolvedValue({ data: null, error: { message: "No rows" } }),
+    });
+    mockGetServiceDb.mockReturnValue(serviceDb as never);
+
+    await expect(
+      AuthService.recuperarUsuario({ email: "no-existe@test.com" }),
+    ).resolves.toBeUndefined();
+  });
+
+  it("RN-REC2: recuperarPassword con email inexistente resuelve sin error (Supabase Auth no distingue)", async () => {
+    const serviceDb = buildChain();
+    mockGetServiceDb.mockReturnValue(serviceDb as never);
+    const userDb = buildChain();
+    mockGetDb.mockReturnValue(userDb as never);
+
+    await expect(
+      AuthService.recuperarPassword({ email: "no-existe@test.com" }),
+    ).resolves.toBeUndefined();
+  });
+});
+
+// ─── RN-REC3: token de restablecimiento, nunca password en claro ─────────────
+
+describe("RN-REC3: el reset usa accessToken (no una password vieja) y nunca expone la password", () => {
+  it("RN-REC3: resetPassword autentica con el accessToken del dto, no con una password vieja", async () => {
+    const updateUserMock = vi.fn().mockResolvedValue({ error: null });
+    const userDb = buildChain({ update: updateUserMock });
+    mockGetDb.mockReturnValue(userDb as never);
+
+    await AuthService.resetPassword({ accessToken: "reset-token-abc", nuevaPassword: "NuevaPass1!" });
+
+    expect(mockGetDb).toHaveBeenCalledWith("Bearer reset-token-abc");
+    expect(updateUserMock).toHaveBeenCalledWith({ password: "NuevaPass1!" });
+    expect(updateUserMock).toHaveBeenCalledWith(
+      expect.not.objectContaining({ accessToken: expect.anything() }),
+    );
+  });
+
+  it("RN-REC3: token expirado/inválido → 401 con mensaje genérico, sin filtrar el error real de Supabase", async () => {
+    const userDb = buildChain({
+      update: vi.fn().mockResolvedValue({ error: { message: "JWT expired" } }),
+    });
+    mockGetDb.mockReturnValue(userDb as never);
+
+    await expect(
+      AuthService.resetPassword({ accessToken: "vencido", nuevaPassword: "NuevaPass1!" }),
+    ).rejects.toMatchObject({
+      code:       ErrorCode.UNAUTHORIZED,
+      statusCode: 401,
+      message:    expect.stringContaining("token puede haber expirado"),
+    });
+  });
+});
+
+// ─── RN-REC4: auditoría de la solicitud de recuperación ──────────────────────
+
+describe("RN-REC4: la solicitud de recuperación audita en módulo security", () => {
+  it("RN-REC4: recuperarUsuario registra auditoría VIEW en módulo security", async () => {
+    const serviceDb = buildChain({
+      single: vi.fn().mockResolvedValue({ data: null, error: { message: "No rows" } }),
+    });
+    mockGetServiceDb.mockReturnValue(serviceDb as never);
+
+    await AuthService.recuperarUsuario({ email: "alguien@test.com" });
+
+    expect(mockRecordAudit).toHaveBeenCalledOnce();
+    const auditCall = mockRecordAudit.mock.calls[0][1];
+    expect(auditCall.action).toBe("VIEW");
+    expect(auditCall.module).toBe("security");
+  });
+
+  it("RN-REC4: recuperarPassword registra auditoría UPDATE en módulo security", async () => {
+    const serviceDb = buildChain();
+    mockGetServiceDb.mockReturnValue(serviceDb as never);
+    const userDb = buildChain();
+    mockGetDb.mockReturnValue(userDb as never);
+
+    await AuthService.recuperarPassword({ email: "alguien@test.com" });
+
+    expect(mockRecordAudit).toHaveBeenCalledOnce();
+    const auditCall = mockRecordAudit.mock.calls[0][1];
+    expect(auditCall.action).toBe("UPDATE");
+    expect(auditCall.module).toBe("security");
+  });
+});
+
+// ─── RN-AUT2: el login emite un JWT con expiración ───────────────────────────
+
+function makeJwt(payload: object): string {
+  const encode = (obj: object) =>
+    Buffer.from(JSON.stringify(obj))
+      .toString("base64")
+      .replace(/=/g, "")
+      .replace(/\+/g, "-")
+      .replace(/\//g, "_");
+  return `${encode({ alg: "HS256" })}.${encode(payload)}.sig`;
+}
+
+describe("RN-AUT2: el token emitido en login trae una expiración (exp)", () => {
+  it("RN-AUT2: result.token decodifica con una claim exp numérica", async () => {
+    const serviceDb = buildChain({
+      single: vi.fn().mockResolvedValue({ data: usuarioActivo, error: null }),
+    });
+    mockGetServiceDb.mockReturnValue(serviceDb as never);
+
+    const exp = Math.floor(Date.now() / 1000) + 3600;
+    const jwtConExpiracion = makeJwt({ sub: USER_ID, exp });
+
+    const userDb = buildChain({
+      signIn: vi.fn().mockResolvedValue({
+        data:  { session: { access_token: jwtConExpiracion, expires_in: 3600 } },
+        error: null,
+      }),
+    });
+    mockGetDb.mockReturnValue(userDb as never);
+
+    const result = await AuthService.login({ username: "admin1", password: "Pass1234!" }, "127.0.0.1");
+
+    const base64 = result.token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
+    const payload = JSON.parse(Buffer.from(base64, "base64").toString("utf-8"));
+    expect(typeof payload.exp).toBe("number");
   });
 });
