@@ -315,6 +315,15 @@ export interface CrearEstadiaInput {
   notes?:       string;
 }
 
+/** Body de `PUT /estadias/:id` (espejo de `ModificarEstadiaSchema`). Cliente y
+ *  mascota no se pueden cambiar; el backend pre-rellena lo que no se envíe. */
+export interface ModificarEstadiaInput {
+  checkInDate?:  string;
+  checkOutDate?: string;
+  reason?:       string;
+  notes?:        string | null;
+}
+
 /** Item de `GET /estadias/cupo` (RN-GU4): ocupación vs cupo configurado, por día. */
 export interface CupoDia {
   date:       string;

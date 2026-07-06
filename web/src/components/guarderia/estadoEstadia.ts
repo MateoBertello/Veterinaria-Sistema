@@ -58,6 +58,19 @@ export function esTerminal(status: string): boolean {
   return ESTADOS_TERMINALES.has(status as EstadoEstadia);
 }
 
+/**
+ * RN-ME1 (`STAY_LOCKED`): una estadía terminal (Finalizada/Cancelada) no admite
+ * modificación ni cancelación. El backend es la autoridad final; esto solo decide
+ * si se DIBUJAN los botones.
+ */
+export function puedeModificar(status: string): boolean {
+  return !esTerminal(status);
+}
+
+export function puedeCancelar(status: string): boolean {
+  return !esTerminal(status);
+}
+
 /** Transición siguiente para un status arbitrario (string abierto del backend). */
 export function transicionSiguiente(status: string) {
   return TRANSICION_SIGUIENTE[status as EstadoEstadia] ?? null;

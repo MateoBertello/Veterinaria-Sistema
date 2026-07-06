@@ -128,6 +128,7 @@ export function App() {
         <Route path="/turnos/:id/editar" element={<AgendarTurnoPage />} />
         <Route path="/guarderia" element={<OcupacionGuarderiaPage />} />
         <Route path="/guarderia/nuevo" element={<RegistrarEstadiaPage />} />
+        <Route path="/guarderia/:id/editar" element={<RegistrarEstadiaPage />} />
         <Route path="/configuracion" element={<ConfiguracionPage />} />
         <Route path="*" element={<Navigate to="/clientes" replace />} />
       </Route>

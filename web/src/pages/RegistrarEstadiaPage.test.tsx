@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { ApiError, type Cliente, type Estadia, type Mascota } from "../types/index.ts";
 
 vi.mock("../api/clientes.ts", () => ({
@@ -12,6 +12,7 @@ vi.mock("../api/mascotas.ts", () => ({
 }));
 vi.mock("../api/estadias.ts", () => ({
   crearEstadia: vi.fn(),
+  modificarEstadia: vi.fn(),
   obtenerCupo: vi.fn(),
 }));
 vi.mock("sonner", () => ({
@@ -21,11 +22,12 @@ vi.mock("sonner", () => ({
 import { RegistrarEstadiaPage } from "./RegistrarEstadiaPage.tsx";
 import { listarClientes } from "../api/clientes.ts";
 import { listarMascotas } from "../api/mascotas.ts";
-import { crearEstadia, obtenerCupo } from "../api/estadias.ts";
+import { crearEstadia, modificarEstadia, obtenerCupo } from "../api/estadias.ts";
 
 const mockListarClientes = vi.mocked(listarClientes);
 const mockListarMascotas = vi.mocked(listarMascotas);
 const mockCrearEstadia = vi.mocked(crearEstadia);
+const mockModificarEstadia = vi.mocked(modificarEstadia);
 const mockObtenerCupo = vi.mocked(obtenerCupo);
 
 const CHECK_IN = "2099-01-01";
@@ -97,6 +99,23 @@ function renderPage() {
   return render(
     <MemoryRouter>
       <RegistrarEstadiaPage />
+    </MemoryRouter>,
+  );
+}
+
+function renderEditPage(estadia?: Estadia) {
+  return render(
+    <MemoryRouter
+      initialEntries={[
+        estadia
+          ? { pathname: `/guarderia/${estadia.id}/editar`, state: estadia }
+          : "/guarderia/e1/editar",
+      ]}
+    >
+      <Routes>
+        <Route path="/guarderia/:id/editar" element={<RegistrarEstadiaPage />} />
+        <Route path="/guarderia" element={<div>Ocupación de guardería (landing)</div>} />
+      </Routes>
     </MemoryRouter>,
   );
 }
@@ -309,5 +328,80 @@ describe("RegistrarEstadiaPage", () => {
       await screen.findByText("El check-out no puede ser anterior al check-in"),
     ).toBeInTheDocument();
     expect(mockCrearEstadia).not.toHaveBeenCalled();
+  });
+
+  describe("modo edición", () => {
+    it("precarga fechas/motivo/notas y muestra cliente/mascota de solo lectura", async () => {
+      const estadia = makeEstadia({ notes: "Traer su manta" });
+      renderEditPage(estadia);
+
+      expect(await screen.findByText("Modificar Estadía")).toBeInTheDocument();
+      expect(screen.getByText("Firulais")).toBeInTheDocument();
+      expect(screen.getByText("Juan Pérez")).toBeInTheDocument();
+      expect(screen.getByText("Grande")).toBeInTheDocument();
+      expect(screen.getByText("Balanceado sin sal")).toBeInTheDocument();
+      expect(screen.getByLabelText(/Check-in/)).toHaveValue(CHECK_IN);
+      expect(screen.getByLabelText("Check-out *")).toHaveValue(CHECK_OUT);
+      expect(screen.getByLabelText("Motivo *")).toHaveValue("Vacaciones");
+      expect(screen.getByLabelText("Notas")).toHaveValue("Traer su manta");
+      // No se puede cambiar cliente/mascota: no hay combobox/select para eso.
+      expect(screen.queryByRole("combobox", { name: "Dueño" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("combobox", { name: "Mascota" })).not.toBeInTheDocument();
+    });
+
+    it("envía el PUT con el payload esperado y navega a Ocupación", async () => {
+      const estadia = makeEstadia();
+      mockModificarEstadia.mockResolvedValue(makeEstadia({ checkOutDate: "2099-01-05" }));
+      renderEditPage(estadia);
+
+      await screen.findByText("Modificar Estadía");
+      fireEvent.change(screen.getByLabelText("Check-out *"), { target: { value: "2099-01-05" } });
+      await userEvent.click(screen.getByRole("button", { name: "Guardar cambios" }));
+
+      await waitFor(() =>
+        expect(mockModificarEstadia).toHaveBeenCalledWith("e1", {
+          checkInDate: CHECK_IN,
+          checkOutDate: "2099-01-05",
+          reason: "Vacaciones",
+          notes: null,
+        }),
+      );
+      expect(await screen.findByText("Ocupación de guardería (landing)")).toBeInTheDocument();
+    });
+
+    it("En curso: deshabilita el campo de check-in", async () => {
+      const estadia = makeEstadia({ status: "EnCurso" });
+      renderEditPage(estadia);
+
+      expect(await screen.findByLabelText(/Check-in/)).toBeDisabled();
+      expect(screen.getByText("En curso: no se puede modificar el check-in.")).toBeInTheDocument();
+    });
+
+    it("STAY_LOCKED al modificar → toast de error, sin navegar", async () => {
+      const estadia = makeEstadia();
+      mockModificarEstadia.mockRejectedValue(
+        new ApiError("STAY_LOCKED", 422, "La estadía ya no admite cambios"),
+      );
+      renderEditPage(estadia);
+
+      await screen.findByText("Modificar Estadía");
+      await userEvent.click(screen.getByRole("button", { name: "Guardar cambios" }));
+
+      const { toast } = await import("sonner");
+      await waitFor(() =>
+        expect(vi.mocked(toast.error)).toHaveBeenCalledWith("La estadía ya no admite cambios"),
+      );
+      expect(screen.getByText("Modificar Estadía")).toBeInTheDocument();
+    });
+
+    it("sin state de navegación (refresh/link directo) muestra el aviso de volver a Ocupación", async () => {
+      renderEditPage();
+
+      expect(
+        await screen.findByText("No se pudo cargar la estadía a modificar. Volvé a Ocupación e intentá de nuevo."),
+      ).toBeInTheDocument();
+      await userEvent.click(screen.getByRole("button", { name: "Volver a Ocupación" }));
+      expect(await screen.findByText("Ocupación de guardería (landing)")).toBeInTheDocument();
+    });
   });
 });

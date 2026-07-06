@@ -8,12 +8,18 @@ vi.mock("../../api/estadias.ts", () => ({
   obtenerCupo: vi.fn(),
   checkinEstadia: vi.fn(),
   checkoutEstadia: vi.fn(),
+  cancelarEstadia: vi.fn(),
 }));
 const toastSuccess = vi.fn();
 const toastError = vi.fn();
 vi.mock("sonner", () => ({
   toast: { success: (...a: unknown[]) => toastSuccess(...a), error: (...a: unknown[]) => toastError(...a) },
 }));
+const mockNavigate = vi.fn();
+vi.mock("react-router-dom", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("react-router-dom")>();
+  return { ...actual, useNavigate: () => mockNavigate };
+});
 
 import { OcupacionDia } from "./OcupacionDia.tsx";
 import {
@@ -21,12 +27,14 @@ import {
   obtenerCupo,
   checkinEstadia,
   checkoutEstadia,
+  cancelarEstadia,
 } from "../../api/estadias.ts";
 
 const mockListar = vi.mocked(listarEstadias);
 const mockCupo = vi.mocked(obtenerCupo);
 const mockCheckin = vi.mocked(checkinEstadia);
 const mockCheckout = vi.mocked(checkoutEstadia);
+const mockCancelar = vi.mocked(cancelarEstadia);
 
 const HOY = new Date().toISOString().slice(0, 10);
 const AYER = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10);
@@ -107,6 +115,70 @@ describe("OcupacionDia", () => {
     expect(await screen.findByText("Finalizada")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Check-in" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Check-out" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Modificar" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Cancelar" })).not.toBeInTheDocument();
+  });
+
+  it("muestra Modificar y Cancelar en Reservada y en EnCurso", async () => {
+    mockListar.mockResolvedValue([makeEstadia({ status: "Reservada" })]);
+    renderOcupacion();
+    expect(await screen.findByRole("button", { name: "Modificar" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Cancelar" })).toBeInTheDocument();
+  });
+
+  it("oculta Modificar/Cancelar en Cancelada", async () => {
+    mockListar.mockResolvedValue([makeEstadia({ status: "Cancelada" })]);
+    renderOcupacion();
+
+    expect(await screen.findByText("Cancelada")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Modificar" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Cancelar" })).not.toBeInTheDocument();
+  });
+
+  it("Modificar navega a la ruta de edición pasando la estadía por router state", async () => {
+    mockListar.mockResolvedValue([makeEstadia({ status: "Reservada" })]);
+    renderOcupacion();
+
+    await userEvent.click(await screen.findByRole("button", { name: "Modificar" }));
+
+    expect(mockNavigate).toHaveBeenCalledWith(
+      "/guarderia/e1/editar",
+      { state: expect.objectContaining({ id: "e1" }) },
+    );
+  });
+
+  it("Cancelar exige motivo, llama a la API con el motivo y refetea lista+cupo", async () => {
+    mockListar.mockResolvedValue([makeEstadia({ status: "Reservada" })]);
+    mockCancelar.mockResolvedValue(makeEstadia({ status: "Cancelada" }));
+    renderOcupacion();
+
+    await userEvent.click(await screen.findByRole("button", { name: "Cancelar" }));
+    expect(await screen.findByText("Cancelar estadía")).toBeInTheDocument();
+
+    // Sin motivo: no se llama a la API.
+    await userEvent.click(screen.getByRole("button", { name: "Confirmar cancelación" }));
+    expect(await screen.findByText("El motivo es requerido")).toBeInTheDocument();
+    expect(mockCancelar).not.toHaveBeenCalled();
+
+    await userEvent.type(screen.getByLabelText("Motivo *"), "El dueño canceló el viaje");
+    await userEvent.click(screen.getByRole("button", { name: "Confirmar cancelación" }));
+
+    await waitFor(() => expect(mockCancelar).toHaveBeenCalledWith("e1", "El dueño canceló el viaje"));
+    expect(toastSuccess).toHaveBeenCalledWith("Estadía cancelada");
+    // refetch: carga inicial + refetch tras cancelar.
+    await waitFor(() => expect(mockListar).toHaveBeenCalledTimes(2));
+  });
+
+  it("STAY_LOCKED al cancelar → toast de error con el mensaje del backend", async () => {
+    mockListar.mockResolvedValue([makeEstadia({ status: "Reservada" })]);
+    mockCancelar.mockRejectedValue(new ApiError("STAY_LOCKED", 422, "La estadía ya no admite cambios", []));
+    renderOcupacion();
+
+    await userEvent.click(await screen.findByRole("button", { name: "Cancelar" }));
+    await userEvent.type(screen.getByLabelText("Motivo *"), "Motivo cualquiera");
+    await userEvent.click(screen.getByRole("button", { name: "Confirmar cancelación" }));
+
+    await waitFor(() => expect(toastError).toHaveBeenCalledWith("La estadía ya no admite cambios"));
   });
 
   it("check-in exitoso: llama la API, toast de éxito y refetch", async () => {

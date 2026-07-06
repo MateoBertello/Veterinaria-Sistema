@@ -1,5 +1,5 @@
 import { apiClient } from "./client.ts";
-import type { CrearEstadiaInput, CupoDia, Estadia } from "../types/index.ts";
+import type { CrearEstadiaInput, CupoDia, Estadia, ModificarEstadiaInput } from "../types/index.ts";
 
 /** POST /estadias — registrar estadía; nace en estado Reservada (RN-GU5). */
 export function crearEstadia(input: CrearEstadiaInput): Promise<Estadia> {
@@ -47,4 +47,21 @@ export function checkoutEstadia(id: string): Promise<Estadia> {
   return apiClient<Estadia>(`/estadias/${id}/checkout`, { method: "PATCH" });
 }
 
-// Modificar/Cancelar quedan para el próximo pase (backend ya cerrado).
+/**
+ * PUT /estadias/:id — Modificar Estadía (RN-ME1..ME2). Cliente y mascota no viajan:
+ * el backend nunca los acepta (solo fechas/motivo/notas se pueden cambiar).
+ */
+export function modificarEstadia(id: string, input: ModificarEstadiaInput): Promise<Estadia> {
+  return apiClient<Estadia>(`/estadias/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(input),
+  });
+}
+
+/** PATCH /estadias/:id/cancelar — Cancelar Estadía con motivo obligatorio (RN-ME3). */
+export function cancelarEstadia(id: string, cancellationReason: string): Promise<Estadia> {
+  return apiClient<Estadia>(`/estadias/${id}/cancelar`, {
+    method: "PATCH",
+    body: JSON.stringify({ cancellationReason }),
+  });
+}

@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { Controller, useForm } from "react-hook-form";
 import { AlertTriangle, ChevronLeft, ChevronRight } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -9,9 +11,20 @@ import {
   TableHeader,
   TableRow,
 } from "../ui/table.tsx";
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "../ui/alert-dialog.tsx";
 import { Button } from "../ui/button.tsx";
 import { Badge } from "../ui/badge.tsx";
 import { Input } from "../ui/input.tsx";
+import { Label } from "../ui/label.tsx";
+import { Textarea } from "../ui/textarea.tsx";
 import { Skeleton } from "../ui/skeleton.tsx";
 import {
   ESTADO_BADGE_CLASS,
@@ -20,11 +33,14 @@ import {
   PENDIENTE_LABEL,
   esTerminal,
   pendienteDeAccion,
+  puedeCancelar,
+  puedeModificar,
   transicionSiguiente,
   type EstadoEstadia,
 } from "./estadoEstadia.ts";
 import { addDias, formatFechaLarga, hoyISO } from "../turnos/fechas.ts";
 import {
+  cancelarEstadia,
   checkinEstadia,
   checkoutEstadia,
   listarEstadias,
@@ -56,11 +72,14 @@ interface Props {
 }
 
 export function OcupacionDia({ fecha, onFecha }: Props) {
+  const navigate = useNavigate();
   const [estadias, setEstadias] = useState<Estadia[]>([]);
   const [cupo, setCupo] = useState<CupoDia | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [actuandoId, setActuandoId] = useState<string | null>(null);
+  const [cancelandoId, setCancelandoId] = useState<string | null>(null);
+  const [busyCancelar, setBusyCancelar] = useState(false);
 
   const cargar = useCallback(async () => {
     setLoading(true);
@@ -109,6 +128,21 @@ export function OcupacionDia({ fecha, onFecha }: Props) {
     } finally {
       setActuandoId(null);
       await cargar(); // refresca lista y cupo (efecto observable RN-CK)
+    }
+  }
+
+  async function confirmarCancelacion(motivo: string) {
+    if (!cancelandoId) return;
+    setBusyCancelar(true);
+    try {
+      await cancelarEstadia(cancelandoId, motivo);
+      toast.success("Estadía cancelada");
+      setCancelandoId(null);
+      await cargar(); // el cupo se libera al cancelar (RN-ME) — refresco observable
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "No se pudo cancelar la estadía");
+    } finally {
+      setBusyCancelar(false);
     }
   }
 
@@ -250,17 +284,41 @@ export function OcupacionDia({ fecha, onFecha }: Props) {
                       </div>
                     </TableCell>
                     <TableCell className="text-right">
-                      {siguiente ? (
-                        <Button
-                          size="sm"
-                          disabled={actuandoId === e.id}
-                          onClick={() => void accionar(e)}
-                        >
-                          {siguiente.label}
-                        </Button>
-                      ) : esTerminal(e.status) ? (
-                        <span className="text-xs text-muted-foreground">—</span>
-                      ) : null}
+                      <div className="flex flex-wrap items-center justify-end gap-2">
+                        {siguiente ? (
+                          <Button
+                            size="sm"
+                            disabled={actuandoId === e.id}
+                            onClick={() => void accionar(e)}
+                          >
+                            {siguiente.label}
+                          </Button>
+                        ) : null}
+                        {puedeModificar(e.status) ? (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={actuandoId === e.id}
+                            onClick={() => navigate(`/guarderia/${e.id}/editar`, { state: e })}
+                          >
+                            Modificar
+                          </Button>
+                        ) : null}
+                        {puedeCancelar(e.status) ? (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="text-destructive"
+                            disabled={actuandoId === e.id}
+                            onClick={() => setCancelandoId(e.id)}
+                          >
+                            Cancelar
+                          </Button>
+                        ) : null}
+                        {!siguiente && esTerminal(e.status) ? (
+                          <span className="text-xs text-muted-foreground">—</span>
+                        ) : null}
+                      </div>
                     </TableCell>
                   </TableRow>
                 );
@@ -269,7 +327,83 @@ export function OcupacionDia({ fecha, onFecha }: Props) {
           </TableBody>
         </Table>
       </div>
+
+      <CancelarEstadiaAlert
+        open={cancelandoId !== null}
+        busy={busyCancelar}
+        onOpenChange={(open) => { if (!open) setCancelandoId(null); }}
+        onConfirm={(motivo) => void confirmarCancelacion(motivo)}
+      />
     </div>
+  );
+}
+
+interface CancelarProps {
+  open:         boolean;
+  busy:         boolean;
+  onOpenChange: (open: boolean) => void;
+  onConfirm:    (cancellationReason: string) => void;
+}
+
+function CancelarEstadiaAlert({ open, busy, onOpenChange, onConfirm }: CancelarProps) {
+  const {
+    control, handleSubmit, reset,
+    formState: { errors },
+  } = useForm<{ cancellationReason: string }>({ defaultValues: { cancellationReason: "" } });
+
+  useEffect(() => {
+    if (open) reset({ cancellationReason: "" });
+  }, [open, reset]);
+
+  return (
+    <AlertDialog open={open} onOpenChange={onOpenChange}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Cancelar estadía</AlertDialogTitle>
+          <AlertDialogDescription>
+            Indicá el motivo de la cancelación. Queda registrado en la estadía y el cupo se libera.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+
+        <form
+          onSubmit={handleSubmit((v) => onConfirm(v.cancellationReason.trim()))}
+          className="grid gap-2 py-1"
+          noValidate
+        >
+          <Label htmlFor="cancellationReason">Motivo *</Label>
+          <Controller
+            control={control}
+            name="cancellationReason"
+            rules={{
+              required: "El motivo es requerido",
+              maxLength: { value: 500, message: "Máximo 500 caracteres" },
+              validate: (v) => v.trim().length > 0 || "El motivo es requerido",
+            }}
+            render={({ field: { ref: _ref, ...field } }) => (
+              <Textarea
+                id="cancellationReason"
+                rows={3}
+                aria-invalid={Boolean(errors.cancellationReason)}
+                aria-describedby={errors.cancellationReason ? "cancellationReason-error" : undefined}
+                {...field}
+              />
+            )}
+          />
+          {errors.cancellationReason ? (
+            <p id="cancellationReason-error" role="alert" className="text-sm text-destructive">
+              {errors.cancellationReason.message}
+            </p>
+          ) : null}
+
+          <AlertDialogFooter className="mt-2">
+            <AlertDialogCancel type="button" disabled={busy}>Volver</AlertDialogCancel>
+            <Button type="submit" variant="destructive" disabled={busy}>
+              Confirmar cancelación
+            </Button>
+          </AlertDialogFooter>
+        </form>
+      </AlertDialogContent>
+    </AlertDialog>
   );
 }
 

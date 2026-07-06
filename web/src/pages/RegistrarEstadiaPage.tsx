@@ -6,9 +6,9 @@ import {
   type FieldErrors,
   type RegisterOptions,
 } from "react-hook-form";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
-import { ArrowLeft, BedDouble, Ruler, Utensils } from "lucide-react";
+import { ArrowLeft, BedDouble, Lock, PencilLine, Ruler, Utensils } from "lucide-react";
 import { Card, CardContent } from "../components/ui/card.tsx";
 import { Badge } from "../components/ui/badge.tsx";
 import { Button } from "../components/ui/button.tsx";
@@ -27,8 +27,8 @@ import { ClienteCombobox } from "../components/historial/ClienteCombobox.tsx";
 import { CupoDias } from "../components/guarderia/CupoDias.tsx";
 import { hoyISO } from "../components/turnos/fechas.ts";
 import { listarMascotas } from "../api/mascotas.ts";
-import { crearEstadia } from "../api/estadias.ts";
-import { ApiError, ErrorCode, type Cliente, type Mascota } from "../types/index.ts";
+import { crearEstadia, modificarEstadia } from "../api/estadias.ts";
+import { ApiError, ErrorCode, type Cliente, type Estadia, type Mascota } from "../types/index.ts";
 
 const DIETA_FALLBACK = "Sin indicaciones de dieta";
 
@@ -63,6 +63,15 @@ function fieldFromDetail(d: unknown): string | undefined {
 
 export function RegistrarEstadiaPage() {
   const navigate = useNavigate();
+  const { id: estadiaId } = useParams();
+  const location = useLocation();
+  const modoEdicion = Boolean(estadiaId);
+  // La estadía a modificar viaja por router state (no hay GET /estadias/:id): el
+  // único acceso a esta ruta en modo edición es el botón "Modificar" de Ocupación.
+  const estadiaVigente = (location.state as Estadia | undefined) ?? undefined;
+  // RN-ME1 (STAY_LOCKED): En curso solo permite ajustar el egreso, no el ingreso.
+  const bloqueoCheckIn = modoEdicion && estadiaVigente?.status === "EnCurso";
+
   const [cliente, setCliente] = useState<Cliente | null>(null);
   const [mascotaSeleccionada, setMascotaSeleccionada] = useState<Mascota | null>(null);
 
@@ -85,8 +94,25 @@ export function RegistrarEstadiaPage() {
   const checkInDate = watch("checkInDate");
   const checkOutDate = watch("checkOutDate");
 
+  // Modo edición: precarga desde el state de navegación (sin red, cliente/mascota
+  // no viajan porque el backend no los acepta en la modificación).
   useEffect(() => {
-    if (!cliente) {
+    if (modoEdicion && estadiaVigente) {
+      reset({
+        clientId: estadiaVigente.clientId,
+        petId: estadiaVigente.petId,
+        checkInDate: estadiaVigente.checkInDate,
+        checkOutDate: estadiaVigente.checkOutDate,
+        reason: estadiaVigente.reason,
+        notes: estadiaVigente.notes ?? "",
+      });
+    }
+    // Solo al montar: el state de navegación no cambia durante la vida de la página.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (modoEdicion || !cliente) {
       setMascotas([]);
       return;
     }
@@ -98,10 +124,21 @@ export function RegistrarEstadiaPage() {
         setErrorMascotas(err instanceof ApiError ? err.message : "No se pudieron cargar las mascotas");
       })
       .finally(() => setLoadingMascotas(false));
-  }, [cliente]);
+  }, [cliente, modoEdicion]);
 
   async function onSubmit(values: FormValues) {
     try {
+      if (modoEdicion && estadiaId) {
+        const estadia = await modificarEstadia(estadiaId, {
+          checkInDate: values.checkInDate,
+          checkOutDate: values.checkOutDate,
+          reason: values.reason.trim(),
+          notes: values.notes.trim() || null,
+        });
+        toast.success(`Estadía actualizada: ${estadia.petName}, ${estadia.checkInDate} a ${estadia.checkOutDate}`);
+        navigate("/guarderia");
+        return;
+      }
       const estadia = await crearEstadia({
         clientId: values.clientId,
         petId: values.petId,
@@ -118,6 +155,10 @@ export function RegistrarEstadiaPage() {
       setDiasAgotados([]);
     } catch (err) {
       if (err instanceof ApiError) {
+        if (err.code === ErrorCode.STAY_LOCKED) {
+          toast.error(err.message);
+          return;
+        }
         if (err.code === ErrorCode.CUPO_GUARDERIA_AGOTADO) {
           setDiasAgotados(err.details as string[]);
           toast.error(err.message);
@@ -127,7 +168,7 @@ export function RegistrarEstadiaPage() {
           toast.error(err.message);
           return;
         }
-        if (err.code === ErrorCode.MASCOTA_NOT_FOUND || err.code === ErrorCode.PET_DECEASED) {
+        if (!modoEdicion && (err.code === ErrorCode.MASCOTA_NOT_FOUND || err.code === ErrorCode.PET_DECEASED)) {
           setError("petId", { type: "server", message: err.message });
           return;
         }
@@ -151,6 +192,27 @@ export function RegistrarEstadiaPage() {
     }
   }
 
+  if (modoEdicion && !estadiaVigente) {
+    return (
+      <div className="mx-auto max-w-2xl space-y-6">
+        <Button variant="ghost" size="sm" onClick={() => navigate("/guarderia")}>
+          <ArrowLeft className="size-4" aria-hidden />
+          Volver a Ocupación de guardería
+        </Button>
+        <Card>
+          <CardContent className="space-y-2 py-10 text-center">
+            <p className="text-sm text-destructive">
+              No se pudo cargar la estadía a modificar. Volvé a Ocupación e intentá de nuevo.
+            </p>
+            <Button variant="outline" onClick={() => navigate("/guarderia")}>
+              Volver a Ocupación
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
   return (
     <div className="mx-auto max-w-2xl space-y-6">
       <Button variant="ghost" size="sm" onClick={() => navigate("/guarderia")}>
@@ -160,114 +222,153 @@ export function RegistrarEstadiaPage() {
 
       <header className="space-y-1">
         <h1 className="flex items-center gap-2 text-2xl font-semibold text-orange-800">
-          <BedDouble className="size-6" aria-hidden />
-          Registrar Estadía
+          {modoEdicion ? (
+            <PencilLine className="size-6" aria-hidden />
+          ) : (
+            <BedDouble className="size-6" aria-hidden />
+          )}
+          {modoEdicion ? "Modificar Estadía" : "Registrar Estadía"}
         </h1>
         <p className="text-sm text-muted-foreground">
-          Los campos marcados con * son obligatorios.
+          {modoEdicion
+            ? "Cliente y mascota no se pueden cambiar. Los campos marcados con * son obligatorios."
+            : "Los campos marcados con * son obligatorios."}
         </p>
       </header>
 
       <Card>
         <CardContent className="pt-6">
           <form onSubmit={handleSubmit(onSubmit)} className="grid gap-4" noValidate>
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div className="space-y-1.5">
-                <Label>Cliente *</Label>
-                <Controller
-                  control={control}
-                  name="clientId"
-                  rules={{ required: "Elegí un cliente" }}
-                  render={({ field }) => (
-                    <ClienteCombobox
-                      value={cliente}
-                      onChange={(c) => {
-                        setCliente(c);
-                        field.onChange(c.id);
-                        setValue("petId", "");
-                        setMascotaSeleccionada(null);
-                      }}
-                    />
-                  )}
-                />
-                <FieldError message={errors.clientId?.message} />
-              </div>
-
-              <div className="space-y-1.5">
-                <Label>Mascota *</Label>
-                {!cliente ? (
-                  <p className="text-sm text-muted-foreground">Elegí primero un cliente.</p>
-                ) : loadingMascotas ? (
-                  <Skeleton className="h-9 w-full" />
-                ) : errorMascotas ? (
-                  <p className="text-sm text-destructive">{errorMascotas}</p>
-                ) : mascotas.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">Este cliente no tiene mascotas activas.</p>
-                ) : (
-                  <Controller
-                    control={control}
-                    name="petId"
-                    rules={{ required: "Elegí una mascota" }}
-                    render={({ field }) => (
-                      <Select
-                        value={field.value || undefined}
-                        onValueChange={(value) => {
-                          field.onChange(value);
-                          setMascotaSeleccionada(mascotas.find((m) => m.id === value) ?? null);
-                        }}
-                      >
-                        <SelectTrigger aria-label="Mascota">
-                          <SelectValue placeholder="Seleccionar mascota..." />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {mascotas.map((m) => (
-                            <SelectItem key={m.id} value={m.id}>{m.name}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    )}
-                  />
-                )}
-                <FieldError message={errors.petId?.message} />
-              </div>
-            </div>
-
-            {mascotaSeleccionada ? (
+            {modoEdicion && estadiaVigente ? (
               <div className="flex flex-wrap items-center gap-3 rounded-lg border bg-gradient-to-r from-orange-50 to-white p-4">
-                <p className="text-base font-medium">{mascotaSeleccionada.name}</p>
+                <div>
+                  <p className="text-base font-medium">{estadiaVigente.petName}</p>
+                  <p className="text-xs text-muted-foreground">{estadiaVigente.clientName}</p>
+                </div>
                 <div className="ml-auto flex flex-wrap items-center gap-2">
                   <Badge variant="secondary">
                     <Ruler className="size-3" aria-hidden />
-                    {mascotaSeleccionada.tamano}
+                    {estadiaVigente.petTamano}
                   </Badge>
                   <Badge className="bg-blue-100 text-blue-800 hover:bg-blue-100">
                     <Utensils className="size-3" aria-hidden />
-                    {mascotaSeleccionada.alimentoDieta ?? DIETA_FALLBACK}
+                    {estadiaVigente.petDieta ?? DIETA_FALLBACK}
                   </Badge>
                 </div>
               </div>
-            ) : null}
+            ) : (
+              <>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="space-y-1.5">
+                    <Label>Cliente *</Label>
+                    <Controller
+                      control={control}
+                      name="clientId"
+                      rules={{ required: "Elegí un cliente" }}
+                      render={({ field }) => (
+                        <ClienteCombobox
+                          value={cliente}
+                          onChange={(c) => {
+                            setCliente(c);
+                            field.onChange(c.id);
+                            setValue("petId", "");
+                            setMascotaSeleccionada(null);
+                          }}
+                        />
+                      )}
+                    />
+                    <FieldError message={errors.clientId?.message} />
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <Label>Mascota *</Label>
+                    {!cliente ? (
+                      <p className="text-sm text-muted-foreground">Elegí primero un cliente.</p>
+                    ) : loadingMascotas ? (
+                      <Skeleton className="h-9 w-full" />
+                    ) : errorMascotas ? (
+                      <p className="text-sm text-destructive">{errorMascotas}</p>
+                    ) : mascotas.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">Este cliente no tiene mascotas activas.</p>
+                    ) : (
+                      <Controller
+                        control={control}
+                        name="petId"
+                        rules={{ required: "Elegí una mascota" }}
+                        render={({ field }) => (
+                          <Select
+                            value={field.value || undefined}
+                            onValueChange={(value) => {
+                              field.onChange(value);
+                              setMascotaSeleccionada(mascotas.find((m) => m.id === value) ?? null);
+                            }}
+                          >
+                            <SelectTrigger aria-label="Mascota">
+                              <SelectValue placeholder="Seleccionar mascota..." />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {mascotas.map((m) => (
+                                <SelectItem key={m.id} value={m.id}>{m.name}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        )}
+                      />
+                    )}
+                    <FieldError message={errors.petId?.message} />
+                  </div>
+                </div>
+
+                {mascotaSeleccionada ? (
+                  <div className="flex flex-wrap items-center gap-3 rounded-lg border bg-gradient-to-r from-orange-50 to-white p-4">
+                    <p className="text-base font-medium">{mascotaSeleccionada.name}</p>
+                    <div className="ml-auto flex flex-wrap items-center gap-2">
+                      <Badge variant="secondary">
+                        <Ruler className="size-3" aria-hidden />
+                        {mascotaSeleccionada.tamano}
+                      </Badge>
+                      <Badge className="bg-blue-100 text-blue-800 hover:bg-blue-100">
+                        <Utensils className="size-3" aria-hidden />
+                        {mascotaSeleccionada.alimentoDieta ?? DIETA_FALLBACK}
+                      </Badge>
+                    </div>
+                  </div>
+                ) : null}
+              </>
+            )}
 
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-1.5">
-                <Label htmlFor="checkInDate">Check-in *</Label>
+                <Label htmlFor="checkInDate" className="flex items-center gap-1">
+                  Check-in *
+                  {bloqueoCheckIn ? <Lock className="size-3" aria-hidden /> : null}
+                </Label>
                 <Controller
                   control={control}
                   name="checkInDate"
                   rules={{
                     required: "La fecha de check-in es requerida",
-                    validate: (v) => (v < hoyISO() ? "No se puede registrar una estadía en una fecha pasada" : true),
+                    validate: (v) =>
+                      bloqueoCheckIn || v >= hoyISO()
+                        ? true
+                        : "No se puede registrar una estadía en una fecha pasada",
                   }}
                   render={({ field: { ref: _ref, ...field } }) => (
                     <Input
                       id="checkInDate"
                       type="date"
-                      min={hoyISO()}
+                      min={bloqueoCheckIn ? undefined : hoyISO()}
+                      disabled={bloqueoCheckIn}
                       aria-invalid={Boolean(errors.checkInDate)}
                       {...field}
                     />
                   )}
                 />
+                {bloqueoCheckIn ? (
+                  <p className="text-xs text-muted-foreground">
+                    En curso: no se puede modificar el check-in.
+                  </p>
+                ) : null}
                 <FieldError message={errors.checkInDate?.message} />
               </div>
 
@@ -326,7 +427,7 @@ export function RegistrarEstadiaPage() {
 
             <div className="flex justify-end">
               <Button type="submit" disabled={isSubmitting}>
-                Registrar Estadía
+                {modoEdicion ? "Guardar cambios" : "Registrar Estadía"}
               </Button>
             </div>
           </form>
