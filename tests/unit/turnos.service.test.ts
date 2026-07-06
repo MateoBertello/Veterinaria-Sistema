@@ -215,7 +215,7 @@ describe("TurnoService.crearTurno", () => {
 
   // ── RN-TU2 (bloque fuera de las franjas del profesional) ─────────────────────
 
-  it("RN-TU2: bloque fuera de toda franja activa del doctor → VALIDATION_ERROR", async () => {
+  it("RN-TU2/RN-HOR3: bloque fuera de toda franja activa del doctor → VALIDATION_ERROR", async () => {
     const db = makeDb([
       { data: servicioRow({ requiere_profesional: true }) },  // servicio
       { data: { id: PET_ID, estado: "Activa" } },             // mascota
@@ -617,7 +617,7 @@ describe("TurnoService.slotsDisponibles", () => {
 
   // ── RN-TU2 (slots derivados de franjas, restando ocupados) ───────────────────
 
-  it("RN-TU2: genera slots por duración y excluye los inicios ya ocupados", async () => {
+  it("RN-TU2/RN-HOR3: genera slots por duración y excluye los inicios ya ocupados", async () => {
     const db = makeDb([
       { data: { duracion_minutos: 30, activo: true } },                 // servicio
       { data: [{ start_time: "09:00", end_time: "10:00" }] },           // franja activa

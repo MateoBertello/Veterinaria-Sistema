@@ -73,14 +73,14 @@ describe("requireModule middleware", () => {
     invalidateModuleCache(TENANT_ID);
   });
 
-  it("permite el acceso cuando el módulo está habilitado", async () => {
+  it("RN-SM1: permite el acceso cuando el módulo está habilitado", async () => {
     mockDb({ habilitado: true });
     const app = buildApp("historial_clinico");
     const res = await sendReq(app);
     expect(res.status).toBe(200);
   });
 
-  it("rechaza con 403 MODULE_NOT_LICENSED cuando el módulo no está habilitado", async () => {
+  it("RN-SM1: rechaza con 403 MODULE_NOT_LICENSED cuando el módulo no está habilitado", async () => {
     mockDb({ habilitado: false });
     const app = buildApp("turnos");
     const res = await sendReq(app);
