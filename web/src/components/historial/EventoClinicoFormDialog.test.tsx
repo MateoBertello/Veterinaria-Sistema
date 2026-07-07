@@ -102,8 +102,8 @@ describe("EventoClinicoFormDialog", () => {
         eventType: "Consulta",
         professionalId: "u1",
         description: "Control anual, buen estado",
-        weightKg: null,
-        temperatureC: null,
+        weightKg: undefined,
+        temperatureC: undefined,
       }),
     );
     expect(toastSuccess).toHaveBeenCalled();

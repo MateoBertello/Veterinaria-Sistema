@@ -85,10 +85,13 @@ export function EutanasiaDialog({ open, onOpenChange, petId, mascotaName, onSucc
       date:                 values.date,
       professionalId:       values.professionalId,
       description:          values.description,
-      weightKg:             values.weightKg ? Number(values.weightKg) : null,
-      temperatureC:         values.temperatureC ? Number(values.temperatureC) : null,
-      diagnosis:            values.diagnosis || null,
-      notes:                values.notes || null,
+      // undefined (no null): el schema del backend usa Zod .optional() y rechaza
+      // un `null` explícito con VALIDATION_ERROR — JSON.stringify omite las claves
+      // undefined, así el campo llega ausente cuando el usuario lo deja vacío.
+      weightKg:             values.weightKg ? Number(values.weightKg) : undefined,
+      temperatureC:         values.temperatureC ? Number(values.temperatureC) : undefined,
+      diagnosis:            values.diagnosis || undefined,
+      notes:                values.notes || undefined,
       euthanasiaConfirmed:  values.confirmed,
     };
 
