@@ -44,6 +44,7 @@ export function DoctorCombobox({ value, onChange }: Props) {
           variant="outline"
           role="combobox"
           aria-expanded={open}
+          aria-label="Doctor"
           className={cn("w-full max-w-sm justify-between font-normal", !value && "text-muted-foreground")}
         >
           {value?.name ?? "Buscar doctor..."}

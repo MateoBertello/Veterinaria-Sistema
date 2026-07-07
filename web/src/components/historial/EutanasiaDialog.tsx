@@ -142,11 +142,18 @@ export function EutanasiaDialog({ open, onOpenChange, petId, mascotaName, onSucc
                 name="date"
                 rules={{ required: "La fecha es requerida" }}
                 render={({ field: { ref: _ref, ...field } }) => (
-                  <Input id="eutanasia-date" type="date" max={hoy} aria-invalid={Boolean(errors.date)} {...field} />
+                  <Input
+                    id="eutanasia-date"
+                    type="date"
+                    max={hoy}
+                    aria-invalid={Boolean(errors.date)}
+                    aria-describedby={errors.date ? "eutanasia-date-error" : undefined}
+                    {...field}
+                  />
                 )}
               />
               {errors.date ? (
-                <p role="alert" className="text-sm text-destructive">{errors.date.message}</p>
+                <p id="eutanasia-date-error" role="alert" className="text-sm text-destructive">{errors.date.message}</p>
               ) : null}
             </div>
 
@@ -158,7 +165,11 @@ export function EutanasiaDialog({ open, onOpenChange, petId, mascotaName, onSucc
                 rules={{ required: "El profesional es requerido" }}
                 render={({ field }) => (
                   <Select value={field.value} onValueChange={field.onChange}>
-                    <SelectTrigger id="eutanasia-professionalId" aria-invalid={Boolean(errors.professionalId)}>
+                    <SelectTrigger
+                      id="eutanasia-professionalId"
+                      aria-invalid={Boolean(errors.professionalId)}
+                      aria-describedby={errors.professionalId ? "eutanasia-professionalId-error" : undefined}
+                    >
                       <SelectValue placeholder="Seleccionar..." />
                     </SelectTrigger>
                     <SelectContent>
@@ -176,7 +187,7 @@ export function EutanasiaDialog({ open, onOpenChange, petId, mascotaName, onSucc
                 )}
               />
               {errors.professionalId ? (
-                <p role="alert" className="text-sm text-destructive">{errors.professionalId.message}</p>
+                <p id="eutanasia-professionalId-error" role="alert" className="text-sm text-destructive">{errors.professionalId.message}</p>
               ) : null}
             </div>
           </div>
@@ -196,11 +207,17 @@ export function EutanasiaDialog({ open, onOpenChange, petId, mascotaName, onSucc
                   },
                 }}
                 render={({ field: { ref: _ref, ...field } }) => (
-                  <Input id="eutanasia-weightKg" type="number" aria-invalid={Boolean(errors.weightKg)} {...field} />
+                  <Input
+                    id="eutanasia-weightKg"
+                    type="number"
+                    aria-invalid={Boolean(errors.weightKg)}
+                    aria-describedby={errors.weightKg ? "eutanasia-weightKg-error" : undefined}
+                    {...field}
+                  />
                 )}
               />
               {errors.weightKg ? (
-                <p role="alert" className="text-sm text-destructive">{errors.weightKg.message}</p>
+                <p id="eutanasia-weightKg-error" role="alert" className="text-sm text-destructive">{errors.weightKg.message}</p>
               ) : null}
             </div>
 
@@ -218,11 +235,17 @@ export function EutanasiaDialog({ open, onOpenChange, petId, mascotaName, onSucc
                   },
                 }}
                 render={({ field: { ref: _ref, ...field } }) => (
-                  <Input id="eutanasia-temperatureC" type="number" aria-invalid={Boolean(errors.temperatureC)} {...field} />
+                  <Input
+                    id="eutanasia-temperatureC"
+                    type="number"
+                    aria-invalid={Boolean(errors.temperatureC)}
+                    aria-describedby={errors.temperatureC ? "eutanasia-temperatureC-error" : undefined}
+                    {...field}
+                  />
                 )}
               />
               {errors.temperatureC ? (
-                <p role="alert" className="text-sm text-destructive">{errors.temperatureC.message}</p>
+                <p id="eutanasia-temperatureC-error" role="alert" className="text-sm text-destructive">{errors.temperatureC.message}</p>
               ) : null}
             </div>
           </div>
@@ -237,11 +260,17 @@ export function EutanasiaDialog({ open, onOpenChange, petId, mascotaName, onSucc
                 maxLength: { value: 2000, message: "Máximo 2000 caracteres" },
               }}
               render={({ field: { ref: _ref, ...field } }) => (
-                <Textarea id="eutanasia-description" rows={3} aria-invalid={Boolean(errors.description)} {...field} />
+                <Textarea
+                  id="eutanasia-description"
+                  rows={3}
+                  aria-invalid={Boolean(errors.description)}
+                  aria-describedby={errors.description ? "eutanasia-description-error" : undefined}
+                  {...field}
+                />
               )}
             />
             {errors.description ? (
-              <p role="alert" className="text-sm text-destructive">{errors.description.message}</p>
+              <p id="eutanasia-description-error" role="alert" className="text-sm text-destructive">{errors.description.message}</p>
             ) : null}
           </div>
 
@@ -252,11 +281,17 @@ export function EutanasiaDialog({ open, onOpenChange, petId, mascotaName, onSucc
               name="diagnosis"
               rules={{ maxLength: { value: 2000, message: "Máximo 2000 caracteres" } }}
               render={({ field: { ref: _ref, ...field } }) => (
-                <Textarea id="eutanasia-diagnosis" rows={2} aria-invalid={Boolean(errors.diagnosis)} {...field} />
+                <Textarea
+                  id="eutanasia-diagnosis"
+                  rows={2}
+                  aria-invalid={Boolean(errors.diagnosis)}
+                  aria-describedby={errors.diagnosis ? "eutanasia-diagnosis-error" : undefined}
+                  {...field}
+                />
               )}
             />
             {errors.diagnosis ? (
-              <p role="alert" className="text-sm text-destructive">{errors.diagnosis.message}</p>
+              <p id="eutanasia-diagnosis-error" role="alert" className="text-sm text-destructive">{errors.diagnosis.message}</p>
             ) : null}
           </div>
 
@@ -267,11 +302,17 @@ export function EutanasiaDialog({ open, onOpenChange, petId, mascotaName, onSucc
               name="notes"
               rules={{ maxLength: { value: 2000, message: "Máximo 2000 caracteres" } }}
               render={({ field: { ref: _ref, ...field } }) => (
-                <Textarea id="eutanasia-notes" rows={2} aria-invalid={Boolean(errors.notes)} {...field} />
+                <Textarea
+                  id="eutanasia-notes"
+                  rows={2}
+                  aria-invalid={Boolean(errors.notes)}
+                  aria-describedby={errors.notes ? "eutanasia-notes-error" : undefined}
+                  {...field}
+                />
               )}
             />
             {errors.notes ? (
-              <p role="alert" className="text-sm text-destructive">{errors.notes.message}</p>
+              <p id="eutanasia-notes-error" role="alert" className="text-sm text-destructive">{errors.notes.message}</p>
             ) : null}
           </div>
 

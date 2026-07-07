@@ -96,14 +96,14 @@ export function AgendaMes({ fechaInicial, onSelectDay }: Props) {
                   onClick={() => onSelectDay(celda.iso)}
                   aria-label={`${formatFechaLarga(celda.iso)}, ${cantidad === 0 ? "sin turnos" : `${cantidad} turno${cantidad === 1 ? "" : "s"}`}`}
                   className={[
-                    "flex min-h-20 flex-col items-start gap-1 bg-white p-2 text-left transition-colors hover:bg-orange-50 focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-orange-500",
+                    "flex min-h-20 flex-col items-start gap-1 bg-white p-2 text-left transition-colors hover:bg-orange-50 focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-orange-700",
                     celda.enMes ? "" : "bg-gray-50 text-muted-foreground",
                   ].join(" ")}
                 >
                   <span
                     className={[
                       "flex size-6 items-center justify-center rounded-full text-sm",
-                      esHoy ? "bg-orange-600 font-semibold text-white" : "",
+                      esHoy ? "bg-orange-700 font-semibold text-white" : "",
                     ].join(" ")}
                   >
                     {diaDelMes(celda.iso)}

@@ -127,7 +127,7 @@ export function OcupacionMes({ fechaInicial, onSelectDay }: Props) {
                   onClick={() => onSelectDay(celda.iso)}
                   aria-label={`${formatFechaLarga(celda.iso)}, ${ariaResumen}`}
                   className={[
-                    "flex min-h-20 flex-col items-start gap-1 bg-white p-2 text-left transition-colors hover:bg-orange-50 focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-orange-500",
+                    "flex min-h-20 flex-col items-start gap-1 bg-white p-2 text-left transition-colors hover:bg-orange-50 focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-orange-700",
                     celda.enMes ? "" : "bg-gray-50 text-muted-foreground",
                   ].join(" ")}
                 >

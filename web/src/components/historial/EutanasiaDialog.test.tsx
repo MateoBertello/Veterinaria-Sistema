@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -143,5 +144,90 @@ describe("EutanasiaDialog", () => {
     await userEvent.click(screen.getByRole("button", { name: /Confirmar eutanasia/i }));
 
     await waitFor(() => expect(toastError).toHaveBeenCalledWith("Esta mascota ya está marcada como fallecida."));
+  });
+
+  it("RN-UX2: dispara un toast de éxito (sonner) al registrar la eutanasia", async () => {
+    setup();
+    mockRegistrar.mockResolvedValue(makeResultado());
+
+    await completarCamposClinicos();
+    await userEvent.click(screen.getByLabelText(/Confirmo que deseo registrar la eutanasia/i));
+    await userEvent.click(screen.getByRole("button", { name: /Confirmar eutanasia/i }));
+
+    await waitFor(() => expect(toastSuccess).toHaveBeenCalledTimes(1));
+    expect(toastSuccess).toHaveBeenCalledWith(expect.stringContaining("Firulais"));
+  });
+});
+
+describe("EutanasiaDialog — accesibilidad (WCAG AA)", () => {
+  it("expone el diálogo con rol y título accesibles", async () => {
+    setup();
+    const dialog = await screen.findByRole("alertdialog");
+    expect(dialog).toHaveAccessibleName(/Registrar eutanasia/i);
+  });
+
+  it("todos los campos tienen nombre accesible (label asociado)", async () => {
+    setup();
+    // Radix hidrata los labels tras montar; esperamos a que aparezcan.
+    await waitFor(() => expect(screen.getByLabelText(/Fecha \*/i)).toBeInTheDocument());
+    expect(screen.getByLabelText(/Profesional \*/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/Peso \(kg\)/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/Temperatura/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/Descripción \*/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/Diagnóstico/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/Notas/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/Confirmo que deseo registrar la eutanasia/i)).toBeInTheDocument();
+  });
+
+  it("asocia el mensaje de error al campo vía aria-describedby (3.3.1/1.3.1)", async () => {
+    setup();
+    await userEvent.click(screen.getByLabelText(/Confirmo que deseo registrar la eutanasia/i));
+    await userEvent.click(screen.getByRole("button", { name: /Confirmar eutanasia/i }));
+
+    const error = await screen.findByText("El profesional es requerido");
+    expect(error).toHaveAttribute("id", "eutanasia-professionalId-error");
+    expect(screen.getByLabelText(/Profesional \*/i)).toHaveAttribute(
+      "aria-describedby",
+      "eutanasia-professionalId-error",
+    );
+  });
+
+  it("atrapa el foco dentro del diálogo al abrir (focus trap de Radix)", async () => {
+    function Harness() {
+      const [open, setOpen] = useState(false);
+      return (
+        <>
+          <button type="button" onClick={() => setOpen(true)}>Abrir</button>
+          <EutanasiaDialog
+            open={open}
+            petId="pet1"
+            mascotaName="Firulais"
+            onOpenChange={setOpen}
+            onSuccess={vi.fn()}
+          />
+        </>
+      );
+    }
+    render(<Harness />);
+
+    const trigger = screen.getByRole("button", { name: "Abrir" });
+    await userEvent.click(trigger);
+
+    const dialog = await screen.findByRole("alertdialog");
+    // Radix mueve el foco al interior del diálogo (no queda en el disparador),
+    // condición del focus-trap: el foco de teclado no puede escaparse por detrás.
+    await waitFor(() => expect(dialog).toContainElement(document.activeElement as HTMLElement));
+    expect(trigger).not.toHaveFocus();
+  });
+
+  it("permite cerrar con teclado (Escape) — sin trampa de foco (WCAG 2.1.2)", async () => {
+    const onOpenChange = vi.fn();
+    render(
+      <EutanasiaDialog open petId="pet1" mascotaName="Firulais" onOpenChange={onOpenChange} onSuccess={vi.fn()} />,
+    );
+    await screen.findByRole("alertdialog");
+
+    await userEvent.keyboard("{Escape}");
+    await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
   });
 });

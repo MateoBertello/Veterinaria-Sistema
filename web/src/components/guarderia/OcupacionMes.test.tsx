@@ -85,6 +85,18 @@ describe("OcupacionMes", () => {
     expect(onSelect).toHaveBeenCalledWith("2027-11-15");
   });
 
+  it("WCAG 2.1.1: las celdas-día son botones enfocables y se activan con teclado (Enter)", async () => {
+    const onSelect = vi.fn();
+    render(<OcupacionMes fechaInicial={ANCHOR} onSelectDay={onSelect} />);
+
+    const btn = await screen.findByRole("button", { name: /15 de noviembre de 2027/ });
+    btn.focus();
+    expect(btn).toHaveFocus();
+    await userEvent.keyboard("{Enter}");
+
+    expect(onSelect).toHaveBeenCalledWith("2027-11-15");
+  });
+
   it("error de carga muestra mensaje y permite reintentar", async () => {
     mockRango.mockRejectedValueOnce(new ApiError("INTERNAL_ERROR", 500, "No se pudo cargar el calendario", []));
     render(<OcupacionMes fechaInicial={ANCHOR} onSelectDay={() => {}} />);

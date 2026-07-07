@@ -64,6 +64,21 @@ describe("AgendaMes", () => {
     expect(onSelectDay).toHaveBeenCalledWith("2026-07-10");
   });
 
+  it("WCAG 2.1.1: las celdas-día son botones enfocables y se activan con teclado (Enter)", async () => {
+    const onSelectDay = vi.fn();
+    mockMes.mockResolvedValue([makeTurno({ date: "2026-07-10" })]);
+
+    render(<AgendaMes fechaInicial={MES} onSelectDay={onSelectDay} />);
+    await screen.findByText("1 turno");
+
+    const dia = screen.getByRole("button", { name: /10 de julio de 2026, 1 turno/ });
+    dia.focus();
+    expect(dia).toHaveFocus();
+    await userEvent.keyboard("{Enter}");
+
+    expect(onSelectDay).toHaveBeenCalledWith("2026-07-10");
+  });
+
   it("navega al mes siguiente", async () => {
     mockMes.mockResolvedValue([]);
     render(<AgendaMes fechaInicial={MES} onSelectDay={() => {}} />);

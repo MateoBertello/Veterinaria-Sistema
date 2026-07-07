@@ -96,8 +96,15 @@ function Sidebar() {
 function Shell() {
   return (
     <div className="flex min-h-screen bg-background">
+      {/* Skip-link (WCAG 2.4.1): visible al recibir foco por teclado, salta al contenido. */}
+      <a
+        href="#contenido"
+        className="sr-only focus:not-sr-only focus:absolute focus:left-2 focus:top-2 focus:z-50 focus:rounded-md focus:bg-primary focus:px-4 focus:py-2 focus:text-sm focus:font-medium focus:text-primary-foreground"
+      >
+        Saltar al contenido
+      </a>
       <Sidebar />
-      <main className="flex-1 overflow-x-auto px-4 py-6 md:px-8">
+      <main id="contenido" className="flex-1 overflow-x-auto px-4 py-6 md:px-8">
         <Outlet />
       </main>
     </div>

@@ -146,7 +146,7 @@ describe("TurnoDetalleDialog", () => {
     expect(onOpenChange).toHaveBeenCalledWith(false);
   });
 
-  it("APPOINTMENT_LOCKED en una acción → toast de error y re-fetch del detalle", async () => {
+  it("RN-UX2: APPOINTMENT_LOCKED en una acción → toast de error y re-fetch del detalle", async () => {
     const turno = makeTurno({ status: "Programado" });
     const api = makeApi(turno);
     api.cambiarEstado.mockRejectedValueOnce(
@@ -163,7 +163,7 @@ describe("TurnoDetalleDialog", () => {
     await waitFor(() => expect(api.obtenerTurno).toHaveBeenCalledTimes(2));
   });
 
-  it("INVALID_TRANSITION en la transición → toast de error y re-fetch", async () => {
+  it("RN-UX2: INVALID_TRANSITION en la transición → toast de error y re-fetch", async () => {
     const turno = makeTurno({ status: "Confirmado" });
     const api = makeApi(turno);
     api.cambiarEstado.mockRejectedValueOnce(
