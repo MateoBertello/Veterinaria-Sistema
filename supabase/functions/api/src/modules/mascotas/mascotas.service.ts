@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { DomainError, ErrorCode } from "../../shared/errors.ts";
 import { recordAudit } from "../../shared/audit.ts";
 import { getServiceDb } from "../../shared/db.ts";
+import { sanitizeLikeTerm } from "../../shared/sanitize.ts";
 import {
   CrearMascotaSchema,
   EditarMascotaSchema,
@@ -363,7 +364,7 @@ export const MascotasService = {
     }
 
     if (opts.search) {
-      const term = opts.search.replace(/[%,]/g, " ");
+      const term = sanitizeLikeTerm(opts.search);
       query = query.ilike("name", `%${term}%`);
     }
 

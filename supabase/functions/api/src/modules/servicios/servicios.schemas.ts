@@ -32,7 +32,7 @@ export const CambiarEstadoServicioSchema = z.object({
 });
 
 export const ListarServiciosQuerySchema = z.object({
-  search: z.string().trim().min(1).optional(),
+  search: z.string().trim().min(1).max(100).optional(),
   tipo:   z.enum(TIPO_SERVICIO_VALUES).optional(),
   activo: z
     .string()

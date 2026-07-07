@@ -12,7 +12,7 @@ export const ActualizarDoctorSchema = z.object({
 });
 
 export const ListarDoctoresQuerySchema = z.object({
-  search:    z.string().trim().min(1).optional(),
+  search:    z.string().trim().min(1).max(100).optional(),
   available: z
     .string()
     .optional()

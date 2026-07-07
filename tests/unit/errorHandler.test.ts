@@ -54,6 +54,29 @@ describe("errorHandler — integración Sentry (Regla 7)", () => {
     expect(JSON.stringify(body)).not.toContain("DNI 123");
   });
 
+  it("Regla 7: un 5xx NO filtra el stack trace (ni ruta de archivo) en body ni headers", async () => {
+    const app = buildApp(vi.fn(() => "evt-id"));
+    // Error con stack real: contiene rutas de archivo del proyecto.
+    app.get("/turnos/stack", () => {
+      const err = new Error("boom con secreto");
+      err.stack =
+        "Error: boom con secreto\n    at /home/mateo/Veterinaria-Sistema/supabase/functions/api/src/secreto.ts:42:7";
+      throw err;
+    });
+    const res = await app.request("http://localhost/api/v1/turnos/stack");
+
+    expect(res.status).toBe(500);
+    const body = await res.json();
+    const serialized = JSON.stringify(body);
+    expect(serialized).not.toContain("stack");
+    expect(serialized).not.toContain("secreto.ts");
+    expect(serialized).not.toContain("boom con secreto");
+    // Tampoco debe viajar el stack por headers.
+    let headerBlob = "";
+    res.headers.forEach((v, k) => (headerBlob += `${k}:${v};`));
+    expect(headerBlob).not.toContain("secreto.ts");
+  });
+
   it("Regla 7: un 5xx reporta a Sentry con tags module y tenantId", async () => {
     const capture = vi.fn(() => "evt-id");
     const app = buildApp(capture);

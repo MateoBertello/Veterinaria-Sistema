@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { DomainError, ErrorCode } from "../../shared/errors.ts";
 import { recordAudit } from "../../shared/audit.ts";
 import { getServiceDb } from "../../shared/db.ts";
+import { sanitizeLikeTerm } from "../../shared/sanitize.ts";
 import { invalidateModuleCache } from "../../middleware/requireModule.ts";
 import {
   CrearTenantSchema,
@@ -349,7 +350,8 @@ export const TenantService = {
       );
 
     if (filtros.q) {
-      query = query.or(`nombre.ilike.%${filtros.q}%,cuit_rut.ilike.%${filtros.q}%`);
+      const q = sanitizeLikeTerm(filtros.q);
+      query = query.or(`nombre.ilike.%${q}%,cuit_rut.ilike.%${q}%`);
     }
     if (filtros.plan) {
       query = query.eq("plan", filtros.plan);

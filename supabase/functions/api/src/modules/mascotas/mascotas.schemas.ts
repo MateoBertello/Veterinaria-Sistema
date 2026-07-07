@@ -31,7 +31,7 @@ export const EditarMascotaSchema = CrearMascotaSchema
 export const EDAD_CAT_VALUES = ["cachorro", "adulto", "senior"] as const;
 
 export const ListarMascotasQuerySchema = z.object({
-  search:    z.string().trim().min(1).optional(),
+  search:    z.string().trim().min(1).max(100).optional(),
   clientId:  z.string().uuid().optional(),
   especieId: z.string().uuid().optional(),
   estado:    z.enum(["Activa", "Fallecida"]).optional(),

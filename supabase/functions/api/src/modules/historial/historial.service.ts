@@ -3,6 +3,7 @@ import * as XLSX from "xlsx";
 import { DomainError, ErrorCode } from "../../shared/errors.ts";
 import { recordAudit } from "../../shared/audit.ts";
 import { getServiceDb } from "../../shared/db.ts";
+import { neutralizeFormula } from "../../shared/sanitize.ts";
 import {
   CanalEmailResend,
   type CanalNotificacion,
@@ -114,7 +115,7 @@ interface PetInfo {
   ownerName:   string | null;
 }
 
-interface HistorialRow {
+export interface HistorialRow {
   id:            string;
   date:          string;
   event_type:    string;
@@ -185,20 +186,23 @@ async function buildPdf(pet: PetInfo, records: HistorialRow[]): Promise<Uint8Arr
   return doc.save();
 }
 
-function buildXlsx(records: HistorialRow[]): Uint8Array {
+// Exportado para test de formula injection (RN-SEC).
+export function buildXlsx(records: HistorialRow[]): Uint8Array {
   const headers = [
     "Fecha", "Tipo", "Profesional",
     "Peso (kg)", "Temp. (C)",
     "Descripcion", "Diagnostico",
   ];
+  // Las celdas de texto se neutralizan contra formula injection (=/+/-/@ → prefijo '):
+  // XLSX preserva un `=` inicial como fórmula al abrir el archivo. Los numéricos no son sink.
   const rows = records.map((r) => [
-    r.date,
-    r.event_type,
-    r.profesional?.full_name ?? "",
+    neutralizeFormula(r.date),
+    neutralizeFormula(r.event_type),
+    neutralizeFormula(r.profesional?.full_name ?? ""),
     r.weight_kg     ?? "",
     r.temperature_c ?? "",
-    r.description,
-    r.diagnosis     ?? "",
+    neutralizeFormula(r.description),
+    neutralizeFormula(r.diagnosis ?? ""),
   ]);
   const wb = XLSX.utils.book_new();
   const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);

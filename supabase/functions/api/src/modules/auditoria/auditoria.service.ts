@@ -1,6 +1,7 @@
 import { DomainError, ErrorCode } from "../../shared/errors.ts";
 import { recordAudit } from "../../shared/audit.ts";
 import { getServiceDb } from "../../shared/db.ts";
+import { neutralizeFormula } from "../../shared/sanitize.ts";
 import type { ListarAuditoriaOpts, ExportarAuditoriaOpts } from "./auditoria.schemas.ts";
 
 // ─── Tipos públicos ───────────────────────────────────────────────────────────
@@ -49,14 +50,18 @@ function toPublic(row: Record<string, unknown>): RegistroAuditoriaPublico {
 }
 
 function csvEscape(val: unknown): string {
-  const s = val === null || val === undefined ? "" : String(val);
+  const raw = val === null || val === undefined ? "" : String(val);
+  // Neutraliza formula/CSV injection ANTES del quoting RFC-4180: si la celda empieza con
+  // =/+/-/@/TAB/CR queda prefijada con comilla simple para no ejecutarse en Excel/Sheets.
+  const s = neutralizeFormula(raw) as string;
   if (s.includes(",") || s.includes('"') || s.includes("\n") || s.includes("\r")) {
     return `"${s.replace(/"/g, '""')}"`;
   }
   return s;
 }
 
-function buildCsv(rows: Record<string, unknown>[]): string {
+// Exportado para test de formula/CSV injection (RN-SEC).
+export function buildCsv(rows: Record<string, unknown>[]): string {
   const header = "id,timestamp,module,action,userId,userName,userRole,entityId,details,ipAddress";
   const lines = rows.map((r) =>
     [

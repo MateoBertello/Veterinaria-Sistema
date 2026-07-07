@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { DomainError, ErrorCode } from "../../shared/errors.ts";
 import { recordAudit } from "../../shared/audit.ts";
 import { getServiceDb } from "../../shared/db.ts";
+import { sanitizeLikeTerm } from "../../shared/sanitize.ts";
 import {
   CrearClienteSchema,
   EditarClienteSchema,
@@ -254,7 +255,7 @@ export const ClientesService = {
 
     // Búsqueda por nombre, DNI/CUIT o teléfono.
     if (opts.search) {
-      const term = opts.search.replace(/[%,]/g, " ");
+      const term = sanitizeLikeTerm(opts.search);
       query = query.or(
         `full_name.ilike.%${term}%,dni_cuit.ilike.%${term}%,phone.ilike.%${term}%`,
       );

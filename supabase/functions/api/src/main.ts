@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { errorHandler } from "./middleware/errorHandler.ts";
+import { buildCors, securityHeaders } from "./middleware/security.ts";
 import { ok } from "./shared/envelope.ts";
 import { authRouter } from "./modules/auth/auth.controller.ts";
 import { usuariosRouter } from "./modules/usuarios/usuarios.controller.ts";
@@ -33,6 +34,13 @@ import {
 const app = new Hono().basePath("/api/v1");
 
 app.onError(errorHandler);
+
+// ─── Seguridad transversal (Etapa 9 / S7) ──────────────────────────────────
+// CORS con allowlist explícita + security headers en TODA respuesta. Se registran
+// antes de los routers: el preflight OPTIONS lo resuelve buildCors() sin llegar al
+// tenantContext de cada módulo.
+app.use("*", buildCors());
+app.use("*", securityHeaders);
 
 // ─── Endpoint público de salud ─────────────────────────────────────────────
 app.get("/health", (c) => {

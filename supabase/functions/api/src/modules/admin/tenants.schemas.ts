@@ -24,7 +24,7 @@ export const CambiarEstadoSchema = z.object({
 export const ListarTenantsQuerySchema = z.object({
   page:   z.coerce.number().int().min(1).default(1),
   limit:  z.coerce.number().int().min(1).max(100).default(20),
-  q:      z.string().optional(),
+  q:      z.string().trim().min(1).max(100).optional(),
   plan:   PlanTenantEnum.optional(),
   estado: z.enum(["activo", "suspendido"]).optional(),
 });

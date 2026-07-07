@@ -1,6 +1,7 @@
 import { DomainError, ErrorCode } from "../../shared/errors.ts";
 import { recordAudit } from "../../shared/audit.ts";
 import { getServiceDb } from "../../shared/db.ts";
+import { sanitizeLikeTerm } from "../../shared/sanitize.ts";
 import {
   CrearServicioSchema,
   ActualizarServicioSchema,
@@ -335,7 +336,7 @@ export const ServicioService = {
       query = query.eq("tipo", opts.tipo);
     }
     if (opts.search) {
-      const term = opts.search.replace(/[%,]/g, " ");
+      const term = sanitizeLikeTerm(opts.search);
       query = query.ilike("nombre", `%${term}%`);
     }
 
