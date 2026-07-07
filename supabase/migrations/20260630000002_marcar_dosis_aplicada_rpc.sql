@@ -21,7 +21,7 @@
 -- El asiento de auditoría (RN-S3) va DENTRO de la transacción: si algo falla,
 -- rollbackea junto con el evento y el cambio de estado (no es best-effort).
 --
--- Gotcha (ver migración 014, fix_eutanasia_ambiguity): RETURNS TABLE crea
+-- Gotcha (ver 20260623000002_registrar_eutanasia_rpc): RETURNS TABLE crea
 -- variables de salida homónimas. Se aliasan las tablas (pv) y se califican las
 -- columnas en WHERE/SET para evitar "column reference ... is ambiguous" (que se
 -- manifiesta como HTTP 500 en el happy path). El RETURN sólo usa variables/params.

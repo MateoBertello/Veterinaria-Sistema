@@ -1,8 +1,13 @@
 -- =====================================================================
--- MIGRACIÓN 011: Eutanasia — transacción atómica única (RPC)
+-- MIGRACIÓN: Eutanasia — transacción atómica única (RPC)
 -- Caso de uso "Registrar Evento Clínico — Eutanasia" (Addendum v1.1 §HC,
--- RN-EC10..EC12, RN-PV4). Es la ÚNICA operación irreversible del sistema
--- (CLAUDE.md regla 8).
+-- RN-EC10..EC12, RN-PV4, RN-S3). Es la ÚNICA operación irreversible del
+-- sistema (CLAUDE.md regla 8).
+--
+-- [Historial consolidado en Etapa 9 — S11 (DT-8): este archivo reúne las
+--  migraciones 20260623000002..000005 (RPC original, auditoría atómica,
+--  reload de PostgREST y fix de ambigüedad). El detalle de cada iteración
+--  está en el historial de git.]
 -- =====================================================================
 --
 -- ---------------------------------------------------------------------
@@ -13,9 +18,18 @@
 --   (2) actualiza la mascota a estado='Fallecida' (deceased_date = fecha del
 --       evento, deceased_reason = 'Eutanasia'),
 --   (3) cancela las dosis 'Pendiente' del plan_vacunacion de esa mascota
---       (RN-PV4).
+--       (RN-PV4),
+--   (4) registra el asiento de auditoría (RN-S3) DENTRO de la transacción:
+--       si la eutanasia hace rollback, el asiento también; si commitea, el
+--       asiento queda garantizado (no best-effort en el Service).
 -- Si CUALQUIERA de los pasos lanza, PostgreSQL revierte TODO: la mascota
 -- nunca queda "media muerta". Esa atomicidad es la esencia de RN-EC11.
+--
+-- p_user_id es el usuario AUTENTICADO que ejecuta la operación (caller, del
+-- JWT), distinto del profesional firmante (p_professional_id). El asiento de
+-- auditoría registra a este usuario; la función resuelve su full_name /
+-- display_name desde usuarios+roles (SECURITY DEFINER bypasea RLS) para que
+-- el asiento no quede como 'unknown'.
 --
 -- RN-EC10 (confirmación): el flag se valida en el Service (código
 -- EUTHANASIA_CONFIRMATION_REQUIRED); aquí se re-verifica como defensa en
@@ -34,11 +48,22 @@
 --
 -- Los errores de negocio se propagan vía RAISE EXCEPTION con el MESSAGE igual
 -- al código de ErrorCode; el Service los mapea a DomainError.
+--
+-- Gotcha PL/pgSQL: RETURNS TABLE (..., pet_id UUID, ...) crea variables de
+-- salida implícitas visibles en TODO el cuerpo. En el UPDATE de
+-- plan_vacunacion se aliasa la tabla (pv) y se califican sus columnas para
+-- que `pet_id` no quede ambiguo entre la COLUMNA y la VARIABLE de retorno
+-- ("column reference \"pet_id\" is ambiguous" en runtime). El resto del
+-- cuerpo no tiene esta colisión (los INSERT usan lista de columnas; el UPDATE
+-- de mascotas usa targets de SET, siempre columna; el RETURN/SELECT usan
+-- variables v_*/p_* explícitas).
 -- ---------------------------------------------------------------------
+
 CREATE OR REPLACE FUNCTION public.registrar_eutanasia(
   p_tenant_id       UUID,
   p_pet_id          UUID,
   p_professional_id UUID,
+  p_user_id         UUID,
   p_date            DATE,
   p_description     TEXT,
   p_confirmed       BOOLEAN,
@@ -68,6 +93,8 @@ DECLARE
   v_pet        mascotas%ROWTYPE;
   v_prof_name  TEXT;
   v_owner_name TEXT;
+  v_user_name  TEXT;
+  v_user_role  TEXT;
   v_event_id   UUID;
   v_cancelled  INTEGER := 0;
 BEGIN
@@ -112,6 +139,14 @@ BEGIN
     RAISE EXCEPTION 'INTERNAL_ERROR';
   END IF;
 
+  -- Identidad del usuario que EJECUTA la eutanasia (para el asiento RN-S3).
+  -- No bloquea la operación si no se resuelve: el user_id igual queda registrado.
+  SELECT u.full_name, COALESCE(r.display_name, r.name)
+  INTO v_user_name, v_user_role
+  FROM usuarios u
+  LEFT JOIN roles r ON r.id = u.rol_id
+  WHERE u.id = p_user_id AND u.tenant_id = p_tenant_id;
+
   -- (1) Evento clínico 'Eutanasia' (último registro admisible de la historia).
   INSERT INTO historial_clinico (
     tenant_id, pet_id, professional_id, date, event_type, description,
@@ -134,11 +169,29 @@ BEGIN
   WHERE id = p_pet_id AND tenant_id = p_tenant_id;
 
   -- (3) RN-PV4: las dosis Pendiente de la mascota pasan a Cancelada dentro de
-  -- esta misma transacción.
-  UPDATE plan_vacunacion
+  -- esta misma transacción. Se aliasa la tabla (pv) para desambiguar `pet_id`
+  -- respecto de la columna de salida homónima del RETURNS TABLE.
+  UPDATE plan_vacunacion AS pv
   SET estado = 'Cancelada'
-  WHERE pet_id = p_pet_id AND tenant_id = p_tenant_id AND estado = 'Pendiente';
+  WHERE pv.pet_id = p_pet_id AND pv.tenant_id = p_tenant_id AND pv.estado = 'Pendiente';
   GET DIAGNOSTICS v_cancelled = ROW_COUNT;
+
+  -- (4) RN-S3: asiento de auditoría ATÓMICO con la operación. Si algo de lo
+  -- anterior hubiera fallado, este INSERT no se alcanza; si algo posterior
+  -- fallara, este INSERT también rollbackea. Registra al usuario ejecutor.
+  INSERT INTO registros_auditoria (
+    tenant_id, user_id, user_name, user_role, action, module, entity_id, new_values
+  ) VALUES (
+    p_tenant_id, p_user_id, v_user_name, v_user_role, 'CREATE', 'medical_records', v_event_id::text,
+    jsonb_build_object(
+      'event_type',      'Eutanasia',
+      'pet_id',          p_pet_id,
+      'professional_id', p_professional_id,
+      'deceased_date',   p_date,
+      'deceased_reason', 'Eutanasia',
+      'cancelled_doses', v_cancelled
+    )
+  );
 
   RETURN QUERY SELECT
     v_event_id,
@@ -155,14 +208,18 @@ BEGIN
 END;
 $$;
 
--- Endurecimiento: por tratarse de la única transacción IRREVERSIBLE, sólo la
--- Edge Function (service_role) puede invocarla. Se revoca el EXECUTE por
--- defecto a PUBLIC para que `anon`/`authenticated` no puedan ejecutarla
--- directamente vía PostgREST con un p_tenant_id arbitrario.
+-- Endurecimiento: sólo la Edge Function (service_role) puede invocar la
+-- transacción irreversible; se revoca el EXECUTE por defecto a PUBLIC.
 REVOKE ALL ON FUNCTION public.registrar_eutanasia(
-  UUID, UUID, UUID, DATE, TEXT, BOOLEAN, NUMERIC, NUMERIC, TEXT, TEXT
+  UUID, UUID, UUID, UUID, DATE, TEXT, BOOLEAN, NUMERIC, NUMERIC, TEXT, TEXT
 ) FROM PUBLIC;
 
 GRANT EXECUTE ON FUNCTION public.registrar_eutanasia(
-  UUID, UUID, UUID, DATE, TEXT, BOOLEAN, NUMERIC, NUMERIC, TEXT, TEXT
+  UUID, UUID, UUID, UUID, DATE, TEXT, BOOLEAN, NUMERIC, NUMERIC, TEXT, TEXT
 ) TO service_role;
+
+-- Convención de la casa: toda migración que cree o cambie funciones expuestas
+-- por PostgREST (RPC) termina con este NOTIFY. PostgREST cachea el esquema y
+-- puede no recargarlo tras un push, dejando la firma vieja en cache
+-- ("Could not find the function ... in the schema cache").
+NOTIFY pgrst, 'reload schema';

@@ -17,7 +17,7 @@
  *   + Bonus de endurecimiento: `anon` no puede ejecutar el RPC (EXECUTE revocado).
  *
  * Requieren un proyecto Supabase real con TODAS las migraciones aplicadas (incl.
- * 20260623000003_registrar_eutanasia_auditoria.sql) y .env con SUPABASE_URL,
+ * 20260623000002_registrar_eutanasia_rpc.sql) y .env con SUPABASE_URL,
  * SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY.  Para correr: npx vitest run tests/integration
  *
  * NOTA sobre el punto de inyección del fallo (caso 2): el harness de integración

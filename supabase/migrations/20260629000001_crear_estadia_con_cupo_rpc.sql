@@ -1,6 +1,10 @@
 -- =====================================================================
--- MIGRACIÓN 014: Guardería — Registrar Estadía con guarda de cupo (RPC)
+-- MIGRACIÓN: Guardería — Registrar Estadía con guarda de cupo (RPC)
 -- Caso de uso "Registrar Estadía" (Etapa 7; v1.0 §5 + Addendum v1.1).
+--
+-- [Historial consolidado en Etapa 9 — S11 (DT-8): este archivo reúne la
+--  migración original y su fix de ambigüedad (20260629000002). El detalle
+--  de cada iteración está en el historial de git.]
 -- =====================================================================
 --
 -- ---------------------------------------------------------------------
@@ -34,7 +38,16 @@
 -- Los errores de negocio se propagan vía RAISE EXCEPTION con el MESSAGE igual
 -- al código de ErrorCode; el Service los mapea a DomainError. CUPO_GUARDERIA_
 -- AGOTADO incluye los días sin cupo como JSON para el campo `details`.
+--
+-- Gotcha PL/pgSQL: en una función `RETURNS TABLE (id UUID, ...)` los nombres
+-- de las columnas de salida (id, status, ...) son parámetros OUT visibles en
+-- TODO el cuerpo. Las búsquedas sobre mascotas y clientes califican la tabla
+-- (`mascotas.id`, `clientes.id`) para no quedar ambiguas entre `<tabla>.id` y
+-- el OUT param `id` ("column reference 'id' is ambiguous" en runtime). Se
+-- conservan los nombres de las columnas de salida (los lee el Service vía
+-- PostgREST): se califican las tablas, no se renombran los OUT.
 -- ---------------------------------------------------------------------
+
 CREATE OR REPLACE FUNCTION public.crear_estadia_con_cupo(
   p_tenant_id  UUID,
   p_client_id  UUID,
@@ -83,9 +96,10 @@ BEGIN
 
   -- (1) RN-GU3: mascota del tenant, no eliminada y viva. Se aprovecha para el
   -- snapshot de la tarjeta (nombre, tamaño, dieta).
+  -- `mascotas.id` calificado: `id` es además un OUT param de la función.
   SELECT * INTO v_pet
   FROM mascotas
-  WHERE id = p_pet_id AND tenant_id = p_tenant_id AND deleted = false;
+  WHERE mascotas.id = p_pet_id AND mascotas.tenant_id = p_tenant_id AND mascotas.deleted = false;
 
   IF NOT FOUND THEN
     RAISE EXCEPTION 'MASCOTA_NOT_FOUND';
@@ -100,10 +114,10 @@ BEGIN
     RAISE EXCEPTION 'MASCOTA_NOT_FOUND';
   END IF;
 
-  -- Cliente del tenant (para la tarjeta).
-  SELECT full_name INTO v_client_name
+  -- Cliente del tenant (para la tarjeta). `clientes.id` calificado por la misma razón.
+  SELECT clientes.full_name INTO v_client_name
   FROM clientes
-  WHERE id = p_client_id AND tenant_id = p_tenant_id;
+  WHERE clientes.id = p_client_id AND clientes.tenant_id = p_tenant_id;
 
   IF v_client_name IS NULL THEN
     RAISE EXCEPTION 'MASCOTA_NOT_FOUND';
@@ -160,10 +174,9 @@ BEGIN
 END;
 $$;
 
--- Endurecimiento: sólo la Edge Function (service_role) puede invocarla. Se revoca
--- el EXECUTE por defecto a PUBLIC para que `anon`/`authenticated` no la ejecuten
--- vía PostgREST con un p_tenant_id arbitrario (la guarda de cupo se saltearía si
--- se invocara sin pasar por el Service).
+-- Endurecimiento: sólo la Edge Function (service_role) puede invocarla (la guarda
+-- de cupo se saltearía si se invocara directo vía PostgREST con un p_tenant_id
+-- arbitrario).
 REVOKE ALL ON FUNCTION public.crear_estadia_con_cupo(
   UUID, UUID, UUID, DATE, DATE, TEXT, TEXT
 ) FROM PUBLIC;
@@ -172,6 +185,5 @@ GRANT EXECUTE ON FUNCTION public.crear_estadia_con_cupo(
   UUID, UUID, UUID, DATE, DATE, TEXT, TEXT
 ) TO service_role;
 
--- Gotcha PostgREST: recargar el cache de esquema tras crear la función, para que
--- el RPC sea invocable de inmediato vía supabase-js (.rpc).
+-- Gotcha PostgREST: recargar el cache de esquema tras crear/cambiar RPCs.
 NOTIFY pgrst, 'reload schema';
