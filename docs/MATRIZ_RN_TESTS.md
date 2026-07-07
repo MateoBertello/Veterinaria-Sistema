@@ -41,6 +41,16 @@ módulo licenciado. 1 fila más pasada de ❌ a ✅:
 | :-: | :-: | :-: | :-: |
 | 167 | 163 | 4 | 97,6 % |
 
+**Actualizado en Etapa 9 — S9:** se cerró RN-UX1 (≤3 clics por acción frecuente) con
+`tests/e2e/rn-ux1.spec.ts` (alta de cliente, agendar turno y registrar evento clínico, contados
+desde el aterrizaje post-login `/clientes` — la app no tiene una pantalla de "dashboard"
+dedicada). RN-UX2/RN-UX3 ya habían quedado ✅ en S8 (ver sus filas en la tabla completa), así que
+esta sub-sesión deja solo RN-AUD4 pendiente (grupo D, diferida a S11 por decisión de producto):
+
+| Total RN en docs | Con test (título) | Sin test | Cobertura |
+| :-: | :-: | :-: | :-: |
+| 167 | 166 | 1 | 99,4 % |
+
 ---
 
 ## Tabla completa por prefijo
@@ -315,7 +325,7 @@ módulo licenciado. 1 fila más pasada de ❌ a ✅:
 #### RN-UX
 | RN | Test | Archivos |
 | :-- | :-: | :-- |
-| RN-UX1 | ❌ | — |
+| RN-UX1 | ✅ | `tests/e2e/rn-ux1.spec.ts` |
 | RN-UX2 | ✅ | `web/src/components/historial/EutanasiaDialog.test.tsx`, `web/src/components/turnos/TurnoDetalleDialog.test.tsx`, `web/src/pages/PreferenciasPage.test.tsx` |
 | RN-UX3 | ✅ | `web/src/preferences/PreferencesContext.test.tsx`, `web/src/pages/PreferenciasPage.test.tsx`, `web/src/lib/navigation.test.ts` |
 | RN-UX4 | ✅ | `tests/unit/mascotas.service.test.ts` |
@@ -383,14 +393,14 @@ serialización), RN-SEC0/RN-SEC2 (permisos derivan del rol vía `RolPermiso`, no
 usuario), RN-AUT2 (login emite JWT con expiración — delegado a Supabase Auth; test de
 integración liviano que decodifica `exp`). ✅ Cubierto en S5, sin hallazgos de producto.
 
-### B. Cubiertas por otra sub-sesión (3) — RN-NT5 ✅ RESUELTA (Etapa 9 — S6)
+### B. Cubiertas por otra sub-sesión (4) — ✅ RESUELTA (Etapa 9 — S9)
 
 | RN | Sub-sesión | Nota |
 | :-- | :-- | :-- |
 | ~~RN-NT5~~ | ~~S6 (cron)~~ | ✅ RESUELTA en S6: cron pg_cron/pg_net + `notificaciones-cron.integration.test.ts` (dispara y no spamea) |
-| RN-UX2 | S8 | Toasts: hay asserts en component tests sin citar la RN; S8 los nombra |
-| RN-UX3 | S8 | Panel de preferencias: feature nueva + sus tests |
-| RN-UX1 | S9 | ≤3 clics por acción frecuente: heurística verificable en E2E, no unit |
+| ~~RN-UX2~~ | ~~S8~~ | ✅ RESUELTA en S8: toasts, asserts en component tests citando la RN |
+| ~~RN-UX3~~ | ~~S8~~ | ✅ RESUELTA en S8: panel de preferencias + sus tests |
+| ~~RN-UX1~~ | ~~S9~~ | ✅ RESUELTA en S9: `tests/e2e/rn-ux1.spec.ts` (alta cliente, agendar turno, registrar evento — ≤3 clics desde `/clientes`) |
 
 ### C. Cubiertas por cruce — solo renombrar/anotar (2) — ✅ RESUELTA (Etapa 9 — S5)
 
@@ -438,6 +448,49 @@ integración liviano que decodifica `exp`). ✅ Cubierto en S5, sin hallazgos de
 - **Deploy (S11):** setear el env `CRON_SECRET` del Edge Function y cargar en Vault los
   secrets `cron_notif_url` (URL del endpoint) y `cron_notif_secret` (== `CRON_SECRET`). Ver
   el comentario de setup en la migración.
+
+## Etapa 9 — S9 (E2E Playwright — RN-UX1)
+
+- **Setup:** `@playwright/test` instalado en la raíz, `playwright.config.ts` con
+  `globalSetup` (login único como `admin_demo`, `storageState` compartido por el resto de los
+  specs) y `webServer` que levanta `npm run dev --prefix web` si no está corriendo. Specs en
+  `tests/e2e/`, selectores por rol/label accesible (S8 ya dejó el árbol de accesibilidad en
+  buen estado).
+- **Hallazgo de producto (no de test):** `EventoClinicoFormDialog.tsx` y `EutanasiaDialog.tsx`
+  (Etapa 5) mandaban `null` explícito para los campos opcionales (peso, temperatura,
+  diagnóstico, tratamiento, medicación, notas) vacíos; el schema Zod del backend los declara
+  `.optional()` (acepta ausente, no `null`), así que **cualquier registro real con al menos un
+  campo opcional vacío fallaba con 422 VALIDATION_ERROR** — el caso normal de uso. Nunca se
+  detectó antes porque los component tests mockean la llamada a la API y los de integración
+  llaman al Service con payloads bien formados. Corregido cambiando `: null` → `: undefined`
+  en ambos diálogos (`JSON.stringify` omite las claves `undefined`); tests de componente
+  actualizados.
+- **UI mínima nueva:** el tab "Plan de Vacunación" (Etapa 8) era de solo lectura — se agregaron
+  `ProgramarDosisDialog` y `MarcarAplicadaDialog` (con sus tests) para poder ejercitar el flujo
+  completo en E2E, reusando los endpoints ya existentes del backend de Etapa 8.
+- **Fixtures de seed:** `scripts/seed.mjs` ahora asegura también un servicio que requiere
+  profesional y un horario semanal completo (L-D) para `vet_demo` — sin esto, "agendar turno"
+  no tenía slots disponibles. Idempotente (verificado corriendo el seed dos veces).
+- **RN-UX1** fijada por `tests/e2e/rn-ux1.spec.ts`: alta de cliente (1 clic), agendar turno
+  (2 clics) y registrar evento clínico (3 clics), contados desde el aterrizaje post-login
+  (`/clientes` — la app no tiene una pantalla de "dashboard" dedicada; `/` redirige ahí).
+- **Especs por módulo** (`auth`, `clientes-mascotas`, `historial`, `turnos`, `guarderia`,
+  `vacunacion`): un flujo feliz + 1-2 errores clave por módulo, incluyendo un caso genuino de
+  condición de carrera para RN-TU3 (TURNO_SOLAPADO: dos pestañas del mismo browser context
+  reservando el mismo horario del profesional) y RN-ES2/RN-MC4 confirmado empíricamente (los
+  turnos nacen `Confirmado` por auto-confirmación RN-TU5, no `Programado` — el front nunca
+  llega a mostrar esa transición para turnos creados por la UI estándar).
+- Los datos creados por los specs no se limpian (la stack local no se resetea entre corridas);
+  nombres/fechas llevan sufijos derivados de `Date.now()` para que la suite sea re-ejecutable
+  sin colisionar consigo misma. Verificado corriendo `npx playwright test` completo dos veces
+  seguidas en el mismo día calendario.
+- Deuda de S8 encontrada de paso y corregida (no de esta sub-sesión, pero bloqueaba `npm test`):
+  `tests/unit/navigation.test.ts` esperaba que `buildNavItems()` devolviera solo `BASE_NAV`,
+  pero desde que existe el panel de Preferencias la función también anexa `USER_NAV` al final;
+  el sidebar ya funcionaba bien, solo el test había quedado desactualizado.
+- Suites en verde al cierre: `npm run typecheck`, `npm run test:unit` (417/36), 
+  `npm run test:integration` (146/14), `web/` (286/39), `npx playwright test` (18/18, corrido
+  dos veces).
 
 ## Etapa 9 — S5 (cierre de brechas grupo A + C)
 
