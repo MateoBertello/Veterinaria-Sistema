@@ -297,7 +297,7 @@ describe("HistorialClinicoPage", () => {
       await waitFor(() => expect(screen.queryByText("Falló la carga del plan")).not.toBeInTheDocument());
     });
 
-    it("no muestra botones de acción de historial (exportar/registrar/eutanasia) en la pestaña de vacunación", async () => {
+    it("no muestra botones de acción de historial (exportar/registrar/eutanasia) en la pestaña de vacunación, pero sí 'Programar dosis'", async () => {
       mockResumen.mockResolvedValue(makeResumen({ estado: "Activa" }));
       mockListar.mockResolvedValue({ items: [makeEvento()], meta: { page: 1, limit: 20, total: 1 } });
       mockListarDosis.mockResolvedValue({ items: [makeDosis()], meta: { page: 1, limit: 20, total: 1 } });
@@ -309,9 +309,10 @@ describe("HistorialClinicoPage", () => {
       expect(screen.queryByRole("button", { name: /Registrar evento/i })).not.toBeInTheDocument();
       expect(screen.queryByRole("button", { name: /Registrar eutanasia/i })).not.toBeInTheDocument();
       expect(screen.queryByRole("button", { name: /Exportar/i })).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Programar dosis" })).toBeInTheDocument();
     });
 
-    it("el banner de mascota fallecida sigue visible en la pestaña de vacunación", async () => {
+    it("RN-PV4: el banner de mascota fallecida sigue visible y oculta 'Programar dosis'", async () => {
       mockResumen.mockResolvedValue(makeResumen({ estado: "Fallecida" }));
       mockListar.mockResolvedValue({ items: [makeEvento()], meta: { page: 1, limit: 20, total: 1 } });
       mockListarDosis.mockResolvedValue({ items: [makeDosis()], meta: { page: 1, limit: 20, total: 1 } });
@@ -321,6 +322,25 @@ describe("HistorialClinicoPage", () => {
       await screen.findByText("Antirrábica");
 
       expect(screen.getByText(/Mascota fallecida/i)).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Programar dosis" })).not.toBeInTheDocument();
+    });
+
+    it("una dosis Pendiente ofrece 'Marcar aplicada'; una dosis Aplicada no", async () => {
+      mockResumen.mockResolvedValue(makeResumen({ estado: "Activa" }));
+      mockListar.mockResolvedValue({ items: [makeEvento()], meta: { page: 1, limit: 20, total: 1 } });
+      mockListarDosis.mockResolvedValue({
+        items: [
+          makeDosis({ id: "d1", tipoVacunaNombre: "Antirrábica", estado: "Pendiente", estadoVisual: "Proxima" }),
+          makeDosis({ id: "d2", tipoVacunaNombre: "Triple Felina", estado: "Aplicada", estadoVisual: "Aplicada" }),
+        ],
+        meta: { page: 1, limit: 20, total: 2 },
+      });
+
+      renderPage();
+      await abrirPestanaVacunacion();
+      await screen.findByText("Antirrábica");
+
+      expect(screen.getAllByRole("button", { name: "Marcar aplicada" })).toHaveLength(1);
     });
   });
 });

@@ -11,6 +11,8 @@ import { EventoTimeline } from "../components/historial/EventoTimeline.tsx";
 import { EventoClinicoFormDialog } from "../components/historial/EventoClinicoFormDialog.tsx";
 import { EutanasiaDialog } from "../components/historial/EutanasiaDialog.tsx";
 import { PlanVacunacionTimeline } from "../components/vacunacion/PlanVacunacionTimeline.tsx";
+import { ProgramarDosisDialog } from "../components/vacunacion/ProgramarDosisDialog.tsx";
+import { MarcarAplicadaDialog } from "../components/vacunacion/MarcarAplicadaDialog.tsx";
 import { exportarHistorial, listarHistorial, resumenClinico, type FormatoExport } from "../api/historial-clinico.ts";
 import { listarPlanVacunacion } from "../api/vacunacion.ts";
 import { ApiError, ErrorCode, type HistorialItem, type ResumenClinico, type ApiMeta, type DosisVacunacion } from "../types/index.ts";
@@ -57,6 +59,8 @@ export function HistorialClinicoPage() {
   const [dosisLoading, setDosisLoading] = useState(false);
   const [dosisError, setDosisError] = useState<string | null>(null);
   const [dosisPage, setDosisPage] = useState(1);
+  const [programarOpen, setProgramarOpen] = useState(false);
+  const [dosisParaAplicar, setDosisParaAplicar] = useState<DosisVacunacion | null>(null);
 
   const cargarResumen = useCallback(async () => {
     if (!mascotaId) return;
@@ -297,6 +301,15 @@ export function HistorialClinicoPage() {
         </TabsContent>
 
         <TabsContent value="vacunacion" className="space-y-6">
+          {!esFallecida ? (
+            <div className="flex justify-end">
+              <Button type="button" onClick={() => setProgramarOpen(true)}>
+                <Plus className="size-4" aria-hidden />
+                Programar dosis
+              </Button>
+            </div>
+          ) : null}
+
           <div className="rounded-lg border">
             {dosisLoading ? (
               <div className="space-y-3 p-4">
@@ -317,7 +330,7 @@ export function HistorialClinicoPage() {
               </p>
             ) : (
               <div className="px-4">
-                <PlanVacunacionTimeline dosis={dosis} />
+                <PlanVacunacionTimeline dosis={dosis} onMarcarAplicada={setDosisParaAplicar} />
               </div>
             )}
           </div>
@@ -363,6 +376,20 @@ export function HistorialClinicoPage() {
         petId={mascotaId}
         mascotaName={resumen?.name ?? ""}
         onSuccess={() => { void cargarHistorial(); void cargarResumen(); }}
+      />
+
+      <ProgramarDosisDialog
+        open={programarOpen}
+        onOpenChange={setProgramarOpen}
+        petId={mascotaId}
+        onSaved={() => { void cargarPlanVacunacion(); }}
+      />
+
+      <MarcarAplicadaDialog
+        open={dosisParaAplicar != null}
+        onOpenChange={(open) => { if (!open) setDosisParaAplicar(null); }}
+        dosis={dosisParaAplicar}
+        onSaved={() => { void cargarPlanVacunacion(); }}
       />
     </div>
   );

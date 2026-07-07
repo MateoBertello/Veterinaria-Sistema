@@ -72,6 +72,8 @@ export const ErrorCode = {
   EUTHANASIA_CONFIRMATION_REQUIRED: "EUTHANASIA_CONFIRMATION_REQUIRED",
   INVALID_FILE_TYPE:                "INVALID_FILE_TYPE",
   FILE_TOO_LARGE:                   "FILE_TOO_LARGE",
+  VACCINE_TYPE_NOT_FOUND:           "VACCINE_TYPE_NOT_FOUND",
+  VACCINE_PLAN_ALREADY_APPLIED:     "VACCINE_PLAN_ALREADY_APPLIED",
 } as const;
 
 export type ErrorCodeValue = (typeof ErrorCode)[keyof typeof ErrorCode];
@@ -542,6 +544,22 @@ export interface DosisVacunacion {
   estadoVisual:       EstadoVisualDosis;
   notas:              string | null;
   createdAt:          string;
+}
+
+/** Body de `POST /mascotas/:petId/plan-vacunacion` (espejo de `ProgramarDosisSchema`, RN-PV2/PV3). */
+export interface ProgramarDosisInput {
+  tipoVacunaId:  string;
+  fechaEstimada: string;
+  notas?:        string;
+}
+
+/** Body de `PATCH /plan-vacunacion/:id/aplicar` (espejo de `MarcarAplicadaSchema`, RN-PV5). */
+export interface MarcarAplicadaInput {
+  professionalId: string;
+  date?:          string;
+  weightKg?:      number;
+  temperatureC?:  number;
+  notes?:         string;
 }
 
 // ─── Catálogos globales ─────────────────────────────────────────────────────
