@@ -353,6 +353,88 @@ async function ensureDemoData(tenantId) {
   }
 }
 
+// Servicio demo con profesional requerido (necesario para el flujo de agendar
+// turno, que sin slots disponibles no se puede probar de punta a punta) y
+// horario amplio del veterinario demo que cubra cualquier día en que corran
+// las pruebas E2E (RN-TU/RN-HOR — Etapa 9 S9).
+const SERVICIO = {
+  nombre: "Consulta general",
+  descripcion: "Consulta clínica general",
+  duracionMinutos: 30,
+  requiereProfesional: true,
+  tipo: "clinica",
+};
+
+/** Asegura el servicio demo y un horario semanal completo para vet_demo (idempotente). */
+async function ensureServicioYHorario(tenantId) {
+  // Servicio — idempotente por el índice único (tenant_id, lower(nombre)) WHERE activo.
+  const { data: existeServicio, error: svSelErr } = await db
+    .from("servicios")
+    .select("id")
+    .eq("tenant_id", tenantId)
+    .ilike("nombre", SERVICIO.nombre)
+    .maybeSingle();
+  if (svSelErr) die("No pude consultar servicios", svSelErr);
+
+  if (existeServicio) {
+    console.log(`• Servicio "${SERVICIO.nombre}" ya existe — reuso ${existeServicio.id}`);
+  } else {
+    const { data: nuevo, error: svInsErr } = await db
+      .from("servicios")
+      .insert({
+        tenant_id:            tenantId,
+        nombre:               SERVICIO.nombre,
+        descripcion:          SERVICIO.descripcion,
+        duracion_minutos:     SERVICIO.duracionMinutos,
+        requiere_profesional: SERVICIO.requiereProfesional,
+        tipo:                 SERVICIO.tipo,
+        activo:               true,
+      })
+      .select("id")
+      .single();
+    if (svInsErr) die("No pude insertar el servicio demo", svInsErr);
+    console.log(`✓ Servicio "${SERVICIO.nombre}" creado → ${nuevo.id}`);
+  }
+
+  // Horario — resolver el doctor de vet_demo (usuarios.id === auth user id).
+  const vet = USERS.find((u) => u.roleName === "veterinario");
+  const authUser = await findAuthUserByEmail(vet.email);
+  if (!authUser) die(`No pude resolver el auth user de ${vet.email} para el horario demo`);
+
+  const { data: doctor, error: docSelErr } = await db
+    .from("doctores")
+    .select("id")
+    .eq("tenant_id", tenantId)
+    .eq("user_id", authUser.id)
+    .single();
+  if (docSelErr || !doctor) die(`No encontré la fila doctores de ${vet.email}`, docSelErr);
+
+  // Franja amplia L-D 08:00-20:00: cubre cualquier día de la semana en que
+  // corran los tests E2E, sin depender de qué día se ejecute la suite.
+  for (let dayOfWeek = 0; dayOfWeek <= 6; dayOfWeek++) {
+    const { data: existeFranja, error: franjaSelErr } = await db
+      .from("horarios_doctor")
+      .select("id")
+      .eq("tenant_id", tenantId)
+      .eq("doctor_id", doctor.id)
+      .eq("day_of_week", dayOfWeek)
+      .maybeSingle();
+    if (franjaSelErr) die("No pude consultar horarios_doctor", franjaSelErr);
+    if (existeFranja) continue;
+
+    const { error: franjaInsErr } = await db.from("horarios_doctor").insert({
+      tenant_id:   tenantId,
+      doctor_id:   doctor.id,
+      day_of_week: dayOfWeek,
+      start_time:  "08:00",
+      end_time:    "20:00",
+      active:      true,
+    });
+    if (franjaInsErr) die(`No pude insertar el horario del día ${dayOfWeek}`, franjaInsErr);
+  }
+  console.log(`✓ Horario semanal (L-D 08:00-20:00) asegurado para ${vet.email}`);
+}
+
 // ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
@@ -366,6 +448,9 @@ async function main() {
 
   console.log("\n— Datos demo —");
   await ensureDemoData(tenantId);
+
+  console.log("\n— Turnos (servicio + horario) —");
+  await ensureServicioYHorario(tenantId);
 
   console.log("\n✓ Seed completo. Credenciales (todas con password " + PASSWORD + "):");
   for (const u of USERS) console.log(`    ${u.roleName.padEnd(13)} ${u.email}`);

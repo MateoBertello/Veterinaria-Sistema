@@ -7,11 +7,13 @@
     "test:watch": "vitest",
     "test:unit": "vitest run tests/unit",
     "test:integration": "vitest run tests/integration",
+    "test:e2e": "playwright test",
     "seed": "node scripts/seed.mjs",
     "typecheck": "tsc -p supabase/functions/api/tsconfig.json --noEmit && tsc -p web/tsconfig.json --noEmit",
     "lint": "eslint supabase/functions/api/src web/src"
   },
   "devDependencies": {
+    "@playwright/test": "^1.61.1",
     "@supabase/supabase-js": "^2.108.1",
     "@types/node": "^20.19.43",
     "@types/ws": "^8.18.1",

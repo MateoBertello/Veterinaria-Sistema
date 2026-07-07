@@ -11,3 +11,8 @@ coverage/
 # Artefactos locales de la CLI de Supabase (estado del stack, no versionar)
 supabase/.temp/
 supabase/.branches/
+
+# Playwright (Etapa 9 — S9): sesión guardada por global-setup y reportes locales.
+playwright/.auth/
+playwright-report/
+test-results/
