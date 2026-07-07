@@ -6,22 +6,27 @@ import { Toaster } from "./components/ui/sonner.tsx";
 import { AuthProvider } from "./auth/AuthContext.tsx";
 import { PreferencesProvider } from "./preferences/PreferencesContext.tsx";
 import { App } from "./App.tsx";
+import { initSentry, RootErrorBoundary } from "./observability/sentry.tsx";
 import "./components/styles/index.css";
+
+initSentry();
 
 const container = document.getElementById("root");
 if (!container) throw new Error("No se encontró el elemento #root");
 
 createRoot(container).render(
   <StrictMode>
-    <BrowserRouter>
-      <AuthProvider>
-        <PreferencesProvider>
-          <TooltipProvider>
-            <App />
-            <Toaster richColors position="top-right" />
-          </TooltipProvider>
-        </PreferencesProvider>
-      </AuthProvider>
-    </BrowserRouter>
+    <RootErrorBoundary>
+      <BrowserRouter>
+        <AuthProvider>
+          <PreferencesProvider>
+            <TooltipProvider>
+              <App />
+              <Toaster richColors position="top-right" />
+            </TooltipProvider>
+          </PreferencesProvider>
+        </AuthProvider>
+      </BrowserRouter>
+    </RootErrorBoundary>
   </StrictMode>,
 );
