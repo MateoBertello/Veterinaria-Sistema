@@ -67,3 +67,50 @@
 html {
   font-size: var(--font-size);
 }
+
+/* ── Preferencias de accesibilidad (RN-UX3) ──────────────────────────────────
+   Se activan por clase en el <html> raíz desde PreferencesContext. Son overrides
+   de presentación scopeados; no reescriben el kit heredado. */
+
+/* Densidad de tablas: compacta el padding vertical de las celdas del kit. */
+:root.density-compact table th,
+:root.density-compact table td {
+  padding-top: 0.375rem;
+  padding-bottom: 0.375rem;
+}
+
+/* Alto contraste: refuerza texto, bordes y foco; subraya los enlaces. */
+:root.high-contrast {
+  --foreground: #000000;
+  --muted-foreground: #3a3a44;
+  --border: rgba(0, 0, 0, 0.45);
+  --ring: #000000;
+}
+:root.high-contrast a {
+  text-decoration: underline;
+}
+:root.high-contrast :focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+/* Reducción de movimiento: por preferencia del usuario o del SO. */
+:root.reduce-motion *,
+:root.reduce-motion *::before,
+:root.reduce-motion *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+  scroll-behavior: auto !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

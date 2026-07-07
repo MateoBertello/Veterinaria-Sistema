@@ -316,8 +316,8 @@ módulo licenciado. 1 fila más pasada de ❌ a ✅:
 | RN | Test | Archivos |
 | :-- | :-: | :-- |
 | RN-UX1 | ❌ | — |
-| RN-UX2 | ❌ | — |
-| RN-UX3 | ❌ | — |
+| RN-UX2 | ✅ | `web/src/components/historial/EutanasiaDialog.test.tsx`, `web/src/components/turnos/TurnoDetalleDialog.test.tsx`, `web/src/pages/PreferenciasPage.test.tsx` |
+| RN-UX3 | ✅ | `web/src/preferences/PreferencesContext.test.tsx`, `web/src/pages/PreferenciasPage.test.tsx`, `web/src/lib/navigation.test.ts` |
 | RN-UX4 | ✅ | `tests/unit/mascotas.service.test.ts` |
 
 ---

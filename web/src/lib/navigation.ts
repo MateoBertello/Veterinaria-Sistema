@@ -16,6 +16,12 @@ export const BASE_NAV: NavItem[] = [
   { key: "mascotas", label: "Mascotas", href: "/mascotas" },
 ];
 
+// Ítems de nivel usuario (preferencias personales), siempre visibles y sin permiso.
+// Se ubican al final del sidebar (después de módulos y de los ítems por permiso).
+export const USER_NAV: NavItem[] = [
+  { key: "preferencias", label: "Preferencias", href: "/preferencias" },
+];
+
 // Ítems core transversales gateados por permiso (no por módulo vendible/licencia).
 export const PERMISSION_NAV: NavItem[] = [
   { key: "servicios",     label: "Servicios",     href: "/servicios",     permission: "manage_services" },
@@ -54,5 +60,5 @@ export function buildNavItems(modulos: ModuloContratado[], permissions: string[]
     (item) => !item.permission || permissions.includes(item.permission),
   );
 
-  return [...BASE_NAV, ...moduleItems, ...permissionItems];
+  return [...BASE_NAV, ...moduleItems, ...permissionItems, ...USER_NAV];
 }

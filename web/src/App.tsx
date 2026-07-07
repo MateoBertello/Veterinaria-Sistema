@@ -18,6 +18,7 @@ import { TurnosPage } from "./pages/TurnosPage.tsx";
 import { AgendarTurnoPage } from "./pages/AgendarTurnoPage.tsx";
 import { OcupacionGuarderiaPage } from "./pages/OcupacionGuarderiaPage.tsx";
 import { RegistrarEstadiaPage } from "./pages/RegistrarEstadiaPage.tsx";
+import { PreferenciasPage } from "./pages/PreferenciasPage.tsx";
 import { Button } from "./components/ui/button.tsx";
 import { cn } from "./components/ui/utils.ts";
 
@@ -137,6 +138,7 @@ export function App() {
         <Route path="/guarderia/nuevo" element={<RegistrarEstadiaPage />} />
         <Route path="/guarderia/:id/editar" element={<RegistrarEstadiaPage />} />
         <Route path="/configuracion" element={<ConfiguracionPage />} />
+        <Route path="/preferencias" element={<PreferenciasPage />} />
         <Route path="*" element={<Navigate to="/clientes" replace />} />
       </Route>
     </Routes>

@@ -4,6 +4,7 @@ import { BrowserRouter } from "react-router-dom";
 import { TooltipProvider } from "./components/ui/tooltip.tsx";
 import { Toaster } from "./components/ui/sonner.tsx";
 import { AuthProvider } from "./auth/AuthContext.tsx";
+import { PreferencesProvider } from "./preferences/PreferencesContext.tsx";
 import { App } from "./App.tsx";
 import "./components/styles/index.css";
 
@@ -14,10 +15,12 @@ createRoot(container).render(
   <StrictMode>
     <BrowserRouter>
       <AuthProvider>
-        <TooltipProvider>
-          <App />
-          <Toaster richColors position="top-right" />
-        </TooltipProvider>
+        <PreferencesProvider>
+          <TooltipProvider>
+            <App />
+            <Toaster richColors position="top-right" />
+          </TooltipProvider>
+        </PreferencesProvider>
       </AuthProvider>
     </BrowserRouter>
   </StrictMode>,
