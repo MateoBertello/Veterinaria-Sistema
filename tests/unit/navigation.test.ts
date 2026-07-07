@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildNavItems, BASE_NAV } from "../../web/src/lib/navigation.ts";
+import { buildNavItems, BASE_NAV, USER_NAV } from "../../web/src/lib/navigation.ts";
 import type { ModuloContratado, ModuloVendible } from "../../web/src/types/index.ts";
 
 const mod = (modulo: ModuloVendible, habilitado: boolean): ModuloContratado => ({
@@ -42,8 +42,11 @@ describe("buildNavItems: sidebar dinámico (RN-G2)", () => {
       mod("guarderia", false),
     ]);
 
-    expect(items).toHaveLength(BASE_NAV.length);
-    expect(items.map((i) => i.key)).toEqual(BASE_NAV.map((i) => i.key));
+    expect(items).toHaveLength(BASE_NAV.length + USER_NAV.length);
+    expect(items.map((i) => i.key)).toEqual([
+      ...BASE_NAV.map((i) => i.key),
+      ...USER_NAV.map((i) => i.key),
+    ]);
   });
 
   it("mantiene un orden estable: base, luego HC, turnos, guardería", () => {
@@ -58,6 +61,7 @@ describe("buildNavItems: sidebar dinámico (RN-G2)", () => {
       "historial_clinico",
       "turnos",
       "guarderia",
+      ...USER_NAV.map((i) => i.key),
     ]);
   });
 });
