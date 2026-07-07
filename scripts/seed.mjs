@@ -436,6 +436,317 @@ async function ensureServicioYHorario(tenantId) {
 }
 
 // ---------------------------------------------------------------------------
+// Datos operativos de demo — los 3 módulos vendibles con contenido presentable
+// (Etapa 9 — S11). Historial, turnos, guardería y plan de vacunación dejan de
+// estar vacíos en el entorno demo.
+//
+// IDEMPOTENCIA con fechas frescas: las filas demo se identifican por sus
+// textos EXACTOS (reason/description/notas de las listas de abajo); en cada
+// corrida se borran y reinsertan con fechas relativas a HOY, así la demo
+// nunca "envejece". Los tests E2E usan textos únicos por corrida
+// ("... E2E <timestamp>"), por lo que el borrado no puede alcanzarlos.
+//
+// SIN COLISIÓN con la suite E2E: los specs agendan con fechaUnica(offset)
+// (mínimo +10 días para vacunación, +30 turnos, +100 guardería); toda la
+// demo vive en ±12 días de hoy. Además guardería demo evita los pares
+// pet+estado que los specs localizan por fila (Rocky Reservada/EnCurso/
+// Finalizada la crea y assertea guarderia.spec.ts).
+//
+// Inserción directa con service role (sin auditoría): es contenido de demo,
+// no una escritura de usuario (RN-S3). La única excepción es la eutanasia de
+// "Luna", que usa el RPC real `registrar_eutanasia` (transacción completa:
+// evento + Fallecida + dosis cancelada RN-PV4 + asiento de auditoría) y por
+// ser irreversible se ejecuta UNA sola vez (si Luna existe, no se toca).
+// ---------------------------------------------------------------------------
+
+/** YYYY-MM-DD a N días de hoy (negativo = pasado). */
+function fechaRel(dias) {
+  const d = new Date();
+  d.setDate(d.getDate() + dias);
+  return d.toISOString().slice(0, 10);
+}
+
+/** ISO timestamp a N días de hoy, a una hora dada. */
+function timestampRel(dias, hora) {
+  return `${fechaRel(dias)}T${hora}:00Z`;
+}
+
+const DEMO_TURNOS_REASONS = [
+  "Control anual",
+  "Vacunación de refuerzo",
+  "Consulta por control de peso",
+  "Primera consulta del cachorro",
+];
+const DEMO_ESTADIAS_REASONS = [
+  "Vacaciones del dueño",
+  "Guardería por viaje de trabajo",
+];
+const DEMO_HISTORIAL_DESCRIPCIONES = [
+  "Consulta por otitis: revisión y limpieza de oído",
+  "Control de rutina: peso y estado general",
+  "Aplicación de vacuna Triple Felina",
+];
+const DEMO_DOSIS_NOTAS = [
+  "Aplicada en consulta de rutina",
+  "Refuerzo anual antirrábico",
+  "Refuerzo anual antirrábico canino",
+];
+
+async function tipoVacunaIdPorNombre(nombre) {
+  const { data, error } = await db.from("tipos_vacuna").select("id").eq("nombre", nombre).single();
+  if (error || !data) die(`Tipo de vacuna "${nombre}" no está en el catálogo global`, error);
+  return data.id;
+}
+
+/** Resuelve los ids que el bloque demo necesita (clientes, mascotas, vet, servicio). */
+async function resolverContextoDemo(tenantId) {
+  const porDni = async (dni) => {
+    const { data, error } = await db
+      .from("clientes").select("id, full_name")
+      .eq("tenant_id", tenantId).eq("dni_cuit", dni).single();
+    if (error || !data) die(`No encontré el cliente demo con DNI ${dni}`, error);
+    return data;
+  };
+  const juana = await porDni(CLIENTES[0].dniCuit);
+  const carlos = await porDni(CLIENTES[1].dniCuit);
+
+  const mascotaPorNombre = async (clienteId, name) => {
+    const { data, error } = await db
+      .from("mascotas").select("id")
+      .eq("tenant_id", tenantId).eq("client_id", clienteId).eq("name", name).single();
+    if (error || !data) die(`No encontré la mascota demo "${name}"`, error);
+    return data.id;
+  };
+  const firulais = await mascotaPorNombre(juana.id, "Firulais");
+  const michi    = await mascotaPorNombre(juana.id, "Michi");
+
+  const usuarioPorEmail = async (email) => {
+    const { data, error } = await db
+      .from("usuarios").select("id")
+      .eq("tenant_id", tenantId).eq("email", email).single();
+    if (error || !data) die(`No encontré el usuario demo ${email}`, error);
+    return data.id;
+  };
+  const vetId   = await usuarioPorEmail("vet@demo.local");
+  const adminId = await usuarioPorEmail("admin@demo.local");
+
+  const { data: doctor, error: docErr } = await db
+    .from("doctores").select("id")
+    .eq("tenant_id", tenantId).eq("user_id", vetId).single();
+  if (docErr || !doctor) die("No encontré la fila doctores del vet demo", docErr);
+
+  const { data: servicio, error: svErr } = await db
+    .from("servicios").select("id")
+    .eq("tenant_id", tenantId).ilike("nombre", SERVICIO.nombre).single();
+  if (svErr || !servicio) die("No encontré el servicio demo", svErr);
+
+  return { juana, carlos, firulais, michi, vetId, adminId, doctorId: doctor.id, servicioId: servicio.id };
+}
+
+/** Borra la tanda demo anterior (por textos exactos) para reinsertar con fechas frescas. */
+async function purgarDemoPrevia(tenantId) {
+  // Orden por FK/CHECK: una dosis 'Aplicada' referencia su evento de historial
+  // (ON DELETE SET NULL violaría el CHECK de plan_vacunacion) → dosis primero.
+  const pasos = [
+    ["plan_vacunacion",  (q) => q.in("notas", DEMO_DOSIS_NOTAS)],
+    ["historial_clinico", (q) => q.in("description", DEMO_HISTORIAL_DESCRIPCIONES)],
+    ["turnos",           (q) => q.in("reason", DEMO_TURNOS_REASONS)],
+    ["estadias",         (q) => q.in("reason", DEMO_ESTADIAS_REASONS)],
+  ];
+  for (const [tabla, filtro] of pasos) {
+    const { error } = await filtro(db.from(tabla).delete().eq("tenant_id", tenantId));
+    if (error) die(`No pude purgar la tanda demo previa de ${tabla}`, error);
+  }
+}
+
+/** Siembra historial, turnos, estadías y plan de vacunación de demo. */
+async function ensureDemoOperativa(tenantId) {
+  const ctx = await resolverContextoDemo(tenantId);
+  await purgarDemoPrevia(tenantId);
+
+  // — Historial clínico (pasado) —
+  const eventos = [
+    {
+      pet_id: ctx.firulais, date: fechaRel(-90), event_type: "Consulta",
+      description: DEMO_HISTORIAL_DESCRIPCIONES[0],
+      weight_kg: 22.5, temperature_c: 38.5,
+      diagnosis: "Otitis externa leve", treatment: "Limpieza ótica + gotas por 7 días",
+      cliente: ctx.juana,
+    },
+    {
+      pet_id: ctx.firulais, date: fechaRel(-7), event_type: "Control",
+      description: DEMO_HISTORIAL_DESCRIPCIONES[1],
+      weight_kg: 23.1, temperature_c: 38.2,
+      cliente: ctx.juana,
+    },
+    {
+      pet_id: ctx.michi, date: fechaRel(-30), event_type: "Vacunación",
+      description: DEMO_HISTORIAL_DESCRIPCIONES[2],
+      weight_kg: 4.2,
+      cliente: ctx.juana,
+    },
+  ];
+  const eventoIds = [];
+  for (const ev of eventos) {
+    const { cliente, ...campos } = ev;
+    const { data, error } = await db.from("historial_clinico").insert({
+      tenant_id: tenantId,
+      professional_id: ctx.vetId,
+      service_id: ctx.servicioId,
+      client_id_at_time: cliente.id,
+      client_name_at_time: cliente.full_name,
+      ...campos,
+    }).select("id").single();
+    if (error) die("No pude insertar un evento clínico demo", error);
+    eventoIds.push(data.id);
+  }
+  console.log(`✓ Historial demo: ${eventos.length} eventos (Firulais ×2, Michi ×1)`);
+
+  // — Plan de vacunación —
+  const tripleFelina = await tipoVacunaIdPorNombre("Triple Felina");
+  const antirrabica  = await tipoVacunaIdPorNombre("Antirrábica");
+  const dosis = [
+    // Aplicada: linkea el evento 'Vacunación' de Michi (CHECK de la tabla).
+    {
+      pet_id: ctx.michi, tipo_vacuna_id: tripleFelina, fecha_estimada: fechaRel(-30),
+      estado: "Aplicada", evento_aplicacion_id: eventoIds[2], notas: DEMO_DOSIS_NOTAS[0],
+    },
+    { pet_id: ctx.michi, tipo_vacuna_id: antirrabica, fecha_estimada: fechaRel(20),
+      estado: "Pendiente", notas: DEMO_DOSIS_NOTAS[1] },
+    { pet_id: ctx.firulais, tipo_vacuna_id: antirrabica, fecha_estimada: fechaRel(45),
+      estado: "Pendiente", notas: DEMO_DOSIS_NOTAS[2] },
+  ];
+  for (const d of dosis) {
+    const { error } = await db.from("plan_vacunacion").insert({
+      tenant_id: tenantId, created_by: ctx.vetId, ...d,
+    });
+    if (error) die("No pude insertar una dosis demo", error);
+  }
+  console.log("✓ Vacunación demo: 1 aplicada (Michi) + 2 pendientes (Michi +20d, Firulais +45d)");
+
+  // — Turnos (pasados Completado, hoy Confirmado, futuro Programado) —
+  // Los specs E2E agendan a ≥ +30 días (fechaUnica), nunca en esta ventana.
+  const { data: rocky, error: rockyErr } = await db
+    .from("mascotas").select("id")
+    .eq("tenant_id", tenantId).eq("client_id", ctx.carlos.id).eq("name", "Rocky").single();
+  if (rockyErr || !rocky) die("No encontré la mascota demo Rocky", rockyErr);
+
+  const turnos = [
+    { cliente: ctx.juana,  pet_id: ctx.firulais, date: fechaRel(-7), start: "10:00", end: "10:30",
+      status: "Completado", reason: DEMO_TURNOS_REASONS[0] },
+    { cliente: ctx.carlos, pet_id: rocky.id,     date: fechaRel(-2), start: "11:00", end: "11:30",
+      status: "Completado", reason: DEMO_TURNOS_REASONS[1] },
+    { cliente: ctx.juana,  pet_id: ctx.michi,    date: fechaRel(0),  start: "16:00", end: "16:30",
+      status: "Confirmado", reason: DEMO_TURNOS_REASONS[2] },
+    { cliente: ctx.juana,  pet_id: ctx.firulais, date: fechaRel(3),  start: "09:30", end: "10:00",
+      status: "Programado", reason: DEMO_TURNOS_REASONS[3] },
+  ];
+  for (const t of turnos) {
+    const { error } = await db.from("turnos").insert({
+      tenant_id:   tenantId,
+      client_id:   t.cliente.id,
+      pet_id:      t.pet_id,
+      servicio_id: ctx.servicioId,
+      doctor_id:   ctx.doctorId,
+      date:        t.date,
+      start_time:  t.start,
+      end_time:    t.end,
+      status:      t.status,
+      reason:      t.reason,
+    });
+    if (error) die("No pude insertar un turno demo", error);
+  }
+  console.log("✓ Turnos demo: 2 completados, 1 hoy confirmado, 1 programado (+3d)");
+
+  // — Guardería —
+  // Rocky NO se usa: guarderia.spec.ts localiza sus filas por "pet + estado" y
+  // una segunda fila igual rompería el strict mode de Playwright.
+  const estadias = [
+    // Finalizada (terminal: fuera del GIST y del conteo de cupo).
+    {
+      pet_id: ctx.firulais, client_id: ctx.juana.id,
+      check_in_date: fechaRel(-12), check_out_date: fechaRel(-9), status: "Finalizada",
+      reason: DEMO_ESTADIAS_REASONS[0],
+      checked_in_at: timestampRel(-12, "09:00"), checked_out_at: timestampRel(-9, "18:00"),
+    },
+    // En curso: check-in ayer, sale en 2 días.
+    {
+      pet_id: ctx.michi, client_id: ctx.juana.id,
+      check_in_date: fechaRel(-1), check_out_date: fechaRel(2), status: "EnCurso",
+      reason: DEMO_ESTADIAS_REASONS[1],
+      checked_in_at: timestampRel(-1, "09:30"),
+    },
+  ];
+  for (const e of estadias) {
+    const { error } = await db.from("estadias").insert({ tenant_id: tenantId, ...e });
+    if (error) die("No pude insertar una estadía demo", error);
+  }
+  console.log("✓ Guardería demo: 1 finalizada (Firulais) + 1 en curso (Michi, sale +2d)");
+}
+
+/**
+ * "Luna": mascota fallecida por eutanasia vía el RPC REAL (`registrar_eutanasia`),
+ * para que la demo muestre el badge Fallecida, el evento en el timeline y la
+ * dosis Cancelada (RN-PV4). Irreversible por diseño → solo si Luna no existe;
+ * sus filas (evento, dosis cancelada, asiento) nunca se purgan.
+ */
+async function ensureLunaEutanasia(tenantId) {
+  const ctx = await resolverContextoDemo(tenantId);
+
+  const { data: existe, error: selErr } = await db
+    .from("mascotas").select("id")
+    .eq("tenant_id", tenantId).eq("client_id", ctx.carlos.id).eq("name", "Luna")
+    .maybeSingle();
+  if (selErr) die("No pude consultar la mascota Luna", selErr);
+  if (existe) {
+    console.log("• Luna (fallecida) ya existe — no se toca (irreversible)");
+    return;
+  }
+
+  const especieId = await especieIdPorNombre("Perro");
+  const razaId = await razaIdPorNombre(especieId, "Mestizo");
+  const { data: luna, error: insErr } = await db.from("mascotas").insert({
+    tenant_id: tenantId, name: "Luna", client_id: ctx.carlos.id,
+    especie_id: especieId, raza_id: razaId,
+    sex: "Hembra", tamano: "Pequeño", alimento_dieta: "Balanceado senior",
+    estado: "Activa",
+  }).select("id").single();
+  if (insErr) die("No pude crear la mascota Luna", insErr);
+
+  // Historia mínima previa + dosis Pendiente que la eutanasia cancelará (RN-PV4).
+  const { error: evErr } = await db.from("historial_clinico").insert({
+    tenant_id: tenantId, pet_id: luna.id, professional_id: ctx.vetId,
+    service_id: ctx.servicioId, date: fechaRel(-40), event_type: "Consulta",
+    description: "Consulta por decaimiento y pérdida de apetito",
+    weight_kg: 6.8, diagnosis: "Insuficiencia renal crónica avanzada",
+    client_id_at_time: ctx.carlos.id, client_name_at_time: ctx.carlos.full_name,
+  });
+  if (evErr) die("No pude insertar la consulta previa de Luna", evErr);
+
+  const quintuple = await tipoVacunaIdPorNombre("Quíntuple Canina");
+  const { error: dosisErr } = await db.from("plan_vacunacion").insert({
+    tenant_id: tenantId, pet_id: luna.id, tipo_vacuna_id: quintuple,
+    fecha_estimada: fechaRel(30), estado: "Pendiente", created_by: ctx.vetId,
+    notas: "Refuerzo programado antes del diagnóstico",
+  });
+  if (dosisErr) die("No pude insertar la dosis pendiente de Luna", dosisErr);
+
+  const { error: rpcErr } = await db.rpc("registrar_eutanasia", {
+    p_tenant_id:       tenantId,
+    p_pet_id:          luna.id,
+    p_professional_id: ctx.vetId,
+    p_user_id:         ctx.adminId,
+    p_date:            fechaRel(-15),
+    p_description:     "Eutanasia humanitaria por insuficiencia renal terminal, con consentimiento del dueño",
+    p_confirmed:       true,
+    p_weight_kg:       6.1,
+    p_diagnosis:       "Insuficiencia renal crónica terminal",
+  });
+  if (rpcErr) die("registrar_eutanasia (RPC) falló para Luna", rpcErr);
+  console.log("✓ Luna creada y eutanasiada vía RPC real (evento + Fallecida + dosis cancelada RN-PV4)");
+}
+
+// ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
 async function main() {
@@ -451,6 +762,10 @@ async function main() {
 
   console.log("\n— Turnos (servicio + horario) —");
   await ensureServicioYHorario(tenantId);
+
+  console.log("\n— Demo operativa (historial, turnos, guardería, vacunación) —");
+  await ensureDemoOperativa(tenantId);
+  await ensureLunaEutanasia(tenantId);
 
   console.log("\n✓ Seed completo. Credenciales (todas con password " + PASSWORD + "):");
   for (const u of USERS) console.log(`    ${u.roleName.padEnd(13)} ${u.email}`);
