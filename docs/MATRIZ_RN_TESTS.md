@@ -51,6 +51,20 @@ esta sub-sesión deja solo RN-AUD4 pendiente (grupo D, diferida a S11 por decisi
 | :-: | :-: | :-: | :-: |
 | 167 | 166 | 1 | 99,4 % |
 
+**Actualizado en Etapa 9 — S11 (cierre):** se cerró RN-AUD4 (retención de auditoría, DT-9):
+migración `20260707000002_purga_auditoria.sql` (`purgar_auditoria(p_meses DEFAULT 12)` + job
+pg_cron `auditoria-purga-semanal`, política MVP global de 12 meses) + test de integración
+`tests/integration/auditoria-retencion.integration.test.ts` (purga selectiva multi-tenant,
+guard de horizonte y EXECUTE revocado a `anon`). **La matriz queda completa:**
+
+| Total RN en docs | Con test (título) | Sin test | Cobertura |
+| :-: | :-: | :-: | :-: |
+| 167 | 167 | 0 | 100 % |
+
+Suites al cierre de S11 (todas en verde): typecheck, unit **417** tests / 36 archivos,
+integración **149** tests / 15 archivos, componentes web **286** tests / 39 archivos,
+E2E Playwright **18** tests / 7 archivos.
+
 ---
 
 ## Tabla completa por prefijo
@@ -61,7 +75,7 @@ esta sub-sesión deja solo RN-AUD4 pendiente (grupo D, diferida a S11 por decisi
 | RN-AUD1 | ✅ | `tests/unit/auditoria.service.test.ts` |
 | RN-AUD2 | ✅ | `tests/unit/auditoria.service.test.ts` |
 | RN-AUD3 | ✅ | `tests/unit/auditoria.controller.test.ts` |
-| RN-AUD4 | ❌ | — |
+| RN-AUD4 | ✅ | `tests/integration/auditoria-retencion.integration.test.ts` (S11) |
 | RN-AUD5 | ✅ | `tests/unit/auditoria.service.test.ts` |
 
 #### RN-AUT
@@ -411,14 +425,15 @@ integración liviano que decodifica `exp`). ✅ Cubierto en S5, sin hallazgos de
   `tests/unit/requireModule.test.ts` y en integración de módulos bajo RN-SM2..4. S5 agregó la
   cita cruzada (`"RN-SM1: ..."`) en los dos primeros `it()` del archivo.
 
-### D. No implementada — decisión de producto (1 restante tras S5)
+### D. No implementada — decisión de producto (0 restantes tras S11)
 
 - **RN-AUD4** (retención de auditoría): la parte de **índices** se **verificó en S10**
   (`docs/EXPLAIN_INDICES.md`): los de fecha (`idx_auditoria_tenant_ts`) y módulo ya cubrían;
   se agregó `idx_auditoria_usuario (tenant_id, user_id, "timestamp" DESC)` justificado por
-  EXPLAIN (migración `20260707000001_indices_listados.sql`). La **política de retención**
-  (N registros / X meses) sigue sin implementar (DT-9); decidir en S11 si entra al MVP o queda
-  post-MVP documentada. La fila sigue ❌ porque la RN es la retención, no los índices.
+  EXPLAIN (migración `20260707000001_indices_listados.sql`). ~~La política de retención sigue
+  sin implementar~~ — **✅ resuelta en S11 (DT-9, entró al MVP):** `purgar_auditoria(p_meses
+  DEFAULT 12)` + job pg_cron semanal (`20260707000002_purga_auditoria.sql`), con test de
+  integración propio. Política global de 12 meses; la variante por-tenant queda post-MVP.
 - ~~RN-SEC0 figura también en A6~~ — ✅ resuelta en S5 dentro de A6: la parte modelada (roles
   N:M) ya estaba decidida: solo faltaba el test, escrito junto con RN-SEC2 en
   `usuarios.service.test.ts`.
