@@ -377,7 +377,7 @@ hallazgos de producto.
 | RN-EC12 | Irreversibilidad: NO existe vía para revertir `Fallecida` (test negativo) | integración eutanasia |
 | RN-ES2 | Turno Completado se excluye de agenda activa | `turnos.service` |
 | RN-MC4 | Turno Cancelado se excluye de agenda activa | `turnos.service` |
-| RN-HC5 | Timeline paginado por mascota (el índice `(pet_id, date)` ya existe en DDL; verificación de plan → S10) | `historial.service` |
+| RN-HC5 | Timeline paginado por mascota (índice `(pet_id, date)` existe en DDL; **plan verificado en S10** → `docs/EXPLAIN_INDICES.md` Q6: Bitmap Index Scan sobre `idx_historial_pet_date`) | `historial.service` |
 | RN-CL6 | Validación dual front/back (un caso representativo Zod ↔ inline) | schema + component test |
 | RN-G1 | Dependencia de módulos vendibles respecto del Core (gating de navegación) | `navigation.test` |
 
@@ -413,9 +413,12 @@ integración liviano que decodifica `exp`). ✅ Cubierto en S5, sin hallazgos de
 
 ### D. No implementada — decisión de producto (1 restante tras S5)
 
-- **RN-AUD4** (retención de auditoría): los índices por fecha/módulo se verifican en S10, pero
-  la **política de retención** (N registros / X meses) no está implementada. Registrada como
-  DT-9 en TODO.md; decidir en S11 si entra al MVP o queda post-MVP documentada. Sigue ❌.
+- **RN-AUD4** (retención de auditoría): la parte de **índices** se **verificó en S10**
+  (`docs/EXPLAIN_INDICES.md`): los de fecha (`idx_auditoria_tenant_ts`) y módulo ya cubrían;
+  se agregó `idx_auditoria_usuario (tenant_id, user_id, "timestamp" DESC)` justificado por
+  EXPLAIN (migración `20260707000001_indices_listados.sql`). La **política de retención**
+  (N registros / X meses) sigue sin implementar (DT-9); decidir en S11 si entra al MVP o queda
+  post-MVP documentada. La fila sigue ❌ porque la RN es la retención, no los índices.
 - ~~RN-SEC0 figura también en A6~~ — ✅ resuelta en S5 dentro de A6: la parte modelada (roles
   N:M) ya estaba decidida: solo faltaba el test, escrito junto con RN-SEC2 en
   `usuarios.service.test.ts`.
