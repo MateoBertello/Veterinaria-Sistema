@@ -27,7 +27,7 @@ plan de **RN-HC5**. La política de **retención** de auditoría NO entra acá
 | Q2a | Turnos rango mensual (sintético `date BETWEEN`) | `tenant_id`,`date` rango | Bitmap Index Scan | `idx_turnos_tenant_fecha` | **Ya cubierto** |
 | Q2b | Barrido recordatorios turnos (`notificaciones.service`) | `tenant_id`,`status IN`,`date` rango | Bitmap Index Scan | `idx_turnos_tenant_fecha` | **Ya cubierto** |
 | Q3 | Estadías por rango (`guarderia.service`) | `tenant_id`,`status IN`,`check_in≤`,`check_out≥` | Bitmap Index Scan | `idx_estadias_tenant_rango` | **Ya cubierto** |
-| Q4a | Clientes listado (`clientes.service`) | `tenant_id`,`deleted`; ord `created_at` | Seq Scan + top-N | (embed count vía `idx_mascotas_cliente`) | **Seq scan aceptable** (cientos de filas/tenant) |
+| Q4a | Clientes listado (`clientes.service`) | `tenant_id`,`deleted`; ord `created_at` | Seq Scan + top-N | (embed count vía `idx_mascotas_cliente`) | ~~Seq scan aceptable~~ → **revisada pre-deploy: `idx_clientes_listado`** ✅ (ver §Q4a revisada) |
 | Q4b | Clientes búsqueda ILIKE | `... OR ILIKE '%t%'` sobre 3 cols | Seq Scan + filtro | — | **Seq scan aceptable**; pg_trgm no justificado |
 | Q5 | Mascotas búsqueda ILIKE (`mascotas.service`) | `name ILIKE '%t%'` | Seq Scan + filtro | — | **Seq scan aceptable**; pg_trgm no justificado |
 | Q6 | Historial timeline por mascota (`historial.service`, **RN-HC5**) | `tenant_id`,`pet_id`,`deleted`; ord `date DESC` | Bitmap Index Scan | `idx_historial_pet_date` | **Ya cubierto — RN-HC5 verificado** |
@@ -37,8 +37,12 @@ plan de **RN-HC5**. La política de **retención** de auditoría NO entra acá
 | Q8a | Barrido avisos vacunación (`notificaciones.service`, **RN-PV6/7**) | `tenant_id`,`estado`,`fecha_estimada` rango | Bitmap Index Scan | `idx_planvac_tenant_barrido` | **Ya cubierto** |
 | Q8b | Plan vacunación por mascota (`vacunacion.service`) | `tenant_id`,`pet_id`; ord `fecha_estimada` | Bitmap Index Scan | `idx_planvac_pet` | **Ya cubierto** |
 
-**Único índice agregado:** `idx_auditoria_usuario (tenant_id, user_id, "timestamp" DESC)`
+**Único índice agregado en S10:** `idx_auditoria_usuario (tenant_id, user_id, "timestamp" DESC)`
 (migración `20260707000001_indices_listados.sql`).
+
+**Agregados después, en el hardening pre-deploy (2026-07-10):** `idx_clientes_listado`
+e `idx_mascotas_listado` (migración `20260710000002_indices_listado_clientes_mascotas.sql`)
+— revisión de Q4a con volumen de clínica grande, ver §"Q4a revisada" al final.
 
 ---
 
@@ -160,6 +164,63 @@ fuera del alcance de S10 (perf/índices, no features).
 
 ---
 
+## Q4a revisada (hardening pre-deploy, 2026-07-10) — listados por defecto de Clientes y Mascotas
+
+La decisión original de S10 ("Seq scan aceptable") se tomó a escala demo
+(~600 clientes / ~2.000 mascotas por tenant). El análisis de performance
+pre-deploy pidió re-medir a escala de producción de una clínica grande. El
+volumen de S10 ya no existía (barrido por el `db reset` del squash DT-8), así
+que se regeneró con la misma metodología: tenants sintéticos `2222…`/`3333…`,
+**4.750 clientes / 11.400 mascotas vivas** en el tenant grande, `ANALYZE` tras
+la carga. La query medida es la real de `listar()` en ambos services:
+`tenant_id = ? AND deleted = false ORDER BY created_at DESC LIMIT 20 OFFSET n`,
+más el `count` "exact" que PostgREST ejecuta con los mismos filtros en cada
+página. Mascotas no tenía medición del listado por defecto en S10 (solo la
+búsqueda ILIKE, Q5).
+
+### ANTES (sin índice) — tenant `2222…`
+
+```
+-- Clientes página 1
+Limit → Sort (top-N heapsort) → Seq Scan on clientes
+  Filter: ((NOT deleted) AND (tenant_id = '2222…'))  Rows Removed: 1.261
+  Buffers: shared hit=119   Execution Time: 1,963 ms
+
+-- Mascotas página 1
+Limit → Sort (top-N heapsort) → Seq Scan on mascotas (rows=11.400)
+  Buffers: shared hit=265   Execution Time: 3,629 ms
+
+-- Count exact (corre en CADA página): Seq Scan, 116/265 buffers
+-- Offset profundo (pág. 200/500): quicksort completo, 2,2 / 5,5 ms
+```
+
+### DESPUÉS (índices parciales `WHERE NOT deleted`)
+
+```
+-- Clientes página 1: Index Scan using idx_clientes_listado
+  Buffers: 21   Execution Time: 0,058 ms   (~33×)
+
+-- Mascotas página 1: Index Scan using idx_mascotas_listado
+  Buffers: 22   Execution Time: 0,038 ms   (~95×)
+
+-- Count exact mascotas: Index Only Scan, Heap Fetches: 0 (265 → 59 buffers)
+-- Offset profundo: sin Sort (1,2 / 3,6 ms) — el OFFSET sigue O(n), inherente
+```
+
+**Decisión:** se aplican los dos índices parciales
+(`20260710000002_indices_listado_clientes_mascotas.sql`). El patrón ANTES es
+Seq Scan + Sort **en cada carga de página** del listado más caliente de cada
+módulo, con costo lineal en el tamaño del tenant; el índice lo vuelve O(páginas
+del resultado) y de paso sirve el count. Los soft-deleted quedan fuera del
+índice (parcial), y el `DESC` sirve el `ORDER BY` sin Sort. Las búsquedas
+ILIKE (Q4b/Q5) no cambian: siguen en Seq Scan aceptable, pg_trgm sigue sin
+justificarse.
+
+**Verificación:** sin test vitest (PostgREST no expone `pg_indexes` y el repo
+no tiene driver Postgres — mismo criterio que `idx_auditoria_usuario` de S10).
+La evidencia es este EXPLAIN reproducible; los tests funcionales de listados
+existentes cubren que el comportamiento no cambia.
+
 ## Reproducción
 
 ```bash
@@ -168,3 +229,10 @@ PSQL="postgresql://postgres:postgres@127.0.0.1:54322/postgres"
 psql "$PSQL" -f scratchpad/s10_seed_volumen.sql   # volumen sintético (no versionado)
 psql "$PSQL" -f scratchpad/s10_explain.sql        # los EXPLAIN de arriba
 ```
+
+Los scripts de S10 no se versionaron y ya no existen. Para la revisión Q4a
+(pre-deploy) se recrearon equivalentes: `predeploy_seed_volumen.sql` (tenants
+`2222…`/`3333…`, no toca el demo) y `predeploy_explain.sql` (ANTES/DESPUÉS; el
+DESPUÉS crea los índices en una transacción con ROLLBACK). Quedaron en el
+scratchpad de la sesión de hardening — también no versionados; recrearlos es
+trivial a partir de la metodología de arriba.
