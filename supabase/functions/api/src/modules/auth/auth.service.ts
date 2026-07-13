@@ -175,13 +175,26 @@ export const AuthService = {
   async logout(params: LogoutParams): Promise<void> {
     const serviceDb = getServiceDb();
 
-    // Llamar admin.signOut — invalida el token en Supabase
+    // admin.signOut invalida el token en GoTrue, que además VERIFICA firma y
+    // sesión en esa misma llamada (forjado → bad_jwt; ya deslogueado →
+    // session_not_found). El tenantId/userId de params viene de un JWT solo
+    // decodificado (tenantContext no verifica firma): si GoTrue rechaza el
+    // token, esa identidad no es confiable y NO debe asentarse auditoría.
     const userDb = getDb(params.accessToken);
-    await (userDb.auth.admin as {
+    const { error } = await (userDb.auth.admin as {
       signOut: (token: string) => Promise<{ error: unknown }>;
     }).signOut(params.accessToken.replace("Bearer ", ""));
 
-    // Auditoría LOGOUT (RN-AUT4)
+    if (error) {
+      throw new DomainError(
+        ErrorCode.UNAUTHORIZED,
+        401,
+        "Token de autenticación inválido",
+      );
+    }
+
+    // Auditoría LOGOUT (RN-AUT4) — solo con identidad verificada por GoTrue:
+    // la firma cubre el payload, así que los claims decodificados son genuinos.
     await recordAudit(serviceDb as unknown as SupabaseClient, {
       tenantId: params.tenantId,
       userId:   params.userId,

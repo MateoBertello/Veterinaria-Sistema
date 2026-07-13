@@ -223,6 +223,35 @@ describe("RN-AUT4: Auditoría de login/logout", () => {
     expect(auditCall.module).toBe("security");
     expect(auditCall.userId).toBe(USER_ID);
   });
+
+  it("RN-AUT4: logout con token inválido → UNAUTHORIZED y NO registra auditoría", async () => {
+    const serviceDb = buildChain();
+    mockGetServiceDb.mockReturnValue(serviceDb as never);
+
+    // GoTrue rechaza el token (forjado o vencido): admin.signOut devuelve error.
+    const userDb = buildChain({
+      signOut: vi.fn().mockResolvedValue({
+        error: { message: "invalid JWT: unable to parse or verify signature", status: 403 },
+      }),
+    });
+    mockGetDb.mockReturnValue(userDb as never);
+
+    await expect(
+      AuthService.logout({
+        userId:      "usuario-forjado",
+        tenantId:    "tenant-forjado",
+        userName:    "unknown",
+        userRole:    "unknown",
+        accessToken: "Bearer token-forjado",
+      }),
+    ).rejects.toMatchObject({
+      code:       ErrorCode.UNAUTHORIZED,
+      statusCode: 401,
+    });
+
+    // La identidad decodificada del token NO verificado nunca llega a auditoría.
+    expect(mockRecordAudit).not.toHaveBeenCalled();
+  });
 });
 
 // ─── RN-AUT5: rate limiting ───────────────────────────────────────────────────

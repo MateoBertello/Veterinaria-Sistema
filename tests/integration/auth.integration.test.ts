@@ -317,4 +317,40 @@ describeIntegration("RN-AUT4: auditoría de logout", () => {
 
     expect((despues ?? 0)).toBeGreaterThan((antes ?? 0));
   });
+
+  it("RN-AUT4: logout con token forjado → 401 y NO contamina la auditoría del tenant víctima", async () => {
+    if (skipIfNoCredentials()) return;
+
+    // El ataque real: JWT bien formado que apunta al tenant_id de un tenant
+    // EXISTENTE (la víctima) con un usuario inventado, firmado con basura.
+    // Pasa el decode de tenantContext; GoTrue lo rechaza (bad_jwt). Antes del
+    // fix, el asiento LOGOUT se escribía igual en la auditoría de la víctima
+    // (tenant_id tiene FK a tenants: un tenant inexistente no reproduce el bug).
+    const usuarioForjado = "88888888-8888-4888-8888-888888888888";
+    const b64url = (obj: unknown) =>
+      Buffer.from(JSON.stringify(obj)).toString("base64url");
+    const jwtForjado = [
+      b64url({ alg: "HS256", typ: "JWT" }),
+      b64url({
+        sub:          usuarioForjado,
+        role:         "authenticated",
+        exp:          Math.floor(Date.now() / 1000) + 3600,
+        app_metadata: { tenant_id: tenantId },
+      }),
+      "firma-forjada",
+    ].join(".");
+
+    const res = await callApp("/auth/logout", { method: "POST", jwt: jwtForjado });
+    expect(res.status).toBe(401);
+
+    // Ningún asiento LOGOUT quedó escrito a nombre de la identidad forjada.
+    const { count } = await serviceDb
+      .from("registros_auditoria")
+      .select("*", { count: "exact", head: true })
+      .eq("tenant_id", tenantId)
+      .eq("user_id", usuarioForjado)
+      .eq("action", "LOGOUT");
+
+    expect(count ?? 0).toBe(0);
+  });
 });
