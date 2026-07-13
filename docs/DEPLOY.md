@@ -50,6 +50,7 @@ ya aplicadas no se editan jamás: todo cambio de esquema es una migración nueva
 | `NOTIF_FROM_EMAIL` | Sí (notificaciones) | Remitente verificado, ej. `Veterinaria Leo <turnos@tu-dominio.com>`. Para pruebas sin dominio: `Nombre <onboarding@resend.dev>`. |
 | `CRON_SECRET` | Sí (cron) | Valor aleatorio largo. Autoriza `POST /internal/notificaciones/procesar` (header `X-Cron-Secret`). Fail-closed: sin él, la ruta interna rechaza todo. |
 | `AUTH_REDIRECT_URL` | Sí | URL del front para el mail de recuperación de contraseña, ej. `https://app.tu-dominio.com/reset-password` (default: `http://localhost:3000/reset-password`). |
+| `CORS_ALLOWED_ORIGINS` | Según hosting | Lista separada por comas de orígenes del front (ej. `https://app.tu-dominio.com`). La allowlist nunca es `*` (fallback dev: `localhost:5173`). Solo interviene si el front llama a la función **directo** (cross-origin); con el proxy same-origin del §4 el navegador no dispara CORS. |
 
 ## 3. Secrets de Vault — cron de notificaciones (DT-10)
 
