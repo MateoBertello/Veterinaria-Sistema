@@ -1,9 +1,14 @@
 /**
- * Tests de integración — GRANTs de `anon` (DT-5, Etapa 9 — S3).
+ * Tests de integración — GRANTs de `anon` (DT-5, Etapa 9 — S3)
+ * y EXECUTE de funciones (hardening pre-deploy).
  *
  * Verifica que la migración `20260706000001_revoke_anon_grants.sql` dejó a
- * `anon` sin privilegios sobre `public` (DML y SELECT), y que `authenticated`
- * sigue pudiendo leer los catálogos globales sin regresión.
+ * `anon` sin privilegios sobre `public` (DML y SELECT), que `authenticated`
+ * sigue pudiendo leer los catálogos globales sin regresión, y que
+ * `20260710000001_revoke_execute_funciones.sql` dejó las RPCs sensibles
+ * (SECURITY DEFINER con p_tenant_id por parámetro) ejecutables SOLO por
+ * service_role: ni `anon` ni `authenticated` pueden invocarlas por
+ * /rest/v1/rpc saltándose la Edge Function.
  *
  * Requieren un proyecto Supabase real con las migraciones aplicadas.
  * Configurar en .env: TEST_SUPABASE_URL / TEST_SUPABASE_SERVICE_ROLE_KEY.
@@ -103,6 +108,55 @@ describeIntegration("DT-5: anon sin SELECT sobre catálogos globales", () => {
     if (skipIfNoCredentials()) return;
     const { error } = await anonClient().from("especies").select("*");
     expect(error?.code).toBe("42501");
+  });
+});
+
+describeIntegration("pre-deploy: EXECUTE de funciones acotado a service_role", () => {
+  // Argumentos dummy con nombres exactos: PostgREST resuelve la función por
+  // firma, y el chequeo de EXECUTE ocurre ANTES de ejecutar el cuerpo, así
+  // que ningún test produce efectos.
+  const argsCambiarDueno = {
+    p_tenant_id:     "00000000-0000-0000-0000-000000000001",
+    p_pet_id:        "00000000-0000-0000-0000-000000000002",
+    p_new_client_id: "00000000-0000-0000-0000-000000000003",
+    p_recorded_by:   "00000000-0000-0000-0000-000000000004",
+  };
+
+  it("anon no puede ejecutar cambiar_dueno_mascota (42501)", async () => {
+    if (skipIfNoCredentials()) return;
+    const { error } = await anonClient().rpc("cambiar_dueno_mascota", argsCambiarDueno);
+    expect(error?.code).toBe("42501");
+  });
+
+  it("anon no puede ejecutar crear_tenant (42501)", async () => {
+    if (skipIfNoCredentials()) return;
+    const { error } = await anonClient().rpc("crear_tenant", {
+      p_nombre: "x", p_cuit_rut: "x", p_email_contacto: "x@x.com", p_plan: "basico",
+    });
+    expect(error?.code).toBe("42501");
+  });
+
+  it("anon no puede ejecutar on_tenant_created (42501)", async () => {
+    if (skipIfNoCredentials()) return;
+    const { error } = await anonClient().rpc("on_tenant_created", {
+      p_tenant_id: "00000000-0000-0000-0000-000000000001",
+    });
+    expect(error?.code).toBe("42501");
+  });
+
+  it("authenticated tampoco puede ejecutar cambiar_dueno_mascota (42501)", async () => {
+    if (skipIfNoCredentials()) return;
+    const { error } = await userClient(jwt).rpc("cambiar_dueno_mascota", argsCambiarDueno);
+    expect(error?.code).toBe("42501");
+  });
+
+  it("service_role conserva EXECUTE (llega al error de negocio, no a 42501)", async () => {
+    if (skipIfNoCredentials()) return;
+    const serviceDb = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, { auth: { persistSession: false } });
+    const { error } = await serviceDb.rpc("cambiar_dueno_mascota", argsCambiarDueno);
+    // P0001 = RAISE EXCEPTION 'MASCOTA_NOT_FOUND': la función SÍ se ejecutó.
+    expect(error?.code).toBe("P0001");
+    expect(error?.message).toContain("MASCOTA_NOT_FOUND");
   });
 });
 
