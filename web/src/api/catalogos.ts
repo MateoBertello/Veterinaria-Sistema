@@ -2,19 +2,36 @@ import { ApiError } from "../types/index.ts";
 import type { Especie, Raza } from "../types/index.ts";
 
 // Catálogos globales (especies, razas) se leen por PostgREST directo — sin pasar
-// por Controller/Service de Hono — a través del mismo proxy Vite que el resto del
-// front (/rest/v1/*). La apikey la inyecta el proxy (server-side, vite.config.ts),
-// el front solo envía el Bearer del usuario igual que con apiClient.
+// por Controller/Service de Hono. Dos modos según el hosting:
+//
+//  • DEV / hosting con reverse proxy: fetch relativo a /rest/v1/*; la apikey la
+//    inyecta el proxy server-side (vite.config.ts en dev, nginx en prod) y nunca
+//    entra al bundle. Es el modo por defecto (sin VITE_SUPABASE_*).
+//  • Hosting estático sin proxy (Vercel/Netlify): se setean VITE_SUPABASE_URL y
+//    VITE_SUPABASE_ANON_KEY en el build y el fetch va directo a Supabase con la
+//    anon key en el bundle. La anon key es pública por diseño (solo identifica
+//    el proyecto); la barrera real son RLS y el Bearer del usuario, igual que en
+//    el modo proxy.
+//
+// En ambos modos el front envía el Bearer del usuario igual que con apiClient.
+const SUPABASE_URL = import.meta.env["VITE_SUPABASE_URL"] as string | undefined;
+const SUPABASE_ANON_KEY = import.meta.env["VITE_SUPABASE_ANON_KEY"] as string | undefined;
+const MODO_DIRECTO = Boolean(SUPABASE_URL && SUPABASE_ANON_KEY);
+
 async function postgrest<T>(path: string): Promise<T[]> {
   const token = localStorage.getItem("sb-token");
   const headers: Record<string, string> = {};
   if (token) {
     headers["Authorization"] = `Bearer ${token}`;
   }
+  if (MODO_DIRECTO) {
+    headers["apikey"] = SUPABASE_ANON_KEY as string;
+  }
+  const base = MODO_DIRECTO ? `${SUPABASE_URL}/rest/v1/` : "/rest/v1/";
 
   let res: Response;
   try {
-    res = await fetch(`/rest/v1/${path}`, { headers });
+    res = await fetch(`${base}${path}`, { headers });
   } catch (err) {
     throw new ApiError("NETWORK_ERROR", 0, "No se pudo conectar con el servidor", [err]);
   }

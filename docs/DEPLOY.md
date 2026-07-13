@@ -87,20 +87,32 @@ SELECT jobname, schedule FROM cron.job;
 
 | Variable | Uso |
 | :--- | :--- |
-| `VITE_API_URL` | Base de la API. Si el hosting proxea `/api/v1` (recomendado, ver abajo) puede omitirse (default: `/api/v1`, path relativo). |
+| `VITE_API_URL` | Base de la API. Hosting estático: `https://<project-ref>.supabase.co/functions/v1/api/api/v1`. Con reverse proxy puede omitirse (default: `/api/v1`, relativo). |
+| `VITE_SUPABASE_URL` | Solo hosting estático: `https://<project-ref>.supabase.co`. Junto con la anon key activa el **modo directo** de catálogos (`web/src/api/catalogos.ts`). |
+| `VITE_SUPABASE_ANON_KEY` | Solo hosting estático: anon key del proyecto. Es pública por diseño (identifica el proyecto; RLS + Bearer del usuario son la barrera — `anon` no tiene ni SELECT desde DT-5). |
 | `VITE_SENTRY_DSN` | DSN frontend. Sin ella, Sentry del front es no-op (el ErrorBoundary sigue funcionando). |
 | `VITE_SENTRY_ENVIRONMENT` | Opcional (default: modo de Vite). |
 
-### Rutas que el hosting debe resolver
+### Opción A — Hosting estático sin proxy (Vercel / Netlify)
 
-En dev las resuelve el proxy de Vite (`web/vite.config.ts`); en prod el hosting
-tiene que replicarlas:
+Setear las 3 primeras variables de la tabla en el build. El front llama a la
+Edge Function y a PostgREST **directo** (cross-origin), así que además hay que
+setear el secret `CORS_ALLOWED_ORIGINS` (§2) con el dominio del front. El SPA
+fallback ya está en el repo: `web/vercel.json` (Vercel) y `web/public/_redirects`
+(Netlify). Config del proyecto en el hosting: root `web/`, build `npm run build`,
+output `dist/`.
+
+Cobertura de test del modo directo: `web/src/api/catalogos.test.ts` (URL
+absoluta + apikey; el modo proxy sigue siendo el default sin las variables).
+
+### Opción B — Reverse proxy propio (nginx/Caddy en VPS)
+
+Mantiene la anon key fuera del bundle y todo same-origin (CORS no interviene).
+El proxy replica las rutas del dev (`web/vite.config.ts`):
 
 1. `/api/v1/*` → `https://<project-ref>.supabase.co/functions/v1/api/api/v1/*` (la API Hono; mismo doble `api` del §3).
-2. `/rest/v1/*` → `https://<project-ref>.supabase.co/rest/v1/*` **inyectando el header `apikey: <anon-key>`** server-side (catálogos globales por PostgREST directo: `especies`, `razas`, `tipos_vacuna`; el usuario aporta su `Authorization: Bearer`).
+2. `/rest/v1/*` → `https://<project-ref>.supabase.co/rest/v1/*` **inyectando el header `apikey: <anon-key>`** server-side (catálogos globales: `especies`, `razas`, `tipos_vacuna`; el usuario aporta su `Authorization: Bearer`).
 3. SPA fallback: todo lo demás → `index.html`.
-
-Ejemplo nginx:
 
 ```nginx
 location /api/v1/ {
@@ -114,13 +126,6 @@ location /rest/v1/ {
 }
 location / { try_files $uri /index.html; }
 ```
-
-Alternativa sin proxy (hostings sin inyección de headers): setear
-`VITE_API_URL=https://<project-ref>.supabase.co/functions/v1/api/api/v1` y
-exponer la anon key en el bundle para `/rest/v1`. La anon key es pública por
-diseño (RLS es la barrera real); hoy el código del front espera la apikey
-inyectada por proxy, así que esta variante requiere un ajuste menor en
-`web/src/api/catalogos.ts`. Preferir el proxy.
 
 ## 5. Bootstrap de datos (entorno nuevo)
 
