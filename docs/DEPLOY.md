@@ -63,9 +63,12 @@ SELECT vault.create_secret('<mismo valor que CRON_SECRET>', 'cron_notif_secret')
 SELECT vault.create_secret('<URL completa del endpoint>',   'cron_notif_url');
 ```
 
-**Gotcha del path** (función `api` + basePath `/api/v1` → el segmento `api` se repite en prod):
+**Path del endpoint** (SINGLE `api`, no doble). Supabase strippea solo `/functions/v1`
+y conserva el nombre de la función (`api`), que coincide con el primer segmento del
+basePath de Hono (`/api/v1`) → ese `api` se comparte, no se repite. Verificado contra
+prod: single `api` → la ruta matchea; doble `api` → 404.
 
-- Producción: `https://<project-ref>.supabase.co/functions/v1/api/api/v1/internal/notificaciones/procesar`
+- Producción: `https://<project-ref>.supabase.co/functions/v1/api/v1/internal/notificaciones/procesar`
 - Local (pg_net corre dentro del contenedor de DB): `http://host.docker.internal:54321/functions/v1/api/v1/internal/notificaciones/procesar`
 
 Sin estos secrets, `disparar_notificaciones()` hace `RAISE WARNING` y no dispara
@@ -87,7 +90,7 @@ SELECT jobname, schedule FROM cron.job;
 
 | Variable | Uso |
 | :--- | :--- |
-| `VITE_API_URL` | Base de la API. Hosting estático: `https://<project-ref>.supabase.co/functions/v1/api/api/v1`. Con reverse proxy puede omitirse (default: `/api/v1`, relativo). |
+| `VITE_API_URL` | Base de la API. Hosting estático: `https://<project-ref>.supabase.co/functions/v1/api/v1` (single `api`). Con reverse proxy puede omitirse (default: `/api/v1`, relativo). |
 | `VITE_SUPABASE_URL` | Solo hosting estático: `https://<project-ref>.supabase.co`. Junto con la anon key activa el **modo directo** de catálogos (`web/src/api/catalogos.ts`). |
 | `VITE_SUPABASE_ANON_KEY` | Solo hosting estático: anon key del proyecto. Es pública por diseño (identifica el proyecto; RLS + Bearer del usuario son la barrera — `anon` no tiene ni SELECT desde DT-5). |
 | `VITE_SENTRY_DSN` | DSN frontend. Sin ella, Sentry del front es no-op (el ErrorBoundary sigue funcionando). |
@@ -110,13 +113,13 @@ absoluta + apikey; el modo proxy sigue siendo el default sin las variables).
 Mantiene la anon key fuera del bundle y todo same-origin (CORS no interviene).
 El proxy replica las rutas del dev (`web/vite.config.ts`):
 
-1. `/api/v1/*` → `https://<project-ref>.supabase.co/functions/v1/api/api/v1/*` (la API Hono; mismo doble `api` del §3).
+1. `/api/v1/*` → `https://<project-ref>.supabase.co/functions/v1/api/v1/*` (la API Hono; single `api`, ver §3).
 2. `/rest/v1/*` → `https://<project-ref>.supabase.co/rest/v1/*` **inyectando el header `apikey: <anon-key>`** server-side (catálogos globales: `especies`, `razas`, `tipos_vacuna`; el usuario aporta su `Authorization: Bearer`).
 3. SPA fallback: todo lo demás → `index.html`.
 
 ```nginx
 location /api/v1/ {
-  proxy_pass https://<project-ref>.supabase.co/functions/v1/api/api/v1/;
+  proxy_pass https://<project-ref>.supabase.co/functions/v1/api/v1/;
   proxy_set_header Host <project-ref>.supabase.co;
 }
 location /rest/v1/ {
@@ -155,7 +158,7 @@ Credenciales que deja: `admin@demo.local` / `vet@demo.local` /
 
 ## 6. Checklist post-deploy
 
-- [ ] `GET https://<project-ref>.supabase.co/functions/v1/api/api/v1/especies` sin JWT → `401` con envelope `{ success: false, ... }` (la función corre y el auth gatea).
+- [ ] `GET https://<project-ref>.supabase.co/functions/v1/api/v1/especies` sin JWT → `401` con envelope `{ success: false, ... }` (la función corre y el auth gatea).
 - [ ] Login desde el front desplegado → `/clientes` carga (proxy `/api/v1` OK).
 - [ ] Alta de mascota: el select de especies se llena (proxy `/rest/v1` + apikey OK).
 - [ ] `SELECT jobname FROM cron.job;` muestra los 2 jobs (§3).

@@ -81,11 +81,14 @@ NOTIFY pgrst, 'reload schema';
 --   SELECT vault.create_secret('<CRON_SECRET>',  'cron_notif_secret');
 --   SELECT vault.create_secret('<URL-COMPLETA>', 'cron_notif_url');
 --
--- URL completa del endpoint (función `api` + basePath `/api/v1` → doble `api/api/v1`):
+-- URL completa del endpoint. SINGLE `api` (no doble): Supabase strippea solo
+-- `/functions/v1` y conserva el nombre de la función (`api`), que coincide con
+-- el primer segmento del basePath de Hono (`/api/v1`). Verificado contra prod
+-- (2026-07-21): single `api` → la ruta matchea; doble `api` → 404.
 --   • Local (pg_net dentro del contenedor DB → gateway del stack):
---       http://host.docker.internal:54321/functions/v1/api/api/v1/internal/notificaciones/procesar
+--       http://host.docker.internal:54321/functions/v1/api/v1/internal/notificaciones/procesar
 --   • Producción:
---       https://<project-ref>.supabase.co/functions/v1/api/api/v1/internal/notificaciones/procesar
+--       https://<project-ref>.supabase.co/functions/v1/api/v1/internal/notificaciones/procesar
 --
 -- Rotar un secreto (Vault no permite duplicar el `name`):
 --   SELECT vault.update_secret(id, '<nuevo-valor>') FROM vault.secrets WHERE name = 'cron_notif_secret';
