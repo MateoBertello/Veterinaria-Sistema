@@ -15,12 +15,16 @@ import { useAuth } from "../auth/AuthContext.tsx";
  * (keyeadas por id de usuario, "persistido por usuario") y se aplican globalmente
  * como CSS var (--font-size) y clases en el <html> raíz, sin tocar el kit heredado.
  */
-export type FontSize = "sm" | "md" | "lg" | "xl";
-export type Density  = "comfortable" | "compact";
+export type FontSize      = "sm" | "md" | "lg" | "xl";
+export type Density       = "comfortable" | "compact";
+export type TableViewMode = "compact" | "comfortable" | "expanded";
+export type CardSpacing   = "tight" | "normal" | "relaxed";
 
 export interface Preferences {
   fontSize:       FontSize;
   density:        Density;
+  tableViewMode:  TableViewMode;
+  cardSpacing:    CardSpacing;
   highContrast:   boolean;
   reducedMotion:  boolean;
 }
@@ -44,7 +48,14 @@ function prefersReducedMotion(): boolean {
 }
 
 export function defaultPreferences(): Preferences {
-  return { fontSize: "md", density: "comfortable", highContrast: false, reducedMotion: prefersReducedMotion() };
+  return {
+    fontSize: "md",
+    density: "comfortable",
+    tableViewMode: "comfortable",
+    cardSpacing: "normal",
+    highContrast: false,
+    reducedMotion: prefersReducedMotion(),
+  };
 }
 
 function isFontSize(v: unknown): v is FontSize {
@@ -52,6 +63,12 @@ function isFontSize(v: unknown): v is FontSize {
 }
 function isDensity(v: unknown): v is Density {
   return v === "comfortable" || v === "compact";
+}
+function isTableViewMode(v: unknown): v is TableViewMode {
+  return v === "compact" || v === "comfortable" || v === "expanded";
+}
+function isCardSpacing(v: unknown): v is CardSpacing {
+  return v === "tight" || v === "normal" || v === "relaxed";
 }
 
 /** Lee y sanea las preferencias del usuario desde localStorage; nunca lanza. */
@@ -64,6 +81,8 @@ function loadPreferences(userId: string | null): Preferences {
     return {
       fontSize:      isFontSize(parsed.fontSize) ? parsed.fontSize : base.fontSize,
       density:       isDensity(parsed.density) ? parsed.density : base.density,
+      tableViewMode: isTableViewMode(parsed.tableViewMode) ? parsed.tableViewMode : base.tableViewMode,
+      cardSpacing:   isCardSpacing(parsed.cardSpacing) ? parsed.cardSpacing : base.cardSpacing,
       highContrast:  typeof parsed.highContrast === "boolean" ? parsed.highContrast : base.highContrast,
       reducedMotion: typeof parsed.reducedMotion === "boolean" ? parsed.reducedMotion : base.reducedMotion,
     };
@@ -77,6 +96,12 @@ export function applyPreferences(prefs: Preferences): void {
   const root = document.documentElement;
   root.style.setProperty("--font-size", FONT_SIZE_PX[prefs.fontSize]);
   root.classList.toggle("density-compact", prefs.density === "compact");
+  root.classList.toggle("table-compact", prefs.tableViewMode === "compact");
+  root.classList.toggle("table-comfortable", prefs.tableViewMode === "comfortable");
+  root.classList.toggle("table-expanded", prefs.tableViewMode === "expanded");
+  root.classList.toggle("card-tight", prefs.cardSpacing === "tight");
+  root.classList.toggle("card-normal", prefs.cardSpacing === "normal");
+  root.classList.toggle("card-relaxed", prefs.cardSpacing === "relaxed");
   root.classList.toggle("high-contrast", prefs.highContrast);
   root.classList.toggle("reduce-motion", prefs.reducedMotion);
 }
