@@ -1,5 +1,6 @@
-import { PDFDocument, StandardFonts } from "pdf-lib";
-import * as XLSX from "xlsx";
+// pdf-lib y xlsx se importan de forma PEREZOSA dentro de buildPdf/buildXlsx (no al
+// tope del módulo): son librerías pesadas que solo hacen falta al EXPORTAR. Cargarlas
+// acá las metía en el arranque en frío de TODA la Edge Function (login incluido).
 import { DomainError, ErrorCode } from "../../shared/errors.ts";
 import { recordAudit } from "../../shared/audit.ts";
 import { getServiceDb } from "../../shared/db.ts";
@@ -141,6 +142,9 @@ function today(): string {
 }
 
 async function buildPdf(pet: PetInfo, records: HistorialRow[]): Promise<Uint8Array> {
+  // Import perezoso: pdf-lib es ESM puro (named exports directos en el namespace).
+  const { PDFDocument, StandardFonts } = await import("pdf-lib");
+
   const doc  = await PDFDocument.create();
   const font = await doc.embedFont(StandardFonts.Helvetica);
   const bold = await doc.embedFont(StandardFonts.HelveticaBold);
@@ -187,7 +191,12 @@ async function buildPdf(pet: PetInfo, records: HistorialRow[]): Promise<Uint8Arr
 }
 
 // Exportado para test de formula injection (RN-SEC).
-export function buildXlsx(records: HistorialRow[]): Uint8Array {
+// async: importa xlsx de forma perezosa (ver nota al tope del módulo). Bajo import
+// dinámico, xlsx (CJS) expone utils/write en el namespace tanto en Node/vitest como
+// en la compat npm de Deno — verificado empíricamente en ambos runtimes.
+export async function buildXlsx(records: HistorialRow[]): Promise<Uint8Array> {
+  const XLSX = await import("xlsx");
+
   const headers = [
     "Fecha", "Tipo", "Profesional",
     "Peso (kg)", "Temp. (C)",
@@ -962,7 +971,7 @@ export class HistorialService {
       contentType = "application/pdf";
       filename    = `historial-${petId}-${date}.pdf`;
     } else {
-      buffer      = buildXlsx(rows);
+      buffer      = await buildXlsx(rows);
       contentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
       filename    = `historial-${petId}-${date}.xlsx`;
     }

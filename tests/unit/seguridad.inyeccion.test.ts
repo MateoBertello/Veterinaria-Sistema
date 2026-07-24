@@ -84,7 +84,7 @@ describe("Formula/CSV injection — export de auditoría (RN-SEC)", () => {
 });
 
 describe("Formula injection — export XLSX de historial (RN-SEC)", () => {
-  it("RN-SEC: neutraliza celdas de texto que empiezan con carácter peligroso", () => {
+  it("RN-SEC: neutraliza celdas de texto que empiezan con carácter peligroso", async () => {
     const rows: HistorialRow[] = [
       {
         id: "1",
@@ -97,7 +97,7 @@ describe("Formula injection — export XLSX de historial (RN-SEC)", () => {
         profesional: { full_name: "@evil" },
       },
     ];
-    const buf = buildXlsx(rows);
+    const buf = await buildXlsx(rows);
     const wb = XLSX.read(buf, { type: "array" });
     const ws = wb.Sheets[wb.SheetNames[0]];
     const aoa = XLSX.utils.sheet_to_json<string[]>(ws, { header: 1 });
