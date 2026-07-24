@@ -16,3 +16,6 @@ supabase/.branches/
 playwright/.auth/
 playwright-report/
 test-results/
+
+# Referencia visual/UX de Repo 2 (Etapa 10): clon local, no versionar.
+docs/_ref-ui/
