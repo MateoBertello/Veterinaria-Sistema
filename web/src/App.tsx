@@ -19,6 +19,7 @@ import { AgendarTurnoPage } from "./pages/AgendarTurnoPage.tsx";
 import { OcupacionGuarderiaPage } from "./pages/OcupacionGuarderiaPage.tsx";
 import { RegistrarEstadiaPage } from "./pages/RegistrarEstadiaPage.tsx";
 import { PreferenciasPage } from "./pages/PreferenciasPage.tsx";
+import { AccessibilityButton } from "./components/accesibilidad/AccessibilityButton.tsx";
 import { Button } from "./components/ui/button.tsx";
 import { cn } from "./components/ui/utils.ts";
 
@@ -108,6 +109,7 @@ function Shell() {
       <main id="contenido" className="flex-1 overflow-x-auto px-4 py-6 md:px-8">
         <Outlet />
       </main>
+      <AccessibilityButton />
     </div>
   );
 }

@@ -7,9 +7,9 @@ function modulo(over: Partial<ModuloContratado>): ModuloContratado {
 }
 
 describe("buildNavItems", () => {
-  it("RN-G1: sin módulos ni permisos, devuelve los ítems base + Preferencias (Core siempre presente)", () => {
+  it("RN-G1: sin módulos ni permisos, devuelve solo los ítems base (Core siempre presente)", () => {
     const items = buildNavItems([]);
-    expect(items.map((i) => i.key)).toEqual(["inicio", "clientes", "mascotas", "preferencias"]);
+    expect(items.map((i) => i.key)).toEqual(["inicio", "clientes", "mascotas"]);
   });
 
   it("RN-G2: agrega solo los módulos vendibles habilitados", () => {
@@ -17,14 +17,7 @@ describe("buildNavItems", () => {
       modulo({ modulo: "historial_clinico", habilitado: true }),
       modulo({ modulo: "turnos", habilitado: false }),
     ]);
-    expect(items.map((i) => i.key)).toEqual(["inicio", "clientes", "mascotas", "historial_clinico", "preferencias"]);
-  });
-
-  it("RN-UX3: Preferencias es un ítem de usuario siempre visible (sin módulos ni permisos) y va al final", () => {
-    const items = buildNavItems([], []);
-    const keys = items.map((i) => i.key);
-    expect(keys).toContain("preferencias");
-    expect(keys[keys.length - 1]).toBe("preferencias");
+    expect(items.map((i) => i.key)).toEqual(["inicio", "clientes", "mascotas", "historial_clinico"]);
   });
 
   it("sin permisos, no muestra Servicios ni Configuración", () => {
