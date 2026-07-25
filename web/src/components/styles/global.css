@@ -79,6 +79,69 @@ html {
   padding-bottom: 0.375rem;
 }
 
+/* Vista de tablas (tableViewMode): ajusta el padding vertical de las celdas
+   del kit (componente Table, ver web/src/components/ui/table.tsx). "comfortable"
+   es el valor por defecto y ya coincide con el padding del kit (TableCell p-2),
+   por eso no necesita override propio. No se fuerza altura de fila para no
+   cortar contenido cuando fontSize está en "lg"/"xl". */
+:root.table-compact [data-slot='table-head'],
+:root.table-compact [data-slot='table-cell'] {
+  padding-top: 0.25rem;
+  padding-bottom: 0.25rem;
+}
+
+:root.table-expanded [data-slot='table-head'],
+:root.table-expanded [data-slot='table-cell'] {
+  padding-top: 0.875rem;
+  padding-bottom: 0.875rem;
+}
+
+/* Espaciado de tarjetas (cardSpacing): ajusta el gap/padding del kit
+   (componente Card, ver web/src/components/ui/card.tsx). "normal" es el valor
+   por defecto y ya coincide con el spacing del kit (gap-6 / px-6 pt-6 / pb-6),
+   por eso no necesita override propio. */
+:root.card-tight [data-slot='card'] {
+  gap: 1rem;
+}
+:root.card-tight [data-slot='card-header'] {
+  padding-left: 1rem;
+  padding-right: 1rem;
+  padding-top: 1rem;
+}
+:root.card-tight [data-slot='card-content'] {
+  padding-left: 1rem;
+  padding-right: 1rem;
+}
+:root.card-tight [data-slot='card-content']:last-child {
+  padding-bottom: 1rem;
+}
+:root.card-tight [data-slot='card-footer'] {
+  padding-left: 1rem;
+  padding-right: 1rem;
+  padding-bottom: 1rem;
+}
+
+:root.card-relaxed [data-slot='card'] {
+  gap: 2rem;
+}
+:root.card-relaxed [data-slot='card-header'] {
+  padding-left: 2rem;
+  padding-right: 2rem;
+  padding-top: 2rem;
+}
+:root.card-relaxed [data-slot='card-content'] {
+  padding-left: 2rem;
+  padding-right: 2rem;
+}
+:root.card-relaxed [data-slot='card-content']:last-child {
+  padding-bottom: 2rem;
+}
+:root.card-relaxed [data-slot='card-footer'] {
+  padding-left: 2rem;
+  padding-right: 2rem;
+  padding-bottom: 2rem;
+}
+
 /* Alto contraste: refuerza texto, bordes y foco; subraya los enlaces. */
 :root.high-contrast {
   --foreground: #000000;
@@ -92,6 +155,13 @@ html {
 :root.high-contrast :focus-visible {
   outline: 2px solid var(--ring);
   outline-offset: 2px;
+}
+/* Refuerza bordes suaves en naranja que no usan la var --border (p.ej. el
+   marcador de "día actual" del calendario, border-orange-300). Se reutiliza
+   el mismo naranja AA-safe que --primary (ver theme.css) para mantener la
+   paleta del producto. */
+:root.high-contrast .border-orange-300 {
+  border-color: #c2410c;
 }
 
 /* Reducción de movimiento: por preferencia del usuario o del SO. */
