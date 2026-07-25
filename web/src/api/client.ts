@@ -1,4 +1,4 @@
-import type { ApiErrorResponse, ApiMeta, ApiResponse, ApiSuccessResponse } from "../types/index.ts";
+import type { ApiMeta, ApiResponse, ApiSuccessResponse } from "../types/index.ts";
 import { ApiError } from "../types/index.ts";
 import { getToken } from "../lib/session.ts";
 
@@ -11,6 +11,38 @@ let onUnauthorized: (() => void) | null = null;
 
 export function setUnauthorizedHandler(handler: (() => void) | null): void {
   onUnauthorized = handler;
+}
+
+/**
+ * Lee el cuerpo como envelope estándar, o `null` si la respuesta no lo es.
+ *
+ * No todo lo que contesta viene de nuestro handler de errores: una ruta que la
+ * API desplegada no conoce devuelve el 404 en texto plano, y el gateway puede
+ * responder 502/504 o HTML. Sin esto, `response.json()` explotaba con un
+ * SyntaxError crudo que no era ApiError y llegaba a la pantalla como "error
+ * inesperado", escondiendo el status —que es justo el dato que dice qué pasó.
+ */
+async function readEnvelope<T>(response: Response): Promise<ApiResponse<T> | null> {
+  let body: unknown;
+  try {
+    body = await response.json();
+  } catch {
+    return null;
+  }
+
+  if (!body || typeof body !== "object" || !("success" in body)) return null;
+  return body as ApiResponse<T>;
+}
+
+/** Mensaje para una respuesta que no respeta el envelope, según su status. */
+function mensajeFueraDeContrato(status: number): string {
+  if (status === 404) {
+    return "El servidor no reconoce este endpoint (404): puede que la API desplegada no incluya esta función.";
+  }
+  if (status >= 500) {
+    return `El servidor no respondió correctamente (HTTP ${status}). Intentá de nuevo en unos minutos.`;
+  }
+  return `Respuesta inesperada del servidor (HTTP ${status}).`;
 }
 
 /**
@@ -48,17 +80,26 @@ async function request<T>(
     );
   }
 
-  const body = await response.json() as ApiResponse<T>;
+  const body = await readEnvelope<T>(response);
 
-  if (body.success) {
+  if (body?.success) {
     return body;
   }
 
   // Token vencido/inválido en un request autenticado → limpiar sesión y volver a
   // login. Solo si HABÍA token al hacer el request: así el 401 de credenciales
-  // inválidas del propio login (sin token aún) no dispara el auto-logout.
+  // inválidas del propio login (sin token aún) no dispara el auto-logout. Vale
+  // también cuando el 401 no trae envelope (lo corta el gateway, no la API).
   if (response.status === 401 && token) {
     onUnauthorized?.();
+  }
+
+  if (!body) {
+    throw new ApiError(
+      "INVALID_RESPONSE",
+      response.status,
+      mensajeFueraDeContrato(response.status),
+    );
   }
 
   throw new ApiError(
@@ -124,9 +165,14 @@ export async function apiClientBlob(
   }
 
   if (!response.ok) {
-    const body = await response.json() as ApiErrorResponse;
+    // Mismo criterio que `request`: el error puede no venir de nuestro handler
+    // (404 de ruta, 5xx del gateway) y ahí no hay envelope que leer.
+    const body = await readEnvelope<never>(response);
     if (response.status === 401 && token) {
       onUnauthorized?.();
+    }
+    if (!body || body.success) {
+      throw new ApiError("INVALID_RESPONSE", response.status, mensajeFueraDeContrato(response.status));
     }
     throw new ApiError(body.error.code, body.error.statusCode, body.error.message, body.error.details);
   }
