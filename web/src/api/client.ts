@@ -99,13 +99,15 @@ function filenameFromContentDisposition(header: string | null): string | null {
 
 /**
  * Variante para endpoints que devuelven un archivo binario crudo en éxito (no
- * el envelope JSON estándar) — p. ej. exportación de historial en PDF/XLSX.
- * En error, el backend sí responde el envelope JSON de siempre.
+ * el envelope JSON estándar) — p. ej. exportación de historial en PDF/XLSX o
+ * el CSV de auditoría. En error, el backend sí responde el envelope JSON de
+ * siempre. Devuelve también los `headers` crudos: algunos exports (auditoría)
+ * informan metadata propia ahí (p. ej. truncado) que no cabe en filename/blob.
  */
 export async function apiClientBlob(
   path: string,
   options: RequestInit = {},
-): Promise<{ blob: Blob; filename: string | null }> {
+): Promise<{ blob: Blob; filename: string | null; headers: Headers }> {
   const token = getToken();
   const headers: Record<string, string> = {
     ...(options.headers as Record<string, string> | undefined),
@@ -131,5 +133,5 @@ export async function apiClientBlob(
 
   const blob = await response.blob();
   const filename = filenameFromContentDisposition(response.headers.get("Content-Disposition"));
-  return { blob, filename };
+  return { blob, filename, headers: response.headers };
 }

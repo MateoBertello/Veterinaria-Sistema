@@ -22,6 +22,8 @@ export const PERMISSION_NAV: NavItem[] = [
   { key: "doctores",      label: "Doctores",      href: "/doctores",      permission: "manage_users" },
   { key: "horarios",      label: "Horarios",      href: "/horarios",      permission: "manage_schedules" },
   { key: "configuracion", label: "Configuración", href: "/configuracion", permission: "manage_tenant_settings" },
+  { key: "usuarios",      label: "Usuarios",      href: "/usuarios",      permission: "manage_users" },
+  { key: "auditoria",     label: "Auditoría",     href: "/auditoria",     permission: "view_audit" },
 ];
 
 // Metadatos de navegación de cada módulo vendible.

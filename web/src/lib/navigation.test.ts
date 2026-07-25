@@ -45,6 +45,28 @@ describe("buildNavItems", () => {
     expect(items.some((i) => i.key === "horarios")).toBe(false);
   });
 
+  it("con manage_users, muestra Usuarios (/usuarios)", () => {
+    const items = buildNavItems([], ["manage_users"]);
+    const usuarios = items.find((i) => i.key === "usuarios");
+    expect(usuarios?.href).toBe("/usuarios");
+  });
+
+  it("sin manage_users, oculta Usuarios", () => {
+    const items = buildNavItems([], ["manage_services"]);
+    expect(items.some((i) => i.key === "usuarios")).toBe(false);
+  });
+
+  it("con view_audit, muestra Auditoría (/auditoria)", () => {
+    const items = buildNavItems([], ["view_audit"]);
+    const auditoria = items.find((i) => i.key === "auditoria");
+    expect(auditoria?.href).toBe("/auditoria");
+  });
+
+  it("sin view_audit, oculta Auditoría", () => {
+    const items = buildNavItems([], ["manage_users"]);
+    expect(items.some((i) => i.key === "auditoria")).toBe(false);
+  });
+
   it("con manage_schedules, muestra Horarios pero no Doctores", () => {
     const items = buildNavItems([], ["manage_schedules"]);
     expect(items.some((i) => i.key === "horarios")).toBe(true);
