@@ -74,6 +74,10 @@ export const ErrorCode = {
   FILE_TOO_LARGE:                   "FILE_TOO_LARGE",
   VACCINE_TYPE_NOT_FOUND:           "VACCINE_TYPE_NOT_FOUND",
   VACCINE_PLAN_ALREADY_APPLIED:     "VACCINE_PLAN_ALREADY_APPLIED",
+  DUPLICATE_USER:                   "DUPLICATE_USER",
+  LAST_ADMIN:                       "LAST_ADMIN",
+  TENANT_DUPLICATE_TAXID:           "TENANT_DUPLICATE_TAXID",
+  MODULE_UNKNOWN:                   "MODULE_UNKNOWN",
 } as const;
 
 export type ErrorCodeValue = (typeof ErrorCode)[keyof typeof ErrorCode];
@@ -366,6 +370,61 @@ export interface DoctorInput {
   available?:     boolean;
 }
 
+// ─── Gestión de Usuarios ─────────────────────────────────────────────────────
+
+/**
+ * Espejo camelCase de `UsuarioPublico` del backend (GET /usuarios). `rolName` es
+ * el `display_name` del rol (etiqueta); el color del badge se deriva del `name`
+ * del rol resolviendo `rolId` contra el catálogo (ver lib/roles.ts). Nunca trae
+ * password (RN-S1).
+ */
+export interface Usuario {
+  id:        string;
+  username:  string;
+  email:     string;
+  fullName:  string;
+  phone:     string | null;
+  active:    boolean;
+  rolId:     string;
+  rolName:   string;
+  createdAt: string;
+}
+
+/** Catálogo de roles del tenant (GET /usuarios/roles). `name` es el identificador
+ *  de máquina (admin | veterinario | …); `displayName` es la etiqueta en español. */
+export interface Rol {
+  id:          string;
+  name:        string;
+  displayName: string;
+  description: string | null;
+}
+
+/**
+ * Body de `POST /usuarios` (espejo de `CrearUsuarioSchema`). `roleId` es el UUID
+ * del rol. Al asignar el rol veterinario el backend crea/sincroniza el perfil en
+ * `doctores` (DT-1); el front solo refleja el resultado, no duplica esa lógica.
+ */
+export interface CrearUsuarioInput {
+  username: string;
+  password: string;
+  fullName: string;
+  email:    string;
+  phone?:   string;
+  roleId:   string;
+  active?:  boolean;
+}
+
+/** Body de `PUT /usuarios/:id` (espejo de `EditarUsuarioSchema`): todos opcionales
+ *  y sin password (no se edita la contraseña por este endpoint). */
+export interface EditarUsuarioInput {
+  username?: string;
+  fullName?: string;
+  email?:    string;
+  phone?:    string;
+  roleId?:   string;
+  active?:   boolean;
+}
+
 // ─── Horarios (franjas de un doctor) ───────────────────────────────────────
 
 export interface Franja {
@@ -597,6 +656,58 @@ export interface LoginInput {
   password: string;
 }
 
+// ─── Auditoría ──────────────────────────────────────────────────────────────
+
+// Espejo de AUDIT_MODULES/AUDIT_ACTIONS del backend (auditoria.schemas.ts). Deben
+// mantenerse sincronizados: son los únicos valores que el backend acepta como filtro.
+export const AUDIT_MODULES = [
+  "clients", "pets", "medical_records", "appointments", "daycare",
+  "users",   "security", "services", "system", "platform",
+] as const;
+export type AuditModuleValue = (typeof AUDIT_MODULES)[number];
+
+export const AUDIT_ACTIONS = [
+  "CREATE", "UPDATE", "DELETE", "CANCEL",
+  "LOGIN",  "LOGOUT", "VIEW",   "EXPORT",
+] as const;
+export type AuditActionValue = (typeof AUDIT_ACTIONS)[number];
+
+/** Espejo camelCase de `RegistroAuditoriaPublico` del backend (GET /auditoria). */
+export interface RegistroAuditoria {
+  id:        string;
+  timestamp: string;
+  module:    string;
+  action:    string;
+  userId:    string | null;
+  userName:  string | null;
+  userRole:  string | null;
+  entityId:  string | null;
+  oldValues: Record<string, unknown> | null;
+  newValues: Record<string, unknown> | null;
+  details:   string | null;
+  ipAddress: string | null;
+}
+
+// ─── Dashboard ──────────────────────────────────────────────────────────────
+
+/**
+ * Resumen agregado de `GET /dashboard/resumen` (espejo de `ResumenDashboard`
+ * del backend).
+ *
+ * OJO con `null`: NO es cero. Significa "esta métrica no es visible para vos"
+ * porque falta el permiso del endpoint dueño del dato o el módulo vendible no
+ * está licenciado para el tenant. El backend decide, el front oculta la tarjeta.
+ * Un `0` sí es un dato: "no hay nada hoy".
+ */
+export interface ResumenDashboard {
+  fecha:              string;
+  clientes:           number | null;
+  mascotasActivas:    number | null;
+  turnosHoy:          number | null;
+  estadiasHoy:        number | null;
+  vacunasProximas30d: number | null;
+}
+
 // ─── Módulos vendibles ─────────────────────────────────────────────────────
 
 export type ModuloVendible = "historial_clinico" | "turnos" | "guarderia";
@@ -606,3 +717,47 @@ export interface ModuloContratado {
   habilitado: boolean;
   fechaAlta:  string | null;
 }
+
+// ─── Plataforma / Super Admin ───────────────────────────────────────────────
+
+/** Valores EXACTOS del ENUM `plan_tenant` (espejo de `PlanTenantEnum` del backend). */
+export type PlanTenant = "basico" | "profesional" | "premium";
+
+export const PLANES_TENANT: PlanTenant[] = ["basico", "profesional", "premium"];
+
+/**
+ * Espejo camelCase de `TenantPublico` del backend (`/admin/tenants`). RN-SA4: son
+ * metadatos comerciales, NUNCA datos de negocio internos del tenant.
+ * `adminInvitado` refleja si ya se cursó la invitación del Admin (RN-SA2).
+ */
+export interface Tenant {
+  id:            string;
+  nombre:        string;
+  cuitRut:       string;
+  emailContacto: string;
+  plan:          PlanTenant;
+  activo:        boolean;
+  adminInvitado: boolean;
+  createdAt:     string;
+}
+
+/** Body de `POST /admin/tenants` (espejo de `CrearTenantSchema`). El email del
+ *  Admin invitado ES `emailContacto`: el backend invita a esa casilla (RN-SA2). */
+export interface CrearTenantInput {
+  nombre:        string;
+  cuitRut:       string;
+  emailContacto: string;
+  plan:          PlanTenant;
+}
+
+/** Body de `PUT /admin/tenants/:id` (espejo de `EditarTenantSchema`): datos
+ *  comerciales, todos opcionales. `cuitRut` NO se edita (unicidad fiscal, RN-SA1)
+ *  y `activo` va por `PATCH /estado`. */
+export interface EditarTenantInput {
+  nombre?:        string;
+  emailContacto?: string;
+  plan?:          PlanTenant;
+}
+
+/** Filtro de estado del listado de tenants (espejo de `ListarTenantsQuerySchema`). */
+export type EstadoTenantFiltro = "activo" | "suspendido";
