@@ -16,6 +16,12 @@ vi.mock("../api/historial-clinico.ts", () => ({
 
 vi.mock("../api/vacunacion.ts", () => ({
   listarPlanVacunacion: vi.fn(),
+  programarDosis:       vi.fn(),
+  marcarDosisAplicada:  vi.fn(),
+}));
+
+vi.mock("../api/catalogos.ts", () => ({
+  listarTiposVacuna: vi.fn(),
 }));
 
 vi.mock("../api/doctores.ts", () => ({
@@ -28,12 +34,18 @@ vi.mock("sonner", () => ({
 
 import { HistorialClinicoPage } from "./HistorialClinicoPage.tsx";
 import { exportarHistorial, listarHistorial, resumenClinico } from "../api/historial-clinico.ts";
-import { listarPlanVacunacion } from "../api/vacunacion.ts";
+import { listarPlanVacunacion, marcarDosisAplicada, programarDosis } from "../api/vacunacion.ts";
+import { listarTiposVacuna } from "../api/catalogos.ts";
+import { listarDoctores } from "../api/doctores.ts";
 
 const mockListar = vi.mocked(listarHistorial);
 const mockResumen = vi.mocked(resumenClinico);
 const mockExportar = vi.mocked(exportarHistorial);
 const mockListarDosis = vi.mocked(listarPlanVacunacion);
+const mockProgramar = vi.mocked(programarDosis);
+const mockMarcarAplicada = vi.mocked(marcarDosisAplicada);
+const mockTiposVacuna = vi.mocked(listarTiposVacuna);
+const mockDoctores = vi.mocked(listarDoctores);
 
 function makeResumen(over: Partial<ResumenClinico> = {}): ResumenClinico {
   return {
@@ -73,7 +85,13 @@ function renderPage(state?: { from?: string }) {
   );
 }
 
-beforeEach(() => vi.clearAllMocks());
+beforeEach(() => {
+  vi.clearAllMocks();
+  mockTiposVacuna.mockResolvedValue([
+    { id: "t1", nombre: "Antirrábica", especie_aplicable: null, meses_refuerzo_sugerido: 12 },
+    { id: "t2", nombre: "Triple Felina", especie_aplicable: "Gato", meses_refuerzo_sugerido: null },
+  ]);
+});
 
 describe("HistorialClinicoPage", () => {
   it("RN-HC1: muestra los eventos en el orden que devuelve el backend (desc)", async () => {
@@ -341,6 +359,135 @@ describe("HistorialClinicoPage", () => {
       await screen.findByText("Antirrábica");
 
       expect(screen.getAllByRole("button", { name: "Marcar aplicada" })).toHaveLength(1);
+    });
+
+    describe("RN-PV10: refuerzo sugerido al aplicar una dosis", () => {
+      const HOY = new Date().toISOString().slice(0, 10);
+
+      // Radix deja el body con pointer-events mientras se encadenan dos diálogos
+      // (se cierra el de aplicación y se abre el de sugerencia en el mismo commit).
+      async function user() {
+        const { default: userEvent } = await import("@testing-library/user-event");
+        return userEvent.setup({ pointerEventsCheck: 0 });
+      }
+
+      /** Aplica la única dosis pendiente del plan con la fecha indicada. */
+      async function aplicarDosis(fechaAplicacion: string) {
+        const u = await user();
+        await u.click(await screen.findByRole("button", { name: "Marcar aplicada" }));
+
+        await u.click(await screen.findByLabelText(/Profesional \*/i));
+        await u.click(await screen.findByRole("option", { name: "Dra. García" }));
+
+        const fecha = screen.getByLabelText(/^Fecha$/i);
+        await u.clear(fecha);
+        await u.type(fecha, fechaAplicacion);
+
+        await u.click(screen.getByRole("button", { name: "Confirmar aplicación" }));
+      }
+
+      async function prepararPlan(tipoVacunaId = "t1", tipoVacunaNombre = "Antirrábica") {
+        mockResumen.mockResolvedValue(makeResumen({ estado: "Activa" }));
+        mockListar.mockResolvedValue({ items: [makeEvento()], meta: { page: 1, limit: 20, total: 1 } });
+        mockListarDosis.mockResolvedValue({
+          items: [makeDosis({ id: "d1", tipoVacunaId, tipoVacunaNombre, estado: "Pendiente", estadoVisual: "Proxima" })],
+          meta: { page: 1, limit: 20, total: 1 },
+        });
+        mockDoctores.mockResolvedValue({
+          items: [{
+            id: "doc1", userId: "u1", name: "Dra. García", specialty: null,
+            licenseNumber: null, available: true, createdAt: "2026-01-01T00:00:00Z", usuario: null,
+          }],
+          meta: { page: 1, limit: 100, total: 1 },
+        });
+        mockMarcarAplicada.mockResolvedValue(makeDosis({ id: "d1", tipoVacunaId, estado: "Aplicada", estadoVisual: "Aplicada" }));
+
+        renderPage();
+        await abrirPestanaVacunacion();
+        await screen.findByText(tipoVacunaNombre);
+      }
+
+      it("RN-PV10: tras aplicar, propone el refuerzo a fechaAplicada + meses_refuerzo_sugerido", async () => {
+        await prepararPlan();
+
+        await aplicarDosis("2026-03-10");
+
+        expect(await screen.findByRole("heading", { name: "Programar refuerzo sugerido" })).toBeInTheDocument();
+        expect(screen.getByLabelText(/Fecha estimada \*/i)).toHaveValue("2027-03-10");
+        expect(screen.getByLabelText(/Tipo de vacuna \*/i)).toHaveTextContent("Antirrábica");
+        expect(screen.getByText(/Refuerzo de Antirrábica sugerido según el catálogo \(cada 12 meses\)/)).toBeInTheDocument();
+      });
+
+      it("RN-PV10: un tipo de vacuna sin meses_refuerzo_sugerido no dispara ninguna sugerencia", async () => {
+        await prepararPlan("t2", "Triple Felina");
+
+        await aplicarDosis("2026-03-10");
+
+        await waitFor(() => expect(mockMarcarAplicada).toHaveBeenCalledTimes(1));
+        await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+        expect(screen.queryByRole("heading", { name: "Programar refuerzo sugerido" })).not.toBeInTheDocument();
+        expect(mockProgramar).not.toHaveBeenCalled();
+      });
+
+      it("RN-PV10: confirmar la sugerencia con la fecha editada programa esa fecha", async () => {
+        await prepararPlan();
+        mockProgramar.mockResolvedValue(makeDosis({ id: "d2", fechaEstimada: "2027-05-02" }));
+
+        await aplicarDosis("2026-03-10");
+        await screen.findByRole("heading", { name: "Programar refuerzo sugerido" });
+
+        const u = await user();
+        const fechaEstimada = screen.getByLabelText(/Fecha estimada \*/i);
+        await u.clear(fechaEstimada);
+        await u.type(fechaEstimada, "2027-05-02");
+        await u.click(screen.getByRole("button", { name: "Programar" }));
+
+        await waitFor(() => expect(mockProgramar).toHaveBeenCalledTimes(1));
+        expect(mockProgramar).toHaveBeenCalledWith("m1", expect.objectContaining({
+          tipoVacunaId:  "t1",
+          fechaEstimada: "2027-05-02",
+        }));
+      });
+
+      it("RN-PV10: cancelar la sugerencia no crea nada y cierra el diálogo", async () => {
+        await prepararPlan();
+
+        await aplicarDosis("2026-03-10");
+        await screen.findByRole("heading", { name: "Programar refuerzo sugerido" });
+
+        const u = await user();
+        await u.click(screen.getByRole("button", { name: "Cancelar" }));
+
+        await waitFor(() =>
+          expect(screen.queryByRole("heading", { name: "Programar refuerzo sugerido" })).not.toBeInTheDocument(),
+        );
+        expect(mockProgramar).not.toHaveBeenCalled();
+      });
+
+      it("RN-PV10: programar el refuerzo sugerido no encadena otra sugerencia", async () => {
+        await prepararPlan();
+        mockProgramar.mockResolvedValue(makeDosis({ id: "d2", fechaEstimada: "2027-03-10" }));
+
+        await aplicarDosis("2026-03-10");
+        await screen.findByRole("heading", { name: "Programar refuerzo sugerido" });
+
+        const u = await user();
+        await u.click(screen.getByRole("button", { name: "Programar" }));
+
+        await waitFor(() => expect(mockProgramar).toHaveBeenCalledTimes(1));
+        await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+      });
+
+      it("RN-PV2/RN-PV10: si el refuerzo cae en el pasado, pre-carga hoy y lo explica", async () => {
+        await prepararPlan();
+
+        // Aplicación registrada con fecha vieja: 2024-01-10 + 12 meses ya pasó.
+        await aplicarDosis("2024-01-10");
+
+        expect(await screen.findByRole("heading", { name: "Programar refuerzo sugerido" })).toBeInTheDocument();
+        expect(screen.getByLabelText(/Fecha estimada \*/i)).toHaveValue(HOY);
+        expect(screen.getByText(/una fecha ya pasada, así que se propone hoy/)).toBeInTheDocument();
+      });
     });
   });
 });

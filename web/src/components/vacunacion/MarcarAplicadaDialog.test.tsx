@@ -86,8 +86,33 @@ describe("MarcarAplicadaDialog", () => {
     await waitFor(() => expect(mockMarcar).toHaveBeenCalledTimes(1));
     expect(mockMarcar).toHaveBeenCalledWith("d1", expect.objectContaining({ professionalId: "u1" }));
     expect(toastSuccess).toHaveBeenCalledWith("Dosis aplicada — se registró el evento clínico");
-    expect(onSaved).toHaveBeenCalledWith(expect.objectContaining({ estado: "Aplicada" }));
+    expect(onSaved).toHaveBeenCalledWith(expect.objectContaining({ estado: "Aplicada" }), expect.any(String));
     await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
+  });
+
+  it("RN-PV10: informa al padre la fecha con la que se registró la aplicación", async () => {
+    const { onSaved } = setup();
+    mockMarcar.mockResolvedValue(makeDosis({ estado: "Aplicada", estadoVisual: "Aplicada" }));
+
+    await userEvent.click(screen.getByLabelText(/Profesional \*/i));
+    await userEvent.click(await screen.findByRole("option", { name: "Dra. García" }));
+    await userEvent.type(screen.getByLabelText(/^Fecha$/i), "2026-03-10");
+    await userEvent.click(screen.getByRole("button", { name: "Confirmar aplicación" }));
+
+    await waitFor(() => expect(onSaved).toHaveBeenCalledTimes(1));
+    expect(onSaved).toHaveBeenCalledWith(expect.anything(), "2026-03-10");
+  });
+
+  it("RN-PV10: sin fecha explícita informa hoy, igual que el default del backend", async () => {
+    const { onSaved } = setup();
+    mockMarcar.mockResolvedValue(makeDosis({ estado: "Aplicada", estadoVisual: "Aplicada" }));
+
+    await userEvent.click(screen.getByLabelText(/Profesional \*/i));
+    await userEvent.click(await screen.findByRole("option", { name: "Dra. García" }));
+    await userEvent.click(screen.getByRole("button", { name: "Confirmar aplicación" }));
+
+    await waitFor(() => expect(onSaved).toHaveBeenCalledTimes(1));
+    expect(onSaved).toHaveBeenCalledWith(expect.anything(), new Date().toISOString().slice(0, 10));
   });
 
   it("peso fuera de rango (0-200 kg) bloquea el envío", async () => {

@@ -23,6 +23,7 @@ import {
 import { Textarea } from "../ui/textarea.tsx";
 import { listarDoctores } from "../../api/doctores.ts";
 import { marcarDosisAplicada } from "../../api/vacunacion.ts";
+import { hoyISO } from "../../lib/fechas.ts";
 import { ApiError, type Doctor, type DosisVacunacion } from "../../types/index.ts";
 
 interface FormValues {
@@ -39,7 +40,12 @@ interface Props {
   open:         boolean;
   onOpenChange: (open: boolean) => void;
   dosis:        DosisVacunacion | null;
-  onSaved:      (dosis: DosisVacunacion) => void;
+  /**
+   * `fechaAplicada` es la fecha con la que se registró la aplicación (la del
+   * formulario, o hoy si se dejó vacía, igual que el default del backend). La
+   * dosis devuelta no la trae, y es la base del refuerzo sugerido (RN-PV10).
+   */
+  onSaved:      (dosis: DosisVacunacion, fechaAplicada: string) => void;
 }
 
 export function MarcarAplicadaDialog({ open, onOpenChange, dosis, onSaved }: Props) {
@@ -73,7 +79,7 @@ export function MarcarAplicadaDialog({ open, onOpenChange, dosis, onSaved }: Pro
         notes:          values.notes || undefined,
       });
       toast.success("Dosis aplicada — se registró el evento clínico");
-      onSaved(actualizada);
+      onSaved(actualizada, values.date || hoyISO());
       onOpenChange(false);
     } catch (err) {
       const message = err instanceof ApiError ? err.message : "Ocurrió un error inesperado";

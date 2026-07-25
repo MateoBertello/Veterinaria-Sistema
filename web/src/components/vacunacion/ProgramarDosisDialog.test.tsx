@@ -106,4 +106,69 @@ describe("ProgramarDosisDialog", () => {
     expect(onSaved).toHaveBeenCalledWith(makeDosis());
     await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
   });
+
+  describe("modo refuerzo sugerido (RN-PV10)", () => {
+    function setupSugerido(fechaEstimada = "2027-07-25") {
+      const onSaved = vi.fn();
+      const onOpenChange = vi.fn();
+      render(
+        <ProgramarDosisDialog
+          open
+          petId="pet1"
+          onOpenChange={onOpenChange}
+          onSaved={onSaved}
+          tiposVacuna={[
+            { id: "t1", nombre: "Antirrábica", especie_aplicable: null, meses_refuerzo_sugerido: 12 },
+          ]}
+          sugerencia="Refuerzo de Antirrábica sugerido según el catálogo (cada 12 meses). Podés ajustar la fecha antes de confirmar."
+          initialValues={{ tipoVacunaId: "t1", fechaEstimada }}
+        />,
+      );
+      return { onSaved, onOpenChange };
+    }
+
+    it("abre pre-cargado con el tipo y la fecha sugeridos y explica de dónde salen", async () => {
+      setupSugerido();
+
+      expect(screen.getByRole("heading", { name: "Programar refuerzo sugerido" })).toBeInTheDocument();
+      expect(screen.getByText(/Refuerzo de Antirrábica sugerido según el catálogo/)).toBeInTheDocument();
+      expect(screen.getByLabelText(/Fecha estimada \*/i)).toHaveValue("2027-07-25");
+      expect(screen.getByLabelText(/Tipo de vacuna \*/i)).toHaveTextContent("Antirrábica");
+    });
+
+    it("el texto de la sugerencia es la descripción accesible del diálogo", async () => {
+      setupSugerido();
+
+      const dialogo = screen.getByRole("dialog");
+      const descId = dialogo.getAttribute("aria-describedby");
+      expect(descId).toBeTruthy();
+      expect(document.getElementById(descId as string)).toHaveTextContent(
+        /Refuerzo de Antirrábica sugerido según el catálogo/,
+      );
+    });
+
+    it("con el catálogo pre-cargado no vuelve a pedirlo al backend", async () => {
+      setupSugerido();
+
+      await waitFor(() => expect(screen.getByLabelText(/Fecha estimada \*/i)).toHaveValue("2027-07-25"));
+      expect(mockTipos).not.toHaveBeenCalled();
+    });
+
+    it("el veterinario puede editar la fecha sugerida antes de confirmar", async () => {
+      const { onSaved } = setupSugerido();
+      mockProgramar.mockResolvedValue(makeDosis({ fechaEstimada: "2027-09-01" }));
+
+      const fechaInput = screen.getByLabelText(/Fecha estimada \*/i);
+      await userEvent.clear(fechaInput);
+      await userEvent.type(fechaInput, "2027-09-01");
+      await userEvent.click(screen.getByRole("button", { name: "Programar" }));
+
+      await waitFor(() => expect(mockProgramar).toHaveBeenCalledTimes(1));
+      expect(mockProgramar).toHaveBeenCalledWith("pet1", expect.objectContaining({
+        tipoVacunaId:  "t1",
+        fechaEstimada: "2027-09-01",
+      }));
+      expect(onSaved).toHaveBeenCalled();
+    });
+  });
 });

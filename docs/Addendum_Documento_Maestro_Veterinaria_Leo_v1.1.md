@@ -686,6 +686,7 @@ const eventoClinicoSchema = z.object({
 - **RN-PV7 (ventana de aviso):** se notifica cuando `0 ≤ (fechaEstimada − hoy) ≤ diasAvisoVacuna` y la dosis está `Pendiente` sin `notifiedAt`; canales según datos de contacto del cliente (RN-NT4).
 - **RN-PV8 (permiso):** lectura `view_medical_history`; gestión `manage_medical_history`.
 - **RN-PV9 (auditoría):** `CREATE`/`UPDATE` en módulo `medical_records`; los envíos se auditan como evento del sistema (RN-NT6).
+- **RN-PV10 (refuerzo sugerido al aplicar):** al marcar una dosis como `Aplicada`, si el tipo de vacuna tiene `meses_refuerzo_sugerido` en el catálogo global, el sistema **propone** la próxima dosis pre-cargada (mismo `tipoVacunaId`, `fechaEstimada = fechaAplicada + meses_refuerzo_sugerido` meses de calendario, recortando al último día del mes cuando el día no existe) y el profesional acepta, edita la fecha o descarta. **Nunca se crea en silencio:** la dosis se crea solo al confirmar, por el mismo endpoint de programar (RN-PV2..PV4 siguen aplicando). Sin `meses_refuerzo_sugerido` no hay sugerencia. Si la fecha calculada quedó en el pasado (aplicación registrada con fecha vieja) se pre-carga **hoy** —no una fecha que RN-PV2 rechazaría— y el mensaje aclara cuándo correspondía. La sugerencia se dispara **solo** al aplicar: confirmar el refuerzo no encadena otra. Es una regla de UX resuelta en el frontend; el backend no cambia.
 - **UX/UI:** timeline vertical por mascota con puntos coloreados — verde `Aplicada`, naranja `Próxima`, rojo `Vencida` —, chips de tipo de vacuna, botón *Programar próxima dosis*; tooltip con fecha del aviso programado.
 - **Rendimiento:** índice `(tenant_id, estado, fecha_estimada)` para el barrido diario del procesador de avisos.
 
@@ -706,6 +707,7 @@ const eventoClinicoSchema = z.object({
 
 1. El actor abre la pestaña *Plan de Vacunación* de la mascota.
 2. El sistema lista las dosis ordenadas por fecha con su estado visual derivado (RN-PV1) y permite registrar la aplicación de una dosis pendiente (crea el evento clínico de Vacunación y marca `Aplicada` en una transacción).
+3. Aplicada la dosis, el sistema propone el refuerzo siguiente pre-cargado (RN-PV10); el profesional confirma, ajusta la fecha o descarta, y solo al confirmar se crea la próxima dosis `Pendiente`.
 
 **Flujo normal (c — avisos automáticos)**
 

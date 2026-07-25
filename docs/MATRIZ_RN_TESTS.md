@@ -266,6 +266,7 @@ E2E Playwright **18** tests / 7 archivos.
 | RN-PV7 | ✅ | `tests/unit/vacunacion-avisos.service.test.ts` |
 | RN-PV8 | ✅ | `tests/unit/vacunacion-avisos.service.test.ts` |
 | RN-PV9 | ✅ | `tests/unit/vacunacion.service.test.ts` |
+| RN-PV10 | ✅ | `web/src/lib/vacunacion.test.ts`<br>`web/src/pages/HistorialClinicoPage.test.tsx`<br>`web/src/components/vacunacion/ProgramarDosisDialog.test.tsx`<br>`web/src/components/vacunacion/MarcarAplicadaDialog.test.tsx` |
 
 #### RN-REC
 | RN | Test | Archivos |

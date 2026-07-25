@@ -15,6 +15,8 @@ import { ProgramarDosisDialog } from "../components/vacunacion/ProgramarDosisDia
 import { MarcarAplicadaDialog } from "../components/vacunacion/MarcarAplicadaDialog.tsx";
 import { exportarHistorial, listarHistorial, resumenClinico, type FormatoExport } from "../api/historial-clinico.ts";
 import { listarPlanVacunacion } from "../api/vacunacion.ts";
+import { listarTiposVacuna, type TipoVacuna } from "../api/catalogos.ts";
+import { calcularRefuerzoSugerido, type RefuerzoSugerido } from "../lib/vacunacion.ts";
 import { ApiError, ErrorCode, type HistorialItem, type ResumenClinico, type ApiMeta, type DosisVacunacion } from "../types/index.ts";
 
 const PAGE_SIZE = 20;
@@ -61,6 +63,8 @@ export function HistorialClinicoPage() {
   const [dosisPage, setDosisPage] = useState(1);
   const [programarOpen, setProgramarOpen] = useState(false);
   const [dosisParaAplicar, setDosisParaAplicar] = useState<DosisVacunacion | null>(null);
+  const [tiposVacuna, setTiposVacuna] = useState<TipoVacuna[]>([]);
+  const [refuerzo, setRefuerzo] = useState<RefuerzoSugerido | null>(null);
 
   const cargarResumen = useCallback(async () => {
     if (!mascotaId) return;
@@ -109,6 +113,26 @@ export function HistorialClinicoPage() {
     if (activeTab !== "vacunacion") return;
     void cargarPlanVacunacion();
   }, [activeTab, cargarPlanVacunacion]);
+
+  // Catálogo global de tipos de vacuna: una sola carga al entrar a la pestaña, y
+  // queda en memoria. Lo consumen el diálogo de programar y el refuerzo sugerido
+  // (RN-PV10), que así no dispara un fetch por dosis aplicada.
+  useEffect(() => {
+    if (activeTab !== "vacunacion" || tiposVacuna.length > 0) return;
+    listarTiposVacuna()
+      .then(setTiposVacuna)
+      .catch(() => setTiposVacuna([]));
+  }, [activeTab, tiposVacuna.length]);
+
+  /**
+   * RN-PV10: al aplicar una dosis se propone el refuerzo siguiente, nunca se crea
+   * solo. Si el tipo de vacuna no tiene `meses_refuerzo_sugerido` (o el catálogo
+   * no cargó), no hay sugerencia y el flujo termina como siempre.
+   */
+  function proponerRefuerzo(aplicada: DosisVacunacion, fechaAplicada: string) {
+    const tipo = tiposVacuna.find((t) => t.id === aplicada.tipoVacunaId);
+    setRefuerzo(calcularRefuerzoSugerido(tipo, fechaAplicada));
+  }
 
   async function handleExport(format: FormatoExport) {
     if (!mascotaId) return;
@@ -382,6 +406,7 @@ export function HistorialClinicoPage() {
         open={programarOpen}
         onOpenChange={setProgramarOpen}
         petId={mascotaId}
+        tiposVacuna={tiposVacuna}
         onSaved={() => { void cargarPlanVacunacion(); }}
       />
 
@@ -389,6 +414,28 @@ export function HistorialClinicoPage() {
         open={dosisParaAplicar != null}
         onOpenChange={(open) => { if (!open) setDosisParaAplicar(null); }}
         dosis={dosisParaAplicar}
+        onSaved={(aplicada, fechaAplicada) => {
+          void cargarPlanVacunacion();
+          proponerRefuerzo(aplicada, fechaAplicada);
+        }}
+      />
+
+      {/*
+        RN-PV10: el refuerzo se propone pre-cargado y solo se crea si el
+        veterinario confirma. Programarlo NO vuelve a sugerir: la cadena termina
+        acá (la sugerencia nace únicamente de aplicar una dosis).
+      */}
+      <ProgramarDosisDialog
+        open={refuerzo != null}
+        onOpenChange={(open) => { if (!open) setRefuerzo(null); }}
+        petId={mascotaId}
+        tiposVacuna={tiposVacuna}
+        sugerencia={refuerzo?.mensaje ?? null}
+        initialValues={
+          refuerzo
+            ? { tipoVacunaId: refuerzo.tipoVacunaId, fechaEstimada: refuerzo.fechaEstimada }
+            : undefined
+        }
         onSaved={() => { void cargarPlanVacunacion(); }}
       />
     </div>

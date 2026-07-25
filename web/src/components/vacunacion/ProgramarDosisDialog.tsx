@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Controller, useForm } from "react-hook-form";
 import { toast } from "sonner";
-import { Loader2 } from "lucide-react";
+import { Loader2, Sparkles } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -23,6 +23,7 @@ import {
 import { Textarea } from "../ui/textarea.tsx";
 import { listarTiposVacuna, type TipoVacuna } from "../../api/catalogos.ts";
 import { programarDosis } from "../../api/vacunacion.ts";
+import { hoyISO } from "../../lib/fechas.ts";
 import { ApiError, ErrorCode, type DosisVacunacion } from "../../types/index.ts";
 
 interface FormValues {
@@ -31,15 +32,39 @@ interface FormValues {
   notas:         string;
 }
 
+export interface ProgramarDosisInitialValues {
+  tipoVacunaId?:  string;
+  fechaEstimada?: string;
+  notas?:         string;
+}
+
 interface Props {
   open:         boolean;
   onOpenChange: (open: boolean) => void;
   petId:        string;
   onSaved:      (dosis: DosisVacunacion) => void;
+  /** Catálogo global ya cargado por el padre; si no viene, el diálogo lo pide al abrirse. */
+  tiposVacuna?:  TipoVacuna[];
+  /** Valores con los que abrir el formulario (p. ej. el refuerzo sugerido, RN-PV10). */
+  initialValues?: ProgramarDosisInitialValues;
+  /**
+   * Texto de la sugerencia de refuerzo (RN-PV10). Su presencia pone el diálogo en
+   * modo "refuerzo sugerido": cambia el título y explica de dónde sale la fecha.
+   */
+  sugerencia?: string | null;
 }
 
-export function ProgramarDosisDialog({ open, onOpenChange, petId, onSaved }: Props) {
-  const hoy = new Date().toISOString().slice(0, 10);
+export function ProgramarDosisDialog({
+  open,
+  onOpenChange,
+  petId,
+  onSaved,
+  tiposVacuna,
+  initialValues,
+  sugerencia,
+}: Props) {
+  const hoy = hoyISO();
+  const esSugerencia = Boolean(sugerencia);
 
   const {
     control,
@@ -51,9 +76,19 @@ export function ProgramarDosisDialog({ open, onOpenChange, petId, onSaved }: Pro
 
   const [tipos, setTipos] = useState<TipoVacuna[]>([]);
 
+  // Solo al abrirse: pre-cargar es un valor inicial, no un valor controlado — si
+  // el efecto corriera en cada render pisaría lo que el veterinario esté editando.
   useEffect(() => {
     if (!open) return;
-    reset({ tipoVacunaId: "", fechaEstimada: hoy, notas: "" });
+    reset({
+      tipoVacunaId:  initialValues?.tipoVacunaId  ?? "",
+      fechaEstimada: initialValues?.fechaEstimada ?? hoy,
+      notas:         initialValues?.notas         ?? "",
+    });
+    if (tiposVacuna && tiposVacuna.length > 0) {
+      setTipos(tiposVacuna);
+      return;
+    }
     listarTiposVacuna()
       .then(setTipos)
       .catch(() => setTipos([]));
@@ -90,8 +125,21 @@ export function ProgramarDosisDialog({ open, onOpenChange, petId, onSaved }: Pro
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>Programar dosis</DialogTitle>
-          <DialogDescription>Los campos marcados con * son obligatorios.</DialogDescription>
+          <DialogTitle>{esSugerencia ? "Programar refuerzo sugerido" : "Programar dosis"}</DialogTitle>
+          {/*
+            En modo sugerencia el texto va dentro de DialogDescription (y no en un
+            cartel aparte) para que sea la descripción accesible del diálogo y el
+            lector de pantalla lo anuncie al abrirse. El ícono y el borde —no el
+            color solo— lo distinguen visualmente.
+          */}
+          {esSugerencia ? (
+            <DialogDescription className="flex items-start gap-2 rounded-md border border-amber-400 p-3">
+              <Sparkles className="mt-0.5 size-4 shrink-0 text-amber-600" aria-hidden />
+              <span>{sugerencia} Los campos marcados con * son obligatorios.</span>
+            </DialogDescription>
+          ) : (
+            <DialogDescription>Los campos marcados con * son obligatorios.</DialogDescription>
+          )}
         </DialogHeader>
 
         <form onSubmit={handleSubmit(onSubmit)} className="grid gap-4" noValidate>
