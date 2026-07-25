@@ -12,6 +12,7 @@ import { tenantContext, getTenantContext } from "../../middleware/tenantContext.
 import { requireActiveTenant } from "../../middleware/requireActiveTenant.ts";
 import { requireModule } from "../../middleware/requireModule.ts";
 import { requirePermission } from "../../middleware/requirePermission.ts";
+import { CALLER_UNRESOLVED } from "../../shared/audit.ts";
 
 // Middleware compartido para todos los endpoints de historial
 const sharedMiddleware = [
@@ -26,7 +27,7 @@ const manageMedicalHistory = requirePermission("manage_medical_history");
 
 function callerCtx(c: Context): CallerContext {
   const { tenantId, userId } = getTenantContext(c);
-  return { tenantId, callerUserId: userId, callerName: "unknown", callerRole: "unknown" };
+  return { tenantId, callerUserId: userId, callerName: CALLER_UNRESOLVED, callerRole: CALLER_UNRESOLVED };
 }
 
 // ─── /historial/:id ───────────────────────────────────────────────────────────

@@ -14,6 +14,7 @@ import { tenantContext, getTenantContext } from "../../middleware/tenantContext.
 import { requireActiveTenant } from "../../middleware/requireActiveTenant.ts";
 import { requirePermission } from "../../middleware/requirePermission.ts";
 import type { Context } from "hono";
+import { CALLER_UNRESOLVED } from "../../shared/audit.ts";
 
 export const auditoriaRouter = new Hono();
 
@@ -28,7 +29,7 @@ auditoriaRouter.use(
 
 function callerCtx(c: Context): CallerContext {
   const { tenantId, userId } = getTenantContext(c);
-  return { tenantId, callerUserId: userId, callerName: "unknown", callerRole: "unknown" };
+  return { tenantId, callerUserId: userId, callerName: CALLER_UNRESOLVED, callerRole: CALLER_UNRESOLVED };
 }
 
 // ── GET /auditoria ─────────────────────────────────────────────────────────────

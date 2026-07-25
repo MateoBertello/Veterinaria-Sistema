@@ -9,6 +9,7 @@ import {
 import { DomainError, ErrorCode } from "../../shared/errors.ts";
 import { ok } from "../../shared/envelope.ts";
 import { tenantContext, getTenantContext } from "../../middleware/tenantContext.ts";
+import { CALLER_UNRESOLVED } from "../../shared/audit.ts";
 
 export const authRouter = new Hono();
 
@@ -39,12 +40,12 @@ authRouter.post("/logout", tenantContext, async (c) => {
   const { userId, tenantId } = getTenantContext(c);
   const authHeader = c.req.header("Authorization") ?? "";
 
-  // Obtener nombre y rol del contexto (o desde el service en Etapa 3+)
+  // El JWT no trae nombre ni rol: los resuelve `recordAudit` por `userId`.
   await AuthService.logout({
     userId,
     tenantId,
-    userName:    "unknown",   // se enriquecerá en Etapa 3 con datos del JWT
-    userRole:    "unknown",
+    userName:    CALLER_UNRESOLVED,
+    userRole:    CALLER_UNRESOLVED,
     accessToken: authHeader,
   });
 

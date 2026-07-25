@@ -7,6 +7,7 @@ import { tenantContext, getTenantContext } from "../../middleware/tenantContext.
 import { requireActiveTenant } from "../../middleware/requireActiveTenant.ts";
 import { requireModule } from "../../middleware/requireModule.ts";
 import { requirePermission } from "../../middleware/requirePermission.ts";
+import { CALLER_UNRESOLVED } from "../../shared/audit.ts";
 
 // Notificaciones de turnos: módulo vendible 'turnos' (RN-G2) + permiso
 // manage_appointments (RN-S2), igual que el resto de la agenda.
@@ -22,7 +23,7 @@ notificacionesRouter.use(
 
 function callerCtx(c: Context): CallerContext {
   const { tenantId, userId } = getTenantContext(c);
-  return { tenantId, callerUserId: userId, callerName: "unknown", callerRole: "unknown" };
+  return { tenantId, callerUserId: userId, callerName: CALLER_UNRESOLVED, callerRole: CALLER_UNRESOLVED };
 }
 
 // GET /turnos/notificaciones/config — configuración de recordatorios (RN-NT1).

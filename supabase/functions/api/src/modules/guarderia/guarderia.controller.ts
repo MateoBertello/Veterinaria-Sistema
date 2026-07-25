@@ -14,6 +14,7 @@ import { tenantContext, getTenantContext } from "../../middleware/tenantContext.
 import { requireActiveTenant } from "../../middleware/requireActiveTenant.ts";
 import { requireModule } from "../../middleware/requireModule.ts";
 import { requirePermission } from "../../middleware/requirePermission.ts";
+import { CALLER_UNRESOLVED } from "../../shared/audit.ts";
 
 // Módulo vendible 'guarderia' (regla 4) + permiso manage_daycare (RN-GU6).
 const sharedMiddleware = [
@@ -25,7 +26,7 @@ const sharedMiddleware = [
 
 function callerCtx(c: Context): CallerContext {
   const { tenantId, userId } = getTenantContext(c);
-  return { tenantId, callerUserId: userId, callerName: "unknown", callerRole: "unknown" };
+  return { tenantId, callerUserId: userId, callerName: CALLER_UNRESOLVED, callerRole: CALLER_UNRESOLVED };
 }
 
 // ─── /estadias ────────────────────────────────────────────────────────────────

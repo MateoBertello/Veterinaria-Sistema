@@ -281,7 +281,7 @@ E2E Playwright **18** tests / 7 archivos.
 | :-- | :-: | :-- |
 | RN-S1 | ✅ | `tests/unit/auth.service.test.ts<br>tests/unit/usuarios.service.test.ts` |
 | RN-S2 | ✅ | `tests/unit/requirePermission.test.ts` |
-| RN-S3 | ✅ | `tests/unit/historial.service.test.ts` |
+| RN-S3 | ✅ | `tests/unit/historial.service.test.ts`<br>`tests/unit/audit.test.ts` (autor real del asiento) |
 
 #### RN-SA
 | RN | Test | Archivos |

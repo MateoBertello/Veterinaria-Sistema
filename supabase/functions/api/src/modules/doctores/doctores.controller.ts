@@ -9,6 +9,7 @@ import { ok } from "../../shared/envelope.ts";
 import { tenantContext, getTenantContext } from "../../middleware/tenantContext.ts";
 import { requireActiveTenant } from "../../middleware/requireActiveTenant.ts";
 import { requirePermission } from "../../middleware/requirePermission.ts";
+import { CALLER_UNRESOLVED } from "../../shared/audit.ts";
 
 export const doctoresRouter = new Hono();
 
@@ -24,7 +25,7 @@ doctoresRouter.use(
 /** Contexto del llamante — tenant_id y userId siempre del JWT. */
 function callerCtx(c: Context): CallerContext {
   const { tenantId, userId } = getTenantContext(c);
-  return { tenantId, callerUserId: userId, callerName: "unknown", callerRole: "unknown" };
+  return { tenantId, callerUserId: userId, callerName: CALLER_UNRESOLVED, callerRole: CALLER_UNRESOLVED };
 }
 
 // ── GET /doctores ────────────────────────────────────────────────────────────

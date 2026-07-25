@@ -10,6 +10,7 @@ import { ok } from "../../shared/envelope.ts";
 import { tenantContext, getTenantContext } from "../../middleware/tenantContext.ts";
 import { requireActiveTenant } from "../../middleware/requireActiveTenant.ts";
 import { requirePermission } from "../../middleware/requirePermission.ts";
+import { CALLER_UNRESOLVED } from "../../shared/audit.ts";
 
 export const usuariosRouter = new Hono();
 
@@ -51,8 +52,8 @@ usuariosRouter.post("/", async (c) => {
   const usuario = await UsuariosService.crear(parsed.data, {
     tenantId,
     callerUserId: userId,
-    callerName:   "unknown",
-    callerRole:   "unknown",
+    callerName: CALLER_UNRESOLVED,
+    callerRole: CALLER_UNRESOLVED,
     authHeader:   c.req.header("Authorization") ?? "",
   });
 
@@ -78,8 +79,8 @@ usuariosRouter.put("/:id", async (c) => {
   const usuario = await UsuariosService.editar(id, parsed.data, {
     tenantId,
     callerUserId: userId,
-    callerName:   "unknown",
-    callerRole:   "unknown",
+    callerName: CALLER_UNRESOLVED,
+    callerRole: CALLER_UNRESOLVED,
     authHeader:   c.req.header("Authorization") ?? "",
   });
 
