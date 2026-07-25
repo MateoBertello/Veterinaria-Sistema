@@ -53,5 +53,7 @@ export async function login(page: Page, username: string, password: string): Pro
   await page.getByLabel("Usuario").fill(username);
   await page.getByLabel("Contraseña").fill(password);
   await page.getByRole("button", { name: "Iniciar sesión" }).click();
-  await page.waitForURL("**/clientes");
+  // El aterrizaje post-login es el panel de inicio ("/", Etapa 12B). Se espera el
+  // saludo y no la URL: "/" hace match con cualquier ruta en los patrones glob.
+  await page.getByRole("heading", { name: /^Bienvenido/ }).waitFor();
 }
