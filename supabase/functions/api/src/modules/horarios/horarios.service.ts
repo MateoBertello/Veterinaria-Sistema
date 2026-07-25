@@ -13,6 +13,13 @@ export interface CallerContext {
   callerUserId: string;
   callerName:   string;
   callerRole:   string;
+  /**
+   * RN-HOR7: `true` para quien administra la clínica (`manage_users`), que
+   * gestiona el horario de cualquier profesional. Con `false` —el veterinario
+   * con `manage_schedules`— solo puede tocar el suyo. La lectura no distingue:
+   * ver la agenda del resto es parte de coordinarse.
+   */
+  canManageAll: boolean;
 }
 
 export interface HorarioPublico {
@@ -71,7 +78,7 @@ export const HorarioService = {
   ): Promise<Record<string, unknown>> {
     const { data } = await db
       .from("doctores")
-      .select("id, tenant_id")
+      .select("id, tenant_id, user_id")
       .eq("id", doctorId)
       .eq("tenant_id", tenantId)
       .single();
@@ -81,6 +88,34 @@ export const HorarioService = {
       throw new DomainError(ErrorCode.FORBIDDEN, 403, "Doctor no encontrado en este tenant");
     }
     return data as unknown as Record<string, unknown>;
+  },
+
+  /**
+   * RN-HOR7 (pertenencia): quien no administra la clínica solo puede modificar
+   * el horario de SU propio perfil profesional. Se valida sobre la fila del
+   * doctor ya cargada, así no agrega una consulta.
+   */
+  _assertPuedeGestionar(doctor: Record<string, unknown>, ctx: CallerContext): void {
+    if (ctx.canManageAll) return;
+
+    if ((doctor["user_id"] as string | null) !== ctx.callerUserId) {
+      throw new DomainError(
+        ErrorCode.FORBIDDEN,
+        403,
+        "Solo podés gestionar tu propio horario",
+      );
+    }
+  },
+
+  /** Igual que `_assertPuedeGestionar`, para operaciones que parten de una franja. */
+  async _assertPuedeGestionarFranja(
+    db: ReturnType<typeof getServiceDb>,
+    doctorId: string,
+    ctx: CallerContext,
+  ): Promise<void> {
+    if (ctx.canManageAll) return;
+    const doctor = await this._doctorDelTenant(db, doctorId, ctx.tenantId);
+    this._assertPuedeGestionar(doctor, ctx);
   },
 
   /** Franjas de un profesional (activas + inactivas), ordenadas por día y hora. */
@@ -126,7 +161,8 @@ export const HorarioService = {
     const data = parsed.data;
 
     const db = getServiceDb();
-    await this._doctorDelTenant(db, doctorId, ctx.tenantId); // RN-HOR4
+    const doctor = await this._doctorDelTenant(db, doctorId, ctx.tenantId); // RN-HOR4
+    this._assertPuedeGestionar(doctor, ctx);                                // RN-HOR7
 
     const inicio = toMinutes(data.startTime);
     const fin    = toMinutes(data.endTime);
@@ -207,6 +243,9 @@ export const HorarioService = {
 
     const actualRow = actual as unknown as Record<string, unknown>;
 
+    // RN-HOR7: la franja tiene que ser del propio profesional (salvo admin).
+    await this._assertPuedeGestionarFranja(db, actualRow["doctor_id"] as string, ctx);
+
     // RN-HOR2: al activar, revalidar solapamiento (excluyéndose a sí misma).
     if (active) {
       const inicio = toMinutes(actualRow["start_time"] as string);
@@ -264,6 +303,13 @@ export const HorarioService = {
     if (!actual) {
       throw new DomainError(ErrorCode.FORBIDDEN, 403, "Franja no encontrada en este tenant");
     }
+
+    // RN-HOR7: la franja tiene que ser del propio profesional (salvo admin).
+    await this._assertPuedeGestionarFranja(
+      db,
+      (actual as unknown as Record<string, unknown>)["doctor_id"] as string,
+      ctx,
+    );
 
     const { error } = await db
       .from("horarios_doctor")

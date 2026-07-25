@@ -451,15 +451,16 @@ describeIntegration("Dashboard: criterio de cada métrica", () => {
 // ─── RN-S2: gate por permiso, con roles reales ────────────────────────────────
 
 describeIntegration("Dashboard: RN-S2 — cada métrica exige el permiso de su endpoint dueño", () => {
-  it("veterinario (sin manage_clients ni manage_daycare) → esas métricas vienen null", async () => {
+  it("veterinario (sin manage_daycare) → esa métrica viene null", async () => {
     if (skipIfNoCredentials() || !tenantA?.jwtVet) return;
 
     const { status, body } = await getResumen(tenantA.jwtVet);
 
     expect(status).toBe(200);
-    expect(body.data.clientes).toBeNull();
     expect(body.data.estadiasHoy).toBeNull();
-    // Lo que sí tiene el rol veterinario:
+    // Lo que sí tiene el rol veterinario, incluido manage_clients (el Documento
+    // Maestro lo lista como actor de la gestión de clientes).
+    expect(body.data.clientes).toBe(ESPERADO_A.clientes);
     expect(body.data.mascotasActivas).toBe(ESPERADO_A.mascotasActivas);
     expect(body.data.turnosHoy).toBe(ESPERADO_A.turnosHoy);
     expect(body.data.vacunasProximas30d).toBe(ESPERADO_A.vacunasProximas30d);

@@ -8,10 +8,24 @@ import { requireActiveTenant } from "../../middleware/requireActiveTenant.ts";
 import { requirePermission } from "../../middleware/requirePermission.ts";
 import { CALLER_UNRESOLVED } from "../../shared/audit.ts";
 
-/** Contexto del llamante — tenant_id y userId siempre del JWT. */
+/**
+ * Contexto del llamante — tenant_id y userId siempre del JWT.
+ *
+ * `canManageAll` (RN-HOR7) sale de los permisos que ya resolvió
+ * `requirePermission("manage_schedules")` y dejó en el contexto: quien además
+ * administra la clínica (`manage_users`) gestiona el horario de cualquiera; el
+ * veterinario, solo el suyo.
+ */
 function callerCtx(c: Context): CallerContext {
   const { tenantId, userId } = getTenantContext(c);
-  return { tenantId, callerUserId: userId, callerName: CALLER_UNRESOLVED, callerRole: CALLER_UNRESOLVED };
+  const permisos = c.get("permisos") ?? new Set<string>();
+  return {
+    tenantId,
+    callerUserId: userId,
+    callerName:   CALLER_UNRESOLVED,
+    callerRole:   CALLER_UNRESOLVED,
+    canManageAll: permisos.has("manage_users"),
+  };
 }
 
 // ────────────────────────────────────────────────────────────────────────────────
@@ -20,12 +34,15 @@ function callerCtx(c: Context): CallerContext {
 // ────────────────────────────────────────────────────────────────────────────────
 export const horariosDoctorRouter = new Hono();
 
-horariosDoctorRouter.use(
-  "/*",
-  tenantContext,
-  requireActiveTenant,
-  requirePermission("manage_schedules"),
-);
+// Ojo con el alcance: este router se monta en /doctores JUNTO con el de gestión
+// de profesionales, así que un `use("/*")` acá le aplicaba manage_schedules a
+// TODO /doctores —incluido el `GET /doctores` que sirve el otro router— y le
+// devolvía 403 a la recepcionista al abrir "Agendar turno". El middleware se
+// acota a las rutas que este router realmente atiende.
+const gateHorarios = [tenantContext, requireActiveTenant, requirePermission("manage_schedules")] as const;
+
+horariosDoctorRouter.use("/horarios/resumen", ...gateHorarios);
+horariosDoctorRouter.use("/:id/horarios", ...gateHorarios);
 
 // ── GET /doctores/horarios/resumen ──────────────────────────────────────────────
 // Ruta estática: declarada antes de las rutas con :id para evitar capturas.

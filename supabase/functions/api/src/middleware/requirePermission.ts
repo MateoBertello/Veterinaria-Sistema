@@ -3,6 +3,13 @@ import { DomainError, ErrorCode } from "../shared/errors.ts";
 import { getDb } from "../shared/db.ts";
 import { getTenantContext } from "./tenantContext.ts";
 
+declare module "hono" {
+  interface ContextVariableMap {
+    /** Permisos efectivos del usuario, ya resueltos por el middleware. */
+    permisos: Set<string>;
+  }
+}
+
 const PERMISOS_SELECT = `
   rol_id,
   roles!inner(
@@ -66,10 +73,12 @@ export function requirePermission(permiso: string) {
       );
     }
 
-    // Verificar si algún permiso del rol coincide
-    const tienePermiso = hasPermission(data, permiso);
+    // Se deja el set en el contexto: los handlers que además necesitan saber si
+    // el usuario administra (p. ej. RN-HOR7) lo reusan sin repetir la consulta.
+    const efectivos = listPermissions(data);
+    c.set("permisos", efectivos);
 
-    if (!tienePermiso) {
+    if (!efectivos.has(permiso)) {
       throw new DomainError(
         ErrorCode.FORBIDDEN,
         403,
@@ -81,8 +90,33 @@ export function requirePermission(permiso: string) {
   };
 }
 
-function hasPermission(userData: unknown, permiso: string): boolean {
-  return listPermissions(userData).has(permiso);
+/**
+ * Middleware factory: alcanza con UNO de los permisos de la lista.
+ *
+ * Para datos que varios roles necesitan leer aunque su gestión sea de otro:
+ * el listado de profesionales lo consume el que arma horarios, el que agenda
+ * turnos y el que registra un evento clínico, pero editarlos sigue siendo tarea
+ * de `manage_users`. Exigir el permiso de gestión para poder LEER dejaba a esos
+ * roles sin poder usar sus propias pantallas.
+ */
+export function requireAnyPermission(permisos: string[]) {
+  return async function (c: Context, next: Next): Promise<Response | void> {
+    const { userId } = getTenantContext(c);
+    const authHeader = c.req.header("Authorization") ?? "";
+
+    const efectivos = await getUserPermissions(userId, authHeader);
+    c.set("permisos", efectivos);
+
+    if (!permisos.some((p) => efectivos.has(p))) {
+      throw new DomainError(
+        ErrorCode.FORBIDDEN,
+        403,
+        `Permiso requerido: alguno de ${permisos.join(", ")}`,
+      );
+    }
+
+    await next();
+  };
 }
 
 function listPermissions(userData: unknown): Set<string> {

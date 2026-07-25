@@ -3,6 +3,7 @@ import { Hono } from "hono";
 import { tenantContext } from "../../supabase/functions/api/src/middleware/tenantContext.ts";
 import {
   getUserPermissions,
+  requireAnyPermission,
   requirePermission,
 } from "../../supabase/functions/api/src/middleware/requirePermission.ts";
 import { errorHandler } from "../../supabase/functions/api/src/middleware/errorHandler.ts";
@@ -121,5 +122,73 @@ describe("getUserPermissions", () => {
 
     expect(db.eq).toHaveBeenCalledWith("id", "user-1");
     expect(db.eq).toHaveBeenCalledWith("active", true);
+  });
+});
+
+// ─── requireAnyPermission ────────────────────────────────────────────────────
+// Leer el listado de profesionales lo necesitan varios roles (horarios, turnos,
+// historial) aunque su gestión siga siendo de manage_users.
+
+function buildAppAny(permisos: string[]) {
+  const app = new Hono();
+  app.onError(errorHandler);
+  app.get("/protected", tenantContext, requireAnyPermission(permisos), (c) => c.json({ ok: true }));
+  return app;
+}
+
+describe("requireAnyPermission middleware", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("alcanza con UNO de los permisos de la lista", async () => {
+    mockDbSequence(mockGetDb, [permissionResult(["manage_schedules"])]);
+
+    const res = await sendReq(buildAppAny(["manage_users", "manage_schedules"]));
+
+    expect(res.status).toBe(200);
+  });
+
+  it("el veterinario (manage_medical_history) puede leer aunque no tenga manage_users", async () => {
+    mockDbSequence(mockGetDb, [permissionResult(["manage_pets", "manage_medical_history"])]);
+
+    const res = await sendReq(buildAppAny(["manage_users", "manage_medical_history"]));
+
+    expect(res.status).toBe(200);
+  });
+
+  it("sin ninguno de los permisos → 403 FORBIDDEN con el envelope estándar", async () => {
+    mockDbSequence(mockGetDb, [permissionResult(["manage_daycare"])]);
+
+    const res  = await sendReq(buildAppAny(["manage_users", "manage_schedules"]));
+    const body = await res.json();
+
+    expect(res.status).toBe(403);
+    expect(body.success).toBe(false);
+    expect(body.error.code).toBe("FORBIDDEN");
+    expect(body.error.message).toContain("manage_users");
+  });
+
+  it("usuario inexistente o inactivo → 403 (getUserPermissions devuelve vacío)", async () => {
+    mockDbSequence(mockGetDb, [{ data: null, error: { message: "no rows" } }]);
+
+    const res = await sendReq(buildAppAny(["manage_users"]));
+
+    expect(res.status).toBe(403);
+  });
+
+  it("deja los permisos efectivos en el contexto para el handler (sin repetir la consulta)", async () => {
+    mockDbSequence(mockGetDb, [permissionResult(["manage_schedules", "manage_users"])]);
+
+    const app = new Hono();
+    app.onError(errorHandler);
+    app.get("/protected", tenantContext, requireAnyPermission(["manage_schedules"]), (c) =>
+      c.json({ admin: c.get("permisos").has("manage_users") }),
+    );
+
+    const res  = await sendReq(app);
+    const body = await res.json();
+
+    expect(body.admin).toBe(true);
+    // Una sola consulta: la del middleware.
+    expect(mockGetDb).toHaveBeenCalledTimes(1);
   });
 });

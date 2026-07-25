@@ -233,6 +233,14 @@ const toggleModuloSchema = z.object({
 
 ---
 
+## 2.3 bis Horarios de Atención — *acceso (redefine RN-HOR5)*
+
+- **RN-HOR7 (gestión del horario propio):** el profesional con `manage_schedules` gestiona **únicamente las franjas de su propio perfil `Doctor`** (`doctores.user_id` = usuario del JWT); sobre el de otro obtiene `403 FORBIDDEN`. Quien administra la clínica (`manage_users`) gestiona el de cualquiera. **La lectura no se restringe**: ver la agenda del resto del equipo es parte de coordinarse, y el módulo Turnos la consume para ofrecer slots. Esto **redefine RN-HOR5** de la v1.0 ("gestión restringida a Administrador"), que dejaba inutilizable el permiso `manage_schedules` que el seeder ya otorgaba al rol veterinario.
+- **Corolario de acceso (lectura de profesionales):** el listado de profesionales (`GET /doctores`) es un dato de apoyo de Horarios, Turnos, Historial Clínico y Vacunación —todos eligen un profesional de una lista—, así que su **lectura** requiere cualquiera de `manage_users`, `manage_schedules`, `manage_appointments`, `manage_medical_history` o `view_medical_history`. Su **gestión** (alta/edición del perfil profesional) sigue restringida a `manage_users` (RN-SEC5).
+- **Matriz de permisos por rol (seeder Nivel 2):** el rol **Veterinario** incluye `manage_clients`, consistente con las fichas de caso de uso del Documento Maestro que lo listan como actor de la gestión de clientes. Roles base: Administrador (todos), Veterinario (`manage_clients`, `manage_pets`, `view_medical_history`, `manage_medical_history`, `manage_appointments`, `manage_schedules`), Recepcionista (`manage_clients`, `manage_pets`, `view_medical_history`, `manage_appointments`, `manage_daycare`).
+
+---
+
 ## 2.4 Submódulo: Gestión de Servicios *(NUEVO)*
 
 ### Caso de Uso: Gestión de Servicios

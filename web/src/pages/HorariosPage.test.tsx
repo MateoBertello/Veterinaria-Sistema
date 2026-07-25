@@ -19,6 +19,43 @@ vi.mock("sonner", () => ({
   toast: { success: vi.fn(), error: vi.fn() },
 }));
 
+// La pantalla distingue quién administra la clínica (RN-HOR7): por defecto, admin.
+const mockAuth = {
+  status: "authenticated" as const,
+  user: {
+    id: "u-admin",
+    username: "admin_leo",
+    fullName: "Admin Leo",
+    roleName: "Administrador",
+    permissions: ["manage_schedules", "manage_users"],
+  },
+  login: () => Promise.resolve(),
+  logout: () => Promise.resolve(),
+};
+
+vi.mock("../auth/AuthContext.tsx", () => ({ useAuth: () => mockAuth }));
+
+/** Sesión de un veterinario: `manage_schedules` sin `manage_users`. */
+function sesionVeterinario(userId = "u1") {
+  mockAuth.user = {
+    id: userId,
+    username: "vet_leo",
+    fullName: "Dra. Ana Gómez",
+    roleName: "Veterinario",
+    permissions: ["manage_schedules", "manage_medical_history"],
+  };
+}
+
+function sesionAdmin() {
+  mockAuth.user = {
+    id: "u-admin",
+    username: "admin_leo",
+    fullName: "Admin Leo",
+    roleName: "Administrador",
+    permissions: ["manage_schedules", "manage_users"],
+  };
+}
+
 import { HorariosPage } from "./HorariosPage.tsx";
 import { listarDoctores } from "../api/doctores.ts";
 import { alternarFranja, eliminarFranja, listarHorariosDeDoctor } from "../api/horarios.ts";
@@ -179,5 +216,66 @@ describe("HorariosPage", () => {
     await userEvent.click(screen.getByRole("button", { name: /Agregar franja/i }));
 
     expect(await screen.findByRole("heading", { name: /Agregar franja/i })).toBeInTheDocument();
+  });
+});
+
+// ─── RN-HOR7: el profesional gestiona solo su propio horario ──────────────────
+
+describe("HorariosPage — RN-HOR7 (veterinario)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    sesionVeterinario("u1");
+  });
+
+  it("no muestra el selector de doctor: precarga su propio perfil", async () => {
+    mockListarDoctores.mockResolvedValue({
+      items: [makeDoctor({ id: "d1", userId: "u1" }), makeDoctor({ id: "d2", userId: "u2", name: "Dr. Otro" })],
+      meta: { page: 1, limit: 100, total: 2 },
+    });
+    mockListarHorarios.mockResolvedValue([makeFranja()]);
+
+    render(
+      <TooltipProvider>
+        <HorariosPage />
+      </TooltipProvider>,
+    );
+
+    // Carga las franjas de SU perfil, sin pedirle que elija.
+    await waitFor(() => expect(mockListarHorarios).toHaveBeenCalledWith("d1"));
+    expect(screen.queryByText("Doctor")).not.toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /Agregar franja/i })).toBeInTheDocument();
+  });
+
+  it("si su usuario no tiene perfil profesional, lo explica en vez de dejar la pantalla vacía", async () => {
+    mockListarDoctores.mockResolvedValue({
+      items: [makeDoctor({ id: "d2", userId: "u2", name: "Dr. Otro" })],
+      meta: { page: 1, limit: 100, total: 1 },
+    });
+
+    render(
+      <TooltipProvider>
+        <HorariosPage />
+      </TooltipProvider>,
+    );
+
+    expect(await screen.findByText(/no tiene un perfil profesional asociado/i)).toBeInTheDocument();
+    expect(mockListarHorarios).not.toHaveBeenCalled();
+  });
+
+  it("el administrador sí elige profesional", async () => {
+    sesionAdmin();
+    mockListarDoctores.mockResolvedValue({
+      items: [makeDoctor()],
+      meta: { page: 1, limit: 20, total: 1 },
+    });
+
+    render(
+      <TooltipProvider>
+        <HorariosPage />
+      </TooltipProvider>,
+    );
+
+    expect(await screen.findByText("Doctor")).toBeInTheDocument();
+    expect(mockListarHorarios).not.toHaveBeenCalled();
   });
 });

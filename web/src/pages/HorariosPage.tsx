@@ -15,12 +15,21 @@ import {
   eliminarFranja,
   listarHorariosDeDoctor,
 } from "../api/horarios.ts";
+import { listarDoctores } from "../api/doctores.ts";
+import { useAuth } from "../auth/AuthContext.tsx";
 import { ApiError, type Doctor, type Franja } from "../types/index.ts";
 
 const DIA_LABEL = ["Domingo", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"];
 
 export function HorariosPage() {
+  const { user } = useAuth();
+  // RN-HOR7: quien no administra la clínica solo puede tocar SU horario, así que
+  // no se le ofrece un selector donde casi toda opción terminaría en 403: se le
+  // precarga su propio perfil profesional.
+  const esAdmin = user?.permissions.includes("manage_users") ?? false;
+
   const [doctor, setDoctor] = useState<Doctor | null>(null);
+  const [perfilPropioError, setPerfilPropioError] = useState<string | null>(null);
   const [franjas, setFranjas] = useState<Franja[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -45,6 +54,34 @@ export function HorariosPage() {
   useEffect(() => {
     void cargar();
   }, [cargar]);
+
+  // Profesional no administrador: se resuelve su propio perfil por el userId de
+  // la sesión (`Doctor.userId`) y queda fijo.
+  useEffect(() => {
+    if (esAdmin || !user) return;
+    let activo = true;
+
+    listarDoctores({ limit: 100 })
+      .then(({ items }) => {
+        if (!activo) return;
+        const propio = items.find((d) => d.userId === user.id);
+        if (propio) setDoctor(propio);
+        else {
+          setPerfilPropioError(
+            "Tu usuario no tiene un perfil profesional asociado, así que no tenés horarios propios que gestionar.",
+          );
+        }
+      })
+      .catch((err) => {
+        if (activo) {
+          setPerfilPropioError(
+            err instanceof ApiError ? err.message : "No se pudo cargar tu perfil profesional",
+          );
+        }
+      });
+
+    return () => { activo = false; };
+  }, [esAdmin, user]);
 
   function abrirNueva() { setEditing(null); setFormOpen(true); }
   function abrirEdicion(f: Franja) { setEditing(f); setFormOpen(true); }
@@ -75,15 +112,19 @@ export function HorariosPage() {
         </p>
       </header>
 
-      <div className="space-y-1">
-        <p className="text-sm font-medium">Doctor</p>
-        <DoctorCombobox value={doctor} onChange={setDoctor} />
-      </div>
+      {esAdmin ? (
+        <div className="space-y-1">
+          <p className="text-sm font-medium">Doctor</p>
+          <DoctorCombobox value={doctor} onChange={setDoctor} />
+        </div>
+      ) : null}
 
       {!doctor ? (
         <Card>
           <CardContent className="py-10 text-center text-sm text-muted-foreground">
-            Elegí un doctor para ver y gestionar sus horarios.
+            {esAdmin
+              ? "Elegí un doctor para ver y gestionar sus horarios."
+              : perfilPropioError ?? "Cargando tu perfil profesional…"}
           </CardContent>
         </Card>
       ) : (

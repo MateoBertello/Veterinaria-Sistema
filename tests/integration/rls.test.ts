@@ -556,7 +556,7 @@ describeIntegration("RLS-10: on_tenant_created — roles correctos", () => {
     expect(count).toBe(11);
   });
 
-  it("el rol veterinario tiene exactamente 5 permisos", async () => {
+  it("el rol veterinario tiene exactamente 6 permisos, incluido manage_clients", async () => {
     if (skipIfNoCredentials()) return;
     const { data: vetRol } = await serviceDb
       .from("roles")
@@ -565,12 +565,16 @@ describeIntegration("RLS-10: on_tenant_created — roles correctos", () => {
       .eq("name", "veterinario")
       .single();
 
-    const { count } = await serviceDb
+    const { data: permisos, count } = await serviceDb
       .from("rol_permiso")
-      .select("*", { count: "exact", head: true })
+      .select("permisos!inner(name)", { count: "exact" })
       .eq("rol_id", vetRol?.id ?? "");
 
-    expect(count).toBe(5);
+    expect(count).toBe(6);
+    // El Documento Maestro lo lista como actor de la gestión de clientes; sin
+    // este permiso no podía ni consultar la ficha del dueño de su paciente.
+    const nombres = (permisos ?? []).map((rp: { permisos: { name: string } }) => rp.permisos.name);
+    expect(nombres).toContain("manage_clients");
   });
 
   it("el rol recepcionista tiene exactamente 5 permisos", async () => {

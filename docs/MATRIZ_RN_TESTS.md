@@ -199,6 +199,7 @@ E2E Playwright **18** tests / 7 archivos.
 | RN-HOR4 | ✅ | `tests/unit/horarios.service.test.ts` |
 | RN-HOR5 | ✅ | `tests/unit/horarios.controller.test.ts` |
 | RN-HOR6 | ✅ | `tests/unit/horarios.service.test.ts` |
+| RN-HOR7 | ✅ | `tests/unit/horarios.service.test.ts`<br>`tests/unit/requirePermission.test.ts` (lectura de profesionales) |
 
 #### RN-MA
 | RN | Test | Archivos |
@@ -366,7 +367,8 @@ controller que cite la RN de su módulo.
 | RN-ES4 | Estados de turno requieren `manage_appointments` |
 | RN-EX5 | Export requiere al menos `view_medical_history` |
 | RN-GU6 | Guardería requiere `manage_appointments`/`manage_daycare` |
-| RN-HOR5 | Horarios restringidos a Administrador |
+| RN-HOR5 | Horarios restringidos a Administrador (redefinida por RN-HOR7: el profesional gestiona el suyo) |
+| RN-HOR7 | El profesional gestiona solo su propio horario; el admin, el de cualquiera |
 | RN-ME5 | Modificar estadía requiere `manage_appointments`/`manage_daycare` |
 | RN-TU7 | Turnos requieren `manage_appointments` |
 

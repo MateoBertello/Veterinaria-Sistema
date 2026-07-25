@@ -23,15 +23,19 @@ const mockRecordAudit  = vi.mocked(recordAudit);
 const TENANT_ID = "11111111-1111-4111-8111-111111111111";
 const DOCTOR_ID = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
 const FRANJA_ID = "ffffffff-ffff-4fff-8fff-ffffffffffff";
+// Usuario dueño del perfil profesional DOCTOR_ID (RN-HOR7).
+const VET_USER_ID = "99999999-9999-4999-8999-999999999999";
 
+// Admin de la clínica: gestiona el horario de cualquier profesional (RN-HOR7).
 const ctx = {
   tenantId:     TENANT_ID,
   callerUserId: "22222222-2222-4222-8222-222222222222",
   callerName:   "Admin Leo",
   callerRole:   "admin",
+  canManageAll: true,
 };
 
-const doctorRow = { id: DOCTOR_ID, tenant_id: TENANT_ID };
+const doctorRow = { id: DOCTOR_ID, tenant_id: TENANT_ID, user_id: VET_USER_ID };
 
 function franjaRow(over: Record<string, unknown> = {}) {
   return {
@@ -288,5 +292,86 @@ describe("HorarioService", () => {
     // Orden estable por día/hora.
     expect(resumen[0].franjas.map((f) => f.dayOfWeek)).toEqual([1, 3]);
     expect(resumen[0].franjas[0]).toMatchObject({ startTime: "09:00", endTime: "13:00" });
+  });
+
+  // ── RN-HOR7 (pertenencia) ────────────────────────────────────────────────────
+  // El veterinario tiene manage_schedules, pero solo sobre SU perfil profesional;
+  // el admin de la clínica (canManageAll) no tiene esa restricción.
+
+  const ctxVet = { ...ctx, callerUserId: VET_USER_ID, callerName: "vet_leo", callerRole: "veterinario", canManageAll: false };
+  const ctxOtroVet = { ...ctxVet, callerUserId: "88888888-8888-4888-8888-888888888888" };
+
+  it("RN-HOR7: el veterinario crea franjas en su propio perfil", async () => {
+    const db = buildDbChain({ singleSeq: [doctorRow, franjaRow()] });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    const franja = await HorarioService.crearFranja(
+      DOCTOR_ID,
+      { dayOfWeek: 1, startTime: "09:00", endTime: "13:00", active: true },
+      ctxVet,
+    );
+
+    expect(franja.doctorId).toBe(DOCTOR_ID);
+  });
+
+  it("RN-HOR7: el veterinario NO puede crear franjas en el perfil de otro → FORBIDDEN", async () => {
+    const db = buildDbChain({ singleSeq: [doctorRow] });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    await expect(
+      HorarioService.crearFranja(
+        DOCTOR_ID,
+        { dayOfWeek: 1, startTime: "09:00", endTime: "13:00", active: true },
+        ctxOtroVet,
+      ),
+    ).rejects.toMatchObject({ code: ErrorCode.FORBIDDEN, statusCode: 403 });
+
+    // Cortó antes de tocar la tabla de franjas.
+    expect(db["insert"]).not.toHaveBeenCalled();
+  });
+
+  it("RN-HOR7: el veterinario no puede desactivar la franja de otro → FORBIDDEN", async () => {
+    const db = buildDbChain({ singleSeq: [franjaRow(), doctorRow] });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    await expect(
+      HorarioService.alternarActivo(FRANJA_ID, false, ctxOtroVet),
+    ).rejects.toMatchObject({ code: ErrorCode.FORBIDDEN, statusCode: 403 });
+
+    expect(db["update"]).not.toHaveBeenCalled();
+    expect(mockRecordAudit).not.toHaveBeenCalled();
+  });
+
+  it("RN-HOR7: el veterinario no puede eliminar la franja de otro → FORBIDDEN", async () => {
+    const db = buildDbChain({ singleSeq: [franjaRow(), doctorRow] });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    await expect(
+      HorarioService.eliminar(FRANJA_ID, ctxOtroVet),
+    ).rejects.toMatchObject({ code: ErrorCode.FORBIDDEN, statusCode: 403 });
+
+    expect(db["delete"]).not.toHaveBeenCalled();
+    expect(mockRecordAudit).not.toHaveBeenCalled();
+  });
+
+  it("RN-HOR7: el admin (canManageAll) gestiona el horario de cualquier profesional", async () => {
+    const db = buildDbChain({ singleSeq: [franjaRow(), franjaRow({ active: false })] });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    await HorarioService.alternarActivo(FRANJA_ID, false, ctx);
+
+    expect(db["update"]).toHaveBeenCalledWith({ active: false });
+    // Ni siquiera consulta el perfil del doctor: no hace falta chequear pertenencia.
+    expect((db["from"] as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]))
+      .not.toContain("doctores");
+  });
+
+  it("RN-HOR7: la LECTURA no se restringe — el veterinario ve la agenda de otro", async () => {
+    const db = buildDbChain({ singleSeq: [doctorRow], thenData: [franjaRow()] });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    const franjas = await HorarioService.listarPorDoctor(DOCTOR_ID, ctxOtroVet);
+
+    expect(franjas).toHaveLength(1);
   });
 });

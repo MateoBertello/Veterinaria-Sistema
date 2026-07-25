@@ -8,19 +8,35 @@ import { DomainError, ErrorCode } from "../../shared/errors.ts";
 import { ok } from "../../shared/envelope.ts";
 import { tenantContext, getTenantContext } from "../../middleware/tenantContext.ts";
 import { requireActiveTenant } from "../../middleware/requireActiveTenant.ts";
-import { requirePermission } from "../../middleware/requirePermission.ts";
+import { requireAnyPermission, requirePermission } from "../../middleware/requirePermission.ts";
 import { CALLER_UNRESOLVED } from "../../shared/audit.ts";
 
 export const doctoresRouter = new Hono();
 
-// Autenticación → tenant activo (RN-SA3) → permiso manage_users.
-// Doctores es una extensión del usuario (RN-SEC5); su gestión va bajo manage_users.
-doctoresRouter.use(
-  "/*",
-  tenantContext,
-  requireActiveTenant,
-  requirePermission("manage_users"),
-);
+/**
+ * Leer el listado de profesionales NO es gestionarlos: lo necesitan el que arma
+ * horarios, el que agenda un turno y el que registra un evento clínico o aplica
+ * una vacuna (todos eligen un profesional de una lista). Exigir `manage_users`
+ * —que solo tiene el Administrador— dejaba al veterinario sin poder usar sus
+ * propias pantallas, ni siquiera para asignarse a sí mismo un horario.
+ */
+const puedeVerProfesionales = requireAnyPermission([
+  "manage_users",
+  "manage_schedules",
+  "manage_appointments",
+  "manage_medical_history",
+  "view_medical_history",
+]);
+
+// Doctores es una extensión del usuario (RN-SEC5): su GESTIÓN sigue bajo manage_users.
+const puedeGestionarProfesionales = requirePermission("manage_users");
+
+// Autenticación → tenant activo (RN-SA3) → permiso, que difiere entre leer y
+// gestionar; se elige por método para no repetir el gate en cada ruta.
+doctoresRouter.use("/*", tenantContext, requireActiveTenant, (c, next) => {
+  const gate = c.req.method === "GET" ? puedeVerProfesionales : puedeGestionarProfesionales;
+  return gate(c, next);
+});
 
 /** Contexto del llamante — tenant_id y userId siempre del JWT. */
 function callerCtx(c: Context): CallerContext {
