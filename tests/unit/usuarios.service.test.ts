@@ -33,6 +33,7 @@ type DbMockState = {
   adminCount?:        number;
   authCreateResult?:  object;
   authDeleteResult?:  object;
+  authUpdateResult?:  object;
   insertResult?:      object;
   updateResult?:      object;
   rolName?:           string;
@@ -91,6 +92,9 @@ function buildMockDb(state: DbMockState = {}) {
         ),
         deleteUser: vi.fn().mockResolvedValue(
           state.authDeleteResult ?? { error: null }
+        ),
+        updateUserById: vi.fn().mockResolvedValue(
+          state.authUpdateResult ?? { data: { user: { id: NEW_USER_ID } }, error: null }
         ),
         listUsers: vi.fn().mockResolvedValue({
           data: {
@@ -193,6 +197,89 @@ describe("RN-SEC4: Unicidad de username y email", () => {
       code:       ErrorCode.DUPLICATE_USER,
       statusCode: 409,
     });
+  });
+});
+
+// ─── Teléfono: validación de formato ─────────────────────────────────────────
+
+describe("Validación de teléfono (números y separadores + - ( ) y espacios)", () => {
+  it("phone con letras → VALIDATION_ERROR", async () => {
+    const db = buildMockDb();
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    await expect(
+      UsuariosService.crear({ ...dtoValido, phone: "abc123" }, callerContext),
+    ).rejects.toMatchObject({ code: ErrorCode.VALIDATION_ERROR });
+  });
+
+  it("phone con formato válido (+54 11 5555-0001) → OK", async () => {
+    const db = buildMockDb();
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    await expect(
+      UsuariosService.crear({ ...dtoValido, phone: "+54 11 5555-0001" }, callerContext),
+    ).resolves.toMatchObject({ username: dtoValido.username });
+  });
+});
+
+// ─── Sincronización de email con Supabase Auth al editar ─────────────────────
+
+describe("Editar email: se sincroniza en Auth para no romper el login", () => {
+  const usuario = {
+    id:        NEW_USER_ID,
+    tenant_id: TENANT_ID,
+    username:  "usuario_orig",
+    email:     "orig@test.com",
+    full_name: "Nombre Original",
+    active:    true,
+    rol_id:    ADMIN_ROLE_ID,
+  };
+
+  it("cambiar el email llama a auth.admin.updateUserById con email_confirm", async () => {
+    const db = buildMockDb({ usuarioExistente: usuario, adminCount: 2, rolName: "admin" });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    await UsuariosService.editar(NEW_USER_ID, { email: "nuevo@test.com" }, callerContext);
+
+    const updateSpy = db.auth.admin.updateUserById as ReturnType<typeof vi.fn>;
+    expect(updateSpy).toHaveBeenCalledOnce();
+    expect(updateSpy.mock.calls[0][0]).toBe(NEW_USER_ID);
+    expect(updateSpy.mock.calls[0][1]).toMatchObject({
+      email:         "nuevo@test.com",
+      email_confirm: true,
+    });
+  });
+
+  it("editar SIN cambiar el email no toca Auth", async () => {
+    const db = buildMockDb({ usuarioExistente: usuario, adminCount: 2, rolName: "admin" });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    await UsuariosService.editar(NEW_USER_ID, { fullName: "Otro Nombre" }, callerContext);
+
+    expect(db.auth.admin.updateUserById as ReturnType<typeof vi.fn>).not.toHaveBeenCalled();
+  });
+
+  it("editar con el MISMO email no toca Auth (no hay cambio real)", async () => {
+    const db = buildMockDb({ usuarioExistente: usuario, adminCount: 2, rolName: "admin" });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    await UsuariosService.editar(NEW_USER_ID, { email: "orig@test.com" }, callerContext);
+
+    expect(db.auth.admin.updateUserById as ReturnType<typeof vi.fn>).not.toHaveBeenCalled();
+  });
+
+  it("si Auth rechaza el email (ya registrado) → DUPLICATE_USER (409)", async () => {
+    const db = buildMockDb({
+      usuarioExistente: usuario,
+      adminCount:       2,
+      rolName:          "admin",
+      authUpdateResult: { data: null, error: { message: "A user with this email address has already been registered" } },
+    });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    await expect(
+      UsuariosService.editar(NEW_USER_ID, { email: "tomado@test.com" }, callerContext),
+    ).rejects.toMatchObject({ code: ErrorCode.DUPLICATE_USER, statusCode: 409 });
   });
 });
 

@@ -7,7 +7,12 @@ export const CrearUsuarioSchema = z.object({
   password:  z.string().min(8, "La contraseña debe tener al menos 8 caracteres"),
   fullName:  z.string().min(1, "El nombre completo es requerido").max(150),
   email:     z.string().email("Formato de email inválido"),
-  phone:     z.string().optional(),
+  phone:     z.string()
+                       .regex(
+                         /^\+?[\d\s()-]{6,20}$/,
+                         "El teléfono solo admite números y los símbolos + - ( ) y espacios",
+                       )
+                       .optional(),
   roleId:    z.string().regex(
                /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
                "El roleId debe ser un UUID válido"

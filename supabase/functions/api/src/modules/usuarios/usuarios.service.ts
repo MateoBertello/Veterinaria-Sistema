@@ -274,6 +274,35 @@ export const UsuariosService = {
     }
 
     // 4. Actualizar
+    const emailAnterior = (usuarioActual as { email: string }).email;
+    const emailNuevo    =
+      data.email !== undefined && data.email !== emailAnterior ? data.email : null;
+
+    // 4a. Si cambia el email, sincronizarlo PRIMERO en Supabase Auth. El login
+    //     autentica contra Auth usando el email del espejo `usuarios`; si solo se
+    //     tocara la tabla, el usuario quedaría con un email que Auth no conoce y
+    //     no podría volver a iniciar sesión (401). Espejamos el rollback de crear().
+    if (emailNuevo !== null) {
+      const { error: authError } = await (db.auth.admin as {
+        updateUserById: (
+          uid: string,
+          attrs: { email: string; email_confirm: boolean },
+        ) => Promise<{ error: { message: string } | null }>;
+      }).updateUserById(id, { email: emailNuevo, email_confirm: true });
+
+      if (authError) {
+        // Unicidad de email en Auth es global (cross-tenant): mapear el choque.
+        const duplicado = /already|registered|exists|duplicate/i.test(authError.message ?? "");
+        throw new DomainError(
+          duplicado ? ErrorCode.DUPLICATE_USER : ErrorCode.INTERNAL_ERROR,
+          duplicado ? 409 : 500,
+          duplicado
+            ? "El email ya está registrado"
+            : `No se pudo actualizar el email en Auth: ${authError.message}`,
+        );
+      }
+    }
+
     const updatePayload: Record<string, unknown> = {};
     if (data.fullName  !== undefined) updatePayload["full_name"] = data.fullName;
     if (data.email     !== undefined) updatePayload["email"]     = data.email;
@@ -289,6 +318,15 @@ export const UsuariosService = {
       .eq("tenant_id", ctx.tenantId);
 
     if (updateError) {
+      // Rollback del email en Auth: no dejar Auth y el espejo desincronizados.
+      if (emailNuevo !== null) {
+        await (db.auth.admin as {
+          updateUserById: (
+            uid: string,
+            attrs: { email: string; email_confirm: boolean },
+          ) => Promise<unknown>;
+        }).updateUserById(id, { email: emailAnterior, email_confirm: true }).catch(() => {});
+      }
       if (updateError.message.includes("duplicate")) {
         throw new DomainError(ErrorCode.DUPLICATE_USER, 409, "Username o email ya en uso");
       }
