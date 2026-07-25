@@ -34,6 +34,13 @@ const USER: AuthUser = {
   permissions: ["manage_clients"],
 };
 
+/** JWT de mentira: el front solo lee claims; la firma la valida el backend. */
+function makeJwt(payload: Record<string, unknown>): string {
+  const b64url = (obj: unknown) =>
+    btoa(JSON.stringify(obj)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  return `${b64url({ alg: "HS256" })}.${b64url(payload)}.firma`;
+}
+
 function Consumer() {
   const { status, user, login: doLogin, logout } = useAuth();
   return (
@@ -88,6 +95,24 @@ describe("AuthProvider", () => {
       expect(screen.getByTestId("status")).toHaveTextContent("anonymous"),
     );
     expect(mockClearToken).toHaveBeenCalled();
+  });
+
+  it("token de PLATAFORMA al bootear → anónimo para el tenant, sin /auth/me y sin borrar el token", async () => {
+    // El Super Admin no tiene tenant_id: /auth/me lo rechazaría y el handler de
+    // 401 borraría un token que sí sirve para /admin/*.
+    mockGetToken.mockReturnValue(makeJwt({
+      sub: "sa-1",
+      exp: Math.floor(Date.now() / 1000) + 3600,
+      app_metadata: { platform_role: "super_admin" },
+    }));
+
+    renderProvider();
+
+    await waitFor(() =>
+      expect(screen.getByTestId("status")).toHaveTextContent("anonymous"),
+    );
+    expect(mockFetchMe).not.toHaveBeenCalled();
+    expect(mockClearToken).not.toHaveBeenCalled();
   });
 
   it("login guarda el token y deja la sesión activa", async () => {

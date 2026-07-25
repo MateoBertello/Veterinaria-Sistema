@@ -1,0 +1,86 @@
+import { NavLink, Outlet, useNavigate } from "react-router-dom";
+import { Building2, LogOut, ShieldCheck } from "lucide-react";
+import { Button } from "../ui/button.tsx";
+import { cn } from "../ui/utils.ts";
+import { getPlatformSession } from "../../lib/platform.ts";
+import { clearToken } from "../../lib/session.ts";
+
+/**
+ * Shell del área de plataforma. Deliberadamente distinto del shell del tenant
+ * (sidebar slate oscuro, mismo acento naranja): quien la usa debe ver de un
+ * vistazo que NO está dentro de una clínica sino en el plano de control.
+ */
+export function AdminShell() {
+  const navigate = useNavigate();
+  const sesion = getPlatformSession();
+
+  // El Super Admin no tiene sesión de tenant: `POST /auth/logout` pasa por
+  // `tenantContext` y rechazaría su token. Se limpia la sesión local y se vuelve
+  // al login; el guard hace el resto.
+  function cerrarSesion() {
+    clearToken();
+    navigate("/login", { replace: true });
+  }
+
+  return (
+    <div className="flex min-h-screen bg-background">
+      <a
+        href="#contenido-admin"
+        className="sr-only focus:not-sr-only focus:absolute focus:left-2 focus:top-2 focus:z-50 focus:rounded-md focus:bg-primary focus:px-4 focus:py-2 focus:text-sm focus:font-medium focus:text-primary-foreground"
+      >
+        Saltar al contenido
+      </a>
+
+      <aside className="hidden w-60 shrink-0 flex-col border-r border-slate-800 bg-slate-900 text-slate-100 md:flex">
+        <div className="flex items-center gap-3 px-6 py-5">
+          <div className="rounded-xl bg-gradient-to-br from-orange-500 to-orange-600 p-2 shadow-md">
+            <ShieldCheck className="size-6 text-white" aria-hidden />
+          </div>
+          <div className="leading-tight">
+            <div className="text-base font-semibold text-white">Plataforma</div>
+            <div className="text-xs text-slate-400">Consola Super Admin</div>
+          </div>
+        </div>
+
+        <nav className="flex flex-1 flex-col gap-1 px-3" aria-label="Navegación de plataforma">
+          <NavLink
+            to="/admin/tenants"
+            className={({ isActive }) =>
+              cn(
+                "flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                isActive
+                  ? "bg-primary text-primary-foreground"
+                  : "text-slate-300 hover:bg-slate-800 hover:text-white",
+              )
+            }
+          >
+            <Building2 className="size-4" aria-hidden />
+            Tenants
+          </NavLink>
+        </nav>
+
+        <div className="mt-auto border-t border-slate-800 px-3 py-4">
+          <div className="px-3 pb-3">
+            <p className="truncate text-sm font-medium text-white">
+              {sesion?.email ?? "Super Admin"}
+            </p>
+            <p className="truncate text-xs text-slate-400">Super Admin de plataforma</p>
+          </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="w-full justify-start text-slate-300 hover:bg-slate-800 hover:text-white"
+            onClick={cerrarSesion}
+          >
+            <LogOut aria-hidden />
+            Cerrar sesión
+          </Button>
+        </div>
+      </aside>
+
+      <main id="contenido-admin" className="flex-1 overflow-x-auto px-4 py-6 md:px-8">
+        <Outlet />
+      </main>
+    </div>
+  );
+}

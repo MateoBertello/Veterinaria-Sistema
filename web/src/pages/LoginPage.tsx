@@ -7,7 +7,7 @@ import {
   type FieldErrors,
   type RegisterOptions,
 } from "react-hook-form";
-import { Loader2, PawPrint } from "lucide-react";
+import { Dog, Loader2 } from "lucide-react";
 import {
   Card,
   CardContent,
@@ -19,6 +19,7 @@ import { Button } from "../components/ui/button.tsx";
 import { Input } from "../components/ui/input.tsx";
 import { Label } from "../components/ui/label.tsx";
 import { useAuth } from "../auth/AuthContext.tsx";
+import { getPlatformSession } from "../lib/platform.ts";
 import { ApiError, type LoginInput } from "../types/index.ts";
 
 type FormValues = LoginInput;
@@ -52,10 +53,17 @@ export function LoginPage() {
     formState: { errors, isSubmitting },
   } = useForm<FormValues>({ defaultValues: VACIO });
 
-  // Ya autenticado: nada que hacer en /login → al destino previo o a Clientes.
+  // Sesión de PLATAFORMA activa (claim super_admin): su lugar es la consola, no
+  // el shell del tenant. "Cerrar sesión" en la consola limpia el token y devuelve
+  // a este formulario.
+  if (getPlatformSession()) {
+    return <Navigate to="/admin/tenants" replace />;
+  }
+
+  // Ya autenticado: nada que hacer en /login → al destino previo o al panel de inicio.
   if (status === "authenticated") {
     const from = (location.state as { from?: Location } | null)?.from?.pathname;
-    return <Navigate to={from ?? "/clientes"} replace />;
+    return <Navigate to={from ?? "/"} replace />;
   }
 
   async function onSubmit(values: FormValues) {
@@ -76,9 +84,14 @@ export function LoginPage() {
     <div className="flex min-h-screen items-center justify-center bg-background px-4 py-10">
       <Card className="w-full max-w-sm">
         <CardHeader className="items-center text-center">
-          <div className="mb-2 flex items-center gap-2">
-            <PawPrint className="size-7 text-primary" aria-hidden />
-            <span className="text-2xl font-semibold text-orange-800">Leo</span>
+          <div className="mb-2 flex flex-col items-center gap-3">
+            <div className="rounded-2xl bg-gradient-to-br from-orange-500 to-orange-600 p-3 shadow-lg">
+              <Dog className="size-9 text-white" aria-hidden />
+            </div>
+            <div>
+              <div className="text-2xl font-semibold text-orange-800">Veterinaria Leo</div>
+              <div className="text-sm text-muted-foreground">Sistema de Gestión Profesional</div>
+            </div>
           </div>
           <CardTitle className="text-lg font-semibold">Iniciar sesión</CardTitle>
           <CardDescription>Ingresá tus credenciales para continuar.</CardDescription>

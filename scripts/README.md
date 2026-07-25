@@ -93,6 +93,25 @@ internamente:
 
 Tenant: **Veterinaria Demo** · plan **premium** (los 3 módulos visibles).
 
+## Consola Super Admin (`/admin/*`)
+
+El Super Admin de plataforma **no es un usuario de tenant**: es un usuario de
+Supabase Auth con `app_metadata.platform_role = 'super_admin'`, sin fila en
+`usuarios` y sin `tenant_id`. Por eso **no entra por `POST /auth/login`** (ese
+endpoint busca por username en `usuarios`): su sesión sale directo de Supabase
+Auth. `node scripts/crear-super-admin.mjs` hace las dos cosas — lo provisiona
+(idempotente) e imprime el `access_token` con la línea para abrir la consola:
+
+```bash
+# DEV local: toma SUPABASE_URL / SERVICE_ROLE / ANON del .env (acepta las TEST_*)
+SUPER_ADMIN_EMAIL=super@leo.local SUPER_ADMIN_PASSWORD='Super1234!' \
+  node scripts/crear-super-admin.mjs
+```
+
+El front lee el JWT de `localStorage.sb-token`: pegando la línea que imprime el
+script y recargando, `/admin/tenants` abre. El token vence (1 h por defecto) —
+volvé a correr el script para renovarlo.
+
 ## Errores comunes (troubleshooting)
 
 Estos síntomas parecen "login roto" pero casi siempre son del entorno local:

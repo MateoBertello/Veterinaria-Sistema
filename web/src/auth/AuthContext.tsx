@@ -10,6 +10,7 @@ import {
 import { setUnauthorizedHandler } from "../api/client.ts";
 import { fetchMe, login as loginRequest, logoutRequest } from "../api/auth.ts";
 import { clearToken, getToken, setToken } from "../lib/session.ts";
+import { isSuperAdmin } from "../lib/platform.ts";
 import type { AuthUser, LoginInput } from "../types/index.ts";
 
 type AuthStatus = "loading" | "authenticated" | "anonymous";
@@ -43,6 +44,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     let activo = true;
 
     if (!getToken()) {
+      setStatus("anonymous");
+      return;
+    }
+
+    // Token de PLATAFORMA (Super Admin): no tiene tenant_id, así que /auth/me lo
+    // rechazaría con 401 y el handler de sesión expirada borraría un token que
+    // sí es válido para /admin/*. No hay perfil de tenant que rehidratar: queda
+    // anónimo para el shell del tenant, y `RequireSuperAdmin` lee el claim.
+    if (isSuperAdmin()) {
       setStatus("anonymous");
       return;
     }
