@@ -1,7 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { Hono } from "hono";
 import { tenantContext } from "../../supabase/functions/api/src/middleware/tenantContext.ts";
-import { requirePermission } from "../../supabase/functions/api/src/middleware/requirePermission.ts";
+import {
+  getUserPermissions,
+  requirePermission,
+} from "../../supabase/functions/api/src/middleware/requirePermission.ts";
 import { errorHandler } from "../../supabase/functions/api/src/middleware/errorHandler.ts";
 
 vi.mock("../../supabase/functions/api/src/shared/db.ts", () => ({
@@ -66,5 +69,57 @@ describe("requirePermission middleware", () => {
     const res = await sendReq(buildApp("manage_pets"));
     const body = await res.json();
     expect(body.error.message).toContain("manage_pets");
+  });
+});
+
+// ─── getUserPermissions ──────────────────────────────────────────────────────
+// Helper para endpoints que evalúan VARIOS permisos (p. ej. el resumen del
+// dashboard): resuelve el set completo en una sola consulta.
+
+describe("getUserPermissions", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("RN-S2: devuelve el set de permisos del rol del usuario", async () => {
+    mockDbSequence(mockGetDb, [permissionResult(["manage_clients", "manage_pets"])]);
+
+    const permisos = await getUserPermissions("user-1", "Bearer x");
+
+    expect(permisos.has("manage_clients")).toBe(true);
+    expect(permisos.has("manage_pets")).toBe(true);
+    expect(permisos.has("view_audit")).toBe(false);
+    expect(permisos.size).toBe(2);
+  });
+
+  it("resuelve todos los permisos en UNA sola consulta (sin N+1 por permiso)", async () => {
+    const db = mockDbSequence(mockGetDb, [permissionResult(["manage_clients", "manage_pets"])]);
+
+    await getUserPermissions("user-1", "Bearer x");
+
+    expect(db.from).toHaveBeenCalledTimes(1);
+    expect(db.from).toHaveBeenCalledWith("usuarios");
+    expect(db.single).toHaveBeenCalledTimes(1);
+  });
+
+  it("usuario inexistente o inactivo → set vacío (no lanza)", async () => {
+    mockDbSequence(mockGetDb, [permissionResult(null)]);
+
+    const permisos = await getUserPermissions("user-1", "Bearer x");
+
+    expect(permisos.size).toBe(0);
+  });
+
+  it("rol sin permisos asignados → set vacío", async () => {
+    mockDbSequence(mockGetDb, [permissionResult([])]);
+
+    expect((await getUserPermissions("user-1", "Bearer x")).size).toBe(0);
+  });
+
+  it("solo considera usuarios activos (filtra active=true)", async () => {
+    const db = mockDbSequence(mockGetDb, [permissionResult(["manage_clients"])]);
+
+    await getUserPermissions("user-1", "Bearer x");
+
+    expect(db.eq).toHaveBeenCalledWith("id", "user-1");
+    expect(db.eq).toHaveBeenCalledWith("active", true);
   });
 });

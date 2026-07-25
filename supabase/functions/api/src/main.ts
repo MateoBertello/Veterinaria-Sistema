@@ -30,6 +30,7 @@ import {
   planVacunacionMascotaRouter,
   avisosVacunacionRouter,
 } from "./modules/vacunacion/vacunacion.controller.ts";
+import { dashboardRouter } from "./modules/dashboard/dashboard.controller.ts";
 
 const app = new Hono().basePath("/api/v1");
 
@@ -49,6 +50,11 @@ app.get("/health", (c) => {
 
 // ─── Módulos habilitados del tenant autenticado (sidebar dinámico) ──────────
 app.route("/modulos-habilitados", modulosRouter);
+
+// ─── Dashboard (métricas agregadas del tenant — Etapa 12A) ───────────────────
+// Sin requirePermission ni requireModule: el gate es por métrica, dentro del
+// Service (ver dashboard.controller.ts).
+app.route("/dashboard", dashboardRouter);
 
 // ─── Módulo Auth ──────────────────────────────────────────────────────────────
 app.route("/auth", authRouter);
