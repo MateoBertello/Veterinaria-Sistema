@@ -18,18 +18,10 @@ vi.mock("../../supabase/functions/api/src/modules/admin/tenants.service.ts", () 
 import { ModuloService } from "../../supabase/functions/api/src/modules/modulos/modulos.service.ts";
 import { tenantsRouter } from "../../supabase/functions/api/src/modules/admin/tenants.controller.ts";
 import { errorHandler } from "../../supabase/functions/api/src/middleware/errorHandler.ts";
+import { makeJwt } from "./_helpers/permissionMock.ts";
 
 const mockSetModulo = vi.mocked(ModuloService.setModulo);
 
-function makeJwt(payload: object): string {
-  const encode = (obj: object) =>
-    Buffer.from(JSON.stringify(obj))
-      .toString("base64")
-      .replace(/=/g, "")
-      .replace(/\+/g, "-")
-      .replace(/\//g, "_");
-  return `${encode({ alg: "HS256" })}.${encode(payload)}.sig`;
-}
 
 const SUPER_ADMIN_JWT = makeJwt({ sub: "sa-1", app_metadata: { platform_role: "super_admin" } });
 const NORMAL_JWT      = makeJwt({ sub: "user-1", app_metadata: { tenant_id: "tenant-1" } });

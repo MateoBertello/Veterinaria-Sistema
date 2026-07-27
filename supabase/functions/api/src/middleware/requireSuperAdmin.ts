@@ -1,5 +1,6 @@
 import type { Context, Next } from "hono";
 import { DomainError, ErrorCode } from "../shared/errors.ts";
+import { verifyJwt } from "../shared/jwt.ts";
 
 declare module "hono" {
   interface ContextVariableMap {
@@ -14,6 +15,12 @@ declare module "hono" {
  * app_metadata.tenant_id, sino el claim app_metadata.platform_role='super_admin'
  * (consistente con la función SQL is_super_admin() y las RLS de plataforma).
  *
+ * - VERIFICA LA FIRMA del token antes de mirar ningún claim (shared/jwt.ts).
+ *   Acá no es una defensa en profundidad sino EL control: los services de
+ *   /admin/* usan `service_role`, que bypassea RLS, así que la base no vuelve a
+ *   revisar nada. Mientras el claim se leía de un payload solo decodificado,
+ *   un token fabricado a mano —sin credencial de ningún tipo— habilitaba la
+ *   consola de plataforma entera: listar, crear, editar y suspender tenants.
  * - Rechaza con 401 si falta el header Authorization o el JWT es inválido.
  * - Rechaza con 403 FORBIDDEN si el JWT no acredita platform_role='super_admin'.
  * - Adjunta superAdminId al contexto para auditoría (RN-SA5).
@@ -30,15 +37,8 @@ export async function requireSuperAdmin(c: Context, next: Next): Promise<Respons
   }
 
   const token = authHeader.slice("Bearer ".length);
-  const payload = decodeJwtPayload(token);
 
-  if (!payload) {
-    throw new DomainError(
-      ErrorCode.UNAUTHORIZED,
-      401,
-      "Token de autenticación inválido",
-    );
-  }
+  const payload = await verifyJwt(token);
 
   const platformRole = (payload.app_metadata as Record<string, unknown> | undefined)
     ?.platform_role as string | undefined;
@@ -51,7 +51,7 @@ export async function requireSuperAdmin(c: Context, next: Next): Promise<Respons
     );
   }
 
-  const superAdminId = payload.sub as string | undefined;
+  const superAdminId = payload.sub;
   if (!superAdminId) {
     throw new DomainError(
       ErrorCode.UNAUTHORIZED,
@@ -63,18 +63,4 @@ export async function requireSuperAdmin(c: Context, next: Next): Promise<Respons
   c.set("superAdminId", superAdminId);
 
   await next();
-}
-
-function decodeJwtPayload(token: string): Record<string, unknown> | null {
-  try {
-    const parts = token.split(".");
-    if (parts.length !== 3) return null;
-    const base64 = parts[1].replace(/-/g, "+").replace(/_/g, "/");
-    const json = typeof atob !== "undefined"
-      ? atob(base64)
-      : Buffer.from(base64, "base64").toString("utf-8");
-    return JSON.parse(json) as Record<string, unknown>;
-  } catch {
-    return null;
-  }
 }

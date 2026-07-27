@@ -1,14 +1,49 @@
 import { vi } from "vitest";
+import { createHmac } from "node:crypto";
 
-/** JWT falso (sin firmar) para tests de middleware/controller. */
+/**
+ * Secreto con el que se firman los JWT de test.
+ *
+ * Se publica en el entorno al importar este helper porque `verifyJwt` lo lee de
+ * `SUPABASE_JWT_SECRET` en cada verificación. Antes los tests armaban tokens con
+ * la firma literal `"sig"`: servían mientras los middlewares solo decodificaban
+ * el payload, pero ahora la firma se verifica de verdad (era justamente el
+ * agujero que permitía fabricar un token de Super Admin).
+ */
+export const JWT_SECRET_DE_TEST = "secreto-de-test-para-firmar-jwt-en-unitarios";
+
+process.env["SUPABASE_JWT_SECRET"] ??= JWT_SECRET_DE_TEST;
+
+function base64Url(buf: Buffer): string {
+  return buf.toString("base64").replace(/=/g, "").replace(/\+/g, "-").replace(/\//g, "_");
+}
+
+/** JWT HS256 REALMENTE firmado, para tests de middleware/controller. */
 export function makeJwt(payload: object): string {
-  const encode = (obj: object) =>
-    Buffer.from(JSON.stringify(obj))
-      .toString("base64")
-      .replace(/=/g, "")
-      .replace(/\+/g, "-")
-      .replace(/\//g, "_");
-  return `${encode({ alg: "HS256" })}.${encode(payload)}.sig`;
+  const encode = (obj: object) => base64Url(Buffer.from(JSON.stringify(obj)));
+
+  const header = encode({ alg: "HS256", typ: "JWT" });
+  const cuerpo = encode(payload);
+  const firma  = base64Url(
+    createHmac("sha256", JWT_SECRET_DE_TEST).update(`${header}.${cuerpo}`).digest(),
+  );
+
+  return `${header}.${cuerpo}.${firma}`;
+}
+
+/**
+ * JWT con los claims pedidos pero firma inválida: el vector de ataque que
+ * cierran `tenantContext` y `requireSuperAdmin`.
+ */
+export function makeJwtForjado(payload: object): string {
+  const partes = makeJwt(payload).split(".");
+  return `${partes[0]}.${partes[1]}.firma-que-no-es`;
+}
+
+/** JWT con `alg: none` y sin firma: la otra variante clásica de forjado. */
+export function makeJwtAlgNone(payload: object): string {
+  const encode = (obj: object) => base64Url(Buffer.from(JSON.stringify(obj)));
+  return `${encode({ alg: "none", typ: "JWT" })}.${encode(payload)}.`;
 }
 
 interface QueryResult {

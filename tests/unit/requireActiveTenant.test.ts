@@ -10,17 +10,9 @@ vi.mock("../../supabase/functions/api/src/shared/db.ts", () => ({
 }));
 
 import { getDb } from "../../supabase/functions/api/src/shared/db.ts";
+import { makeJwt } from "./_helpers/permissionMock.ts";
 const mockGetDb = vi.mocked(getDb);
 
-function makeJwt(payload: object): string {
-  const encode = (obj: object) =>
-    Buffer.from(JSON.stringify(obj))
-      .toString("base64")
-      .replace(/=/g, "")
-      .replace(/\+/g, "-")
-      .replace(/\//g, "_");
-  return `${encode({ alg: "HS256" })}.${encode(payload)}.sig`;
-}
 
 const VALID_JWT = makeJwt({ sub: "u1", app_metadata: { tenant_id: "tenant-1" } });
 

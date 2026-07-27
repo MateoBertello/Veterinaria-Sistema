@@ -2,16 +2,8 @@ import { describe, it, expect } from "vitest";
 import { Hono } from "hono";
 import { requireSuperAdmin } from "../../supabase/functions/api/src/middleware/requireSuperAdmin.ts";
 import { errorHandler } from "../../supabase/functions/api/src/middleware/errorHandler.ts";
+import { makeJwt, makeJwtAlgNone, makeJwtForjado } from "./_helpers/permissionMock.ts";
 
-function makeJwt(payload: object): string {
-  const encode = (obj: object) =>
-    Buffer.from(JSON.stringify(obj))
-      .toString("base64")
-      .replace(/=/g, "")
-      .replace(/\+/g, "-")
-      .replace(/\//g, "_");
-  return `${encode({ alg: "HS256" })}.${encode(payload)}.sig`;
-}
 
 function buildApp() {
   const app = new Hono();
@@ -56,5 +48,41 @@ describe("requireSuperAdmin middleware", () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.superAdminId).toBe("sa-1");
+  });
+
+  // ── Tokens forjados ────────────────────────────────────────────────────────
+  // Estos endpoints operan con `service_role` (RLS bypasseada), así que la
+  // firma del token es el ÚNICO control: si no se verifica, cualquiera se
+  // fabrica un super admin y se lleva la consola de plataforma entera.
+
+  it("firma inválida con claims de super_admin → 401, NO 403", async () => {
+    const res = await ping(makeJwtForjado({
+      sub: "atacante",
+      app_metadata: { platform_role: "super_admin" },
+      exp: Math.floor(Date.now() / 1000) + 3600,
+    }));
+
+    expect(res.status).toBe(401);
+    const body = await res.json();
+    expect(body.error.code).toBe("UNAUTHORIZED");
+  });
+
+  it("`alg: none` con claims de super_admin → 401", async () => {
+    const res = await ping(makeJwtAlgNone({
+      sub: "atacante",
+      app_metadata: { platform_role: "super_admin" },
+    }));
+
+    expect(res.status).toBe(401);
+  });
+
+  it("token de super_admin vencido → 401", async () => {
+    const res = await ping(makeJwt({
+      sub: "sa-1",
+      app_metadata: { platform_role: "super_admin" },
+      exp: Math.floor(Date.now() / 1000) - 60,
+    }));
+
+    expect(res.status).toBe(401);
   });
 });

@@ -2,22 +2,13 @@ import { describe, it, expect } from "vitest";
 import { Hono } from "hono";
 import { tenantContext } from "../../supabase/functions/api/src/middleware/tenantContext.ts";
 import { errorHandler } from "../../supabase/functions/api/src/middleware/errorHandler.ts";
+import { makeJwt, makeJwtAlgNone, makeJwtForjado } from "./_helpers/permissionMock.ts";
 
 // JWT de prueba: header.payload.signature
 // payload: { sub: "user-123", app_metadata: { tenant_id: "tenant-abc" } }
 const TENANT_ID = "tenant-abc";
 const USER_ID   = "user-123";
 
-function makeJwt(payload: object): string {
-  const encode = (obj: object) =>
-    Buffer.from(JSON.stringify(obj))
-      .toString("base64")
-      .replace(/=/g, "")
-      .replace(/\+/g, "-")
-      .replace(/\//g, "_");
-
-  return `${encode({ alg: "HS256", typ: "JWT" })}.${encode(payload)}.fakesig`;
-}
 
 const VALID_JWT = makeJwt({
   sub: USER_ID,
@@ -112,5 +103,43 @@ describe("tenantContext middleware", () => {
     // El tenantId resuelto es el del JWT, no el de la query
     expect(body.tenantId).toBe(TENANT_ID);
     expect(body.tenantId).not.toBe("otro-tenant-malicioso");
+  });
+
+  // ── Tokens forjados ────────────────────────────────────────────────────────
+  // Acá la firma no es el único control (PostgREST la revalida en cada
+  // consulta), pero un token inventado tiene que morir en la puerta y no
+  // avanzar por la cadena de middlewares como si fuera una sesión real.
+
+  it("firma inválida → 401 aunque traiga un tenant_id bien formado", async () => {
+    const app = buildApp();
+    const res = await req(app, {
+      auth: `Bearer ${makeJwtForjado({ sub: USER_ID, app_metadata: { tenant_id: TENANT_ID } })}`,
+    });
+
+    expect(res.status).toBe(401);
+    const body = await res.json() as { error: { code: string } };
+    expect(body.error.code).toBe("UNAUTHORIZED");
+  });
+
+  it("`alg: none` → 401", async () => {
+    const app = buildApp();
+    const res = await req(app, {
+      auth: `Bearer ${makeJwtAlgNone({ sub: USER_ID, app_metadata: { tenant_id: TENANT_ID } })}`,
+    });
+
+    expect(res.status).toBe(401);
+  });
+
+  it("token vencido → 401", async () => {
+    const app = buildApp();
+    const res = await req(app, {
+      auth: `Bearer ${makeJwt({
+        sub: USER_ID,
+        app_metadata: { tenant_id: TENANT_ID },
+        exp: Math.floor(Date.now() / 1000) - 60,
+      })}`,
+    });
+
+    expect(res.status).toBe(401);
   });
 });
