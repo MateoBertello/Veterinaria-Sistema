@@ -13,6 +13,14 @@ export enum ErrorCode {
   // ── Autenticación / Autorización ──────────────────────────────────
   UNAUTHORIZED = "UNAUTHORIZED",
   FORBIDDEN    = "FORBIDDEN",
+  /** Rate limit del login agotado (RN-AUT5). Antes viajaba como UNAUTHORIZED con status 429. */
+  RATE_LIMITED = "RATE_LIMITED",
+  /**
+   * El identificador de login existe en más de un tenant y no alcanza para
+   * elegir cuál. El username es único POR TENANT, así que dos clínicas pueden
+   * tener su propio `admin`; en ese caso hay que entrar con el email.
+   */
+  AMBIGUOUS_IDENTIFIER = "AMBIGUOUS_IDENTIFIER",
 
   // ── Usuarios ──────────────────────────────────────────────────────
   DUPLICATE_USER = "DUPLICATE_USER",

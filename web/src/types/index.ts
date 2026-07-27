@@ -648,7 +648,15 @@ export interface AuthUser {
 /** Respuesta de `POST /auth/login`: token JWT + datos del usuario. */
 export interface LoginResult {
   token: string;
+  /** Refresh token de GoTrue: permite renovar la sesión sin volver a loguearse. */
+  refreshToken: string;
   user:  AuthUser;
+}
+
+/** Respuesta de `POST /auth/refresh`: par de tokens renovado (GoTrue los rota). */
+export interface RefreshResult {
+  token:        string;
+  refreshToken: string;
 }
 
 export interface LoginInput {

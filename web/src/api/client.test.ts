@@ -169,3 +169,87 @@ describe("apiClientBlob — respuestas fuera del contrato", () => {
     expect(recibidos.get("X-Export-Truncated")).toBe("true");
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Renovación automática de sesión ante 401
+// ─────────────────────────────────────────────────────────────────────────────
+// El access token dura una hora: sin renovación, vencía en medio de cualquier
+// pantalla y tiraba al usuario a /login perdiendo lo que estuviera cargando.
+
+describe("client.ts — refresh automático ante 401", () => {
+  beforeEach(() => {
+    localStorage.setItem("sb-refresh-token", "refresh-viejo");
+  });
+
+  it("renueva la sesión y reintenta el request una sola vez", async () => {
+    const alExpirar = vi.fn();
+    setUnauthorizedHandler(alExpirar);
+
+    fetchMock
+      .mockResolvedValueOnce(envelopeError("UNAUTHORIZED", 401, "Token vencido"))
+      .mockResolvedValueOnce(envelope({ token: "jwt-nuevo", refreshToken: "refresh-nuevo" }))
+      .mockResolvedValueOnce(envelope([{ id: "c1" }]));
+
+    await expect(apiClient("/clientes")).resolves.toEqual([{ id: "c1" }]);
+
+    expect(fetchMock.mock.calls[1]?.[0]).toContain("/auth/refresh");
+    // El par rotado queda guardado: GoTrue invalida el refresh token usado.
+    expect(localStorage.getItem("sb-token")).toBe("jwt-nuevo");
+    expect(localStorage.getItem("sb-refresh-token")).toBe("refresh-nuevo");
+    // La sesión no se cerró.
+    expect(alExpirar).not.toHaveBeenCalled();
+  });
+
+  it("si el refresh falla, cierra la sesión y propaga el 401", async () => {
+    const alExpirar = vi.fn();
+    setUnauthorizedHandler(alExpirar);
+
+    fetchMock
+      .mockResolvedValueOnce(envelopeError("UNAUTHORIZED", 401, "Token vencido"))
+      .mockResolvedValueOnce(envelopeError("UNAUTHORIZED", 401, "Refresh inválido"));
+
+    await expect(apiClient("/clientes")).rejects.toBeInstanceOf(ApiError);
+    expect(alExpirar).toHaveBeenCalledTimes(1);
+  });
+
+  it("no intenta renovar el 401 del propio login (son credenciales mal)", async () => {
+    fetchMock.mockResolvedValueOnce(envelopeError("UNAUTHORIZED", 401, "Credenciales inválidas"));
+
+    await expect(
+      apiClient("/auth/login", { method: "POST", body: "{}" }),
+    ).rejects.toBeInstanceOf(ApiError);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("varios 401 en paralelo disparan UN solo refresh", async () => {
+    // Al volver a una pestaña dormida vencen varios requests a la vez; si cada
+    // uno renovara por su cuenta, se pisarían el refresh token rotado.
+    fetchMock.mockImplementation((url: string) => {
+      if (String(url).includes("/auth/refresh")) {
+        return Promise.resolve(envelope({ token: "jwt-nuevo", refreshToken: "refresh-nuevo" }));
+      }
+      if (localStorage.getItem("sb-token") === "jwt-nuevo") {
+        return Promise.resolve(envelope([]));
+      }
+      return Promise.resolve(envelopeError("UNAUTHORIZED", 401, "Token vencido"));
+    });
+
+    await Promise.all([apiClient("/clientes"), apiClient("/mascotas"), apiClient("/turnos")]);
+
+    const refrescos = fetchMock.mock.calls.filter((c) => String(c[0]).includes("/auth/refresh"));
+    expect(refrescos).toHaveLength(1);
+  });
+
+  it("sin refresh token guardado, cierra la sesión directamente", async () => {
+    localStorage.removeItem("sb-refresh-token");
+    const alExpirar = vi.fn();
+    setUnauthorizedHandler(alExpirar);
+
+    fetchMock.mockResolvedValueOnce(envelopeError("UNAUTHORIZED", 401, "Token vencido"));
+
+    await expect(apiClient("/clientes")).rejects.toBeInstanceOf(ApiError);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(alExpirar).toHaveBeenCalledTimes(1);
+  });
+});

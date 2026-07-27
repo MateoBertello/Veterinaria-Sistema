@@ -9,7 +9,7 @@ import {
 } from "react";
 import { setUnauthorizedHandler } from "../api/client.ts";
 import { fetchMe, login as loginRequest, logoutRequest } from "../api/auth.ts";
-import { clearToken, getToken, setToken } from "../lib/session.ts";
+import { clearToken, getToken, setSession } from "../lib/session.ts";
 import { isSuperAdmin } from "../lib/platform.ts";
 import type { AuthUser, LoginInput } from "../types/index.ts";
 
@@ -81,8 +81,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [goAnonymous]);
 
   const login = useCallback(async (input: LoginInput) => {
-    const { token, user: perfil } = await loginRequest(input);
-    setToken(token);
+    const { token, refreshToken, user: perfil } = await loginRequest(input);
+    // Se guarda el PAR: con solo el access token la sesión moría a la hora y el
+    // cliente HTTP no tenía con qué renovarla.
+    setSession(token, refreshToken);
     setUser(perfil);
     setStatus("authenticated");
   }, []);

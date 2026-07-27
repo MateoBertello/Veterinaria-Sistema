@@ -1,6 +1,6 @@
 import type { ApiMeta, ApiResponse, ApiSuccessResponse } from "../types/index.ts";
 import { ApiError } from "../types/index.ts";
-import { getToken } from "../lib/session.ts";
+import { getRefreshToken, getToken, setSession } from "../lib/session.ts";
 
 const API_BASE = import.meta.env["VITE_API_URL"] ?? "/api/v1";
 
@@ -11,6 +11,54 @@ let onUnauthorized: (() => void) | null = null;
 
 export function setUnauthorizedHandler(handler: (() => void) | null): void {
   onUnauthorized = handler;
+}
+
+// ─── Renovación de sesión ────────────────────────────────────────────────────
+
+/**
+ * Rutas cuyo 401 NO se intenta renovar: el del login es "credenciales mal" y el
+ * del refresh es "el refresh token ya no sirve". Reintentarlos sería un bucle.
+ */
+function esRenovable(path: string): boolean {
+  return !path.startsWith("/auth/login") && !path.startsWith("/auth/refresh");
+}
+
+// Un solo refresh en vuelo: si vencen varios requests en paralelo (el caso
+// normal al volver a una pestaña dormida), todos esperan la MISMA renovación en
+// vez de disparar una cada uno y pisarse el refresh token rotado.
+let refrescoEnVuelo: Promise<boolean> | null = null;
+
+async function renovarSesion(): Promise<boolean> {
+  if (refrescoEnVuelo) return refrescoEnVuelo;
+
+  const refreshToken = getRefreshToken();
+  if (!refreshToken) return false;
+
+  refrescoEnVuelo = (async () => {
+    try {
+      const response = await fetch(`${API_BASE}/auth/refresh`, {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify({ refreshToken }),
+      });
+
+      const body = await response.json().catch(() => null) as
+        | { success?: boolean; data?: { token?: string; refreshToken?: string } }
+        | null;
+
+      if (!response.ok || !body?.success || !body.data?.token) return false;
+
+      // GoTrue rota el refresh token en cada uso: hay que guardar el nuevo par.
+      setSession(body.data.token, body.data.refreshToken ?? "");
+      return true;
+    } catch {
+      return false;
+    } finally {
+      refrescoEnVuelo = null;
+    }
+  })();
+
+  return refrescoEnVuelo;
 }
 
 /**
@@ -52,6 +100,7 @@ function mensajeFueraDeContrato(status: number): string {
 async function request<T>(
   path: string,
   options: RequestInit = {},
+  yaReintentado = false,
 ): Promise<ApiSuccessResponse<T>> {
   const token = getToken();
 
@@ -86,11 +135,17 @@ async function request<T>(
     return body;
   }
 
-  // Token vencido/inválido en un request autenticado → limpiar sesión y volver a
-  // login. Solo si HABÍA token al hacer el request: así el 401 de credenciales
-  // inválidas del propio login (sin token aún) no dispara el auto-logout. Vale
-  // también cuando el 401 no trae envelope (lo corta el gateway, no la API).
+  // Token vencido/inválido en un request autenticado. Antes de cerrar la sesión
+  // se intenta renovarla con el refresh token y repetir el request UNA vez: el
+  // access token dura una hora y vencía en medio de cualquier pantalla, tirando
+  // al usuario a /login y haciéndole perder lo que estuviera cargando.
+  // Solo si HABÍA token: así el 401 de credenciales inválidas del propio login
+  // (sin token aún) no dispara nada. Vale también cuando el 401 no trae envelope
+  // (lo corta el gateway, no la API).
   if (response.status === 401 && token) {
+    if (!yaReintentado && esRenovable(path) && await renovarSesion()) {
+      return request<T>(path, options, true);
+    }
     onUnauthorized?.();
   }
 
@@ -148,6 +203,7 @@ function filenameFromContentDisposition(header: string | null): string | null {
 export async function apiClientBlob(
   path: string,
   options: RequestInit = {},
+  yaReintentado = false,
 ): Promise<{ blob: Blob; filename: string | null; headers: Headers }> {
   const token = getToken();
   const headers: Record<string, string> = {
@@ -169,6 +225,11 @@ export async function apiClientBlob(
     // (404 de ruta, 5xx del gateway) y ahí no hay envelope que leer.
     const body = await readEnvelope<never>(response);
     if (response.status === 401 && token) {
+      // Mismo criterio que `request`: renovar y reintentar una vez antes de
+      // cerrar la sesión (una exportación larga puede cruzar el vencimiento).
+      if (!yaReintentado && esRenovable(path) && await renovarSesion()) {
+        return apiClientBlob(path, options, true);
+      }
       onUnauthorized?.();
     }
     if (!body || body.success) {

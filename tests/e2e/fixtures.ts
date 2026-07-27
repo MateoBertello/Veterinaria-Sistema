@@ -4,7 +4,7 @@ export const ADMIN_STORAGE_STATE = "playwright/.auth/admin.json";
 
 /** Datos fijos sembrados por `npm run seed` (scripts/seed.mjs) — estables entre corridas. */
 export const SEED = {
-  admin: { username: "admin_demo", password: "Demo1234!" },
+  admin: { username: "admin_demo", email: "admin@demo.local", password: "Demo1234!" },
   vet: { username: "vet_demo", nombreCompleto: "Dr. Vet Demo" },
   clientes: {
     juana: { nombre: "Juana Pérez", dni: "27000000001" },
@@ -50,8 +50,12 @@ export function sumarDias(fechaIso: string, n: number): string {
 
 export async function login(page: Page, username: string, password: string): Promise<void> {
   await page.goto("/login");
-  await page.getByLabel("Usuario").fill(username);
-  await page.getByLabel("Contraseña").fill(password);
+  // `pressSequentially` en vez de `fill`: `fill` escribe el valor de una sola
+  // vez (equivale a pegar) y por eso la suite nunca ejercitó el tipeo real —
+  // que era justamente donde fallaba el login. Tipear tecla por tecla es lo
+  // que hace una persona.
+  await page.getByLabel("Usuario o email").pressSequentially(username);
+  await page.getByLabel("Contraseña").pressSequentially(password);
   await page.getByRole("button", { name: "Iniciar sesión" }).click();
   // El aterrizaje post-login es el panel de inicio ("/", Etapa 12B). Se espera el
   // saludo y no la URL: "/" hace match con cualquier ruta en los patrones glob.

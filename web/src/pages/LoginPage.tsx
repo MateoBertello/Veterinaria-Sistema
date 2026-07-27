@@ -32,6 +32,12 @@ function mensajeDeError(err: unknown): string {
     if (err.statusCode === 429) {
       return "Demasiados intentos. Esperá unos minutos e intentá de nuevo.";
     }
+    // Homónimos en distintas clínicas: reintentar no lo resuelve, hay que
+    // decirle al usuario qué hacer. Se muestra el mensaje del backend, que es
+    // accionable ("ingresá con tu email") y no revela credenciales.
+    if (err.code === "AMBIGUOUS_IDENTIFIER") {
+      return err.message;
+    }
     if (err.statusCode === 401) {
       return "Usuario o contraseña incorrectos.";
     }
@@ -112,9 +118,16 @@ export function LoginPage() {
               control={control}
               errors={errors}
               name="username"
-              label="Usuario"
+              label="Usuario o email"
               autoComplete="username"
               autoFocus
+              // El backend resuelve el identificador sin distinguir mayúsculas,
+              // pero igual se apagan las "ayudas" del teclado: en mobile la
+              // autocapitalización convierte `juanpa` en `Juanpa` y el
+              // autocorrector puede reescribir un usuario que no es una palabra.
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
               rules={{ required: "El usuario es requerido" }}
             />
 
@@ -157,6 +170,9 @@ function Field({
   type,
   autoComplete,
   autoFocus,
+  autoCapitalize,
+  autoCorrect,
+  spellCheck,
   rules,
 }: {
   control: Control<FormValues>;
@@ -166,6 +182,9 @@ function Field({
   type?: string;
   autoComplete?: string;
   autoFocus?: boolean;
+  autoCapitalize?: "none" | "sentences" | "words" | "characters";
+  autoCorrect?: "on" | "off";
+  spellCheck?: boolean;
   rules?: Omit<
     RegisterOptions<FormValues, keyof FormValues>,
     "valueAsNumber" | "valueAsDate" | "setValueAs" | "disabled"
@@ -187,6 +206,9 @@ function Field({
             type={type}
             autoComplete={autoComplete}
             autoFocus={autoFocus}
+            autoCapitalize={autoCapitalize}
+            autoCorrect={autoCorrect}
+            spellCheck={spellCheck}
             aria-invalid={Boolean(error)}
             aria-describedby={describedBy}
             {...field}

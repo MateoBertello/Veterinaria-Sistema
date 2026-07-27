@@ -1,9 +1,10 @@
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import { AuthService } from "./auth.service.ts";
 import {
   LoginSchema,
   RecuperarPasswordSchema,
   RecuperarUsuarioSchema,
+  RefreshSchema,
   ResetPasswordSchema,
 } from "./auth.schemas.ts";
 import { DomainError, ErrorCode } from "../../shared/errors.ts";
@@ -12,6 +13,25 @@ import { tenantContext, getTenantContext } from "../../middleware/tenantContext.
 import { CALLER_UNRESOLVED } from "../../shared/audit.ts";
 
 export const authRouter = new Hono();
+
+/**
+ * IP del cliente para el rate limit (RN-AUT5).
+ *
+ * `X-Forwarded-For` es una LISTA que el cliente puede empezar a escribir: si
+ * manda `X-Forwarded-For: loquesea`, el proxy le agrega la IP real DETRÁS. Por
+ * eso se toma la ÚLTIMA entrada (la que puso el proxy más cercano) y no la
+ * primera, que es la que controla quien llama. Igual no se confía del todo en
+ * este valor: el bucket que sostiene la regla es el del identificador.
+ */
+function ipDelRequest(c: Context): string {
+  const xff = c.req.header("X-Forwarded-For");
+  if (xff) {
+    const entradas = xff.split(",").map((p) => p.trim()).filter((p) => p.length > 0);
+    const ultima = entradas[entradas.length - 1];
+    if (ultima) return ultima;
+  }
+  return c.req.header("CF-Connecting-IP") ?? "unknown";
+}
 
 // ── POST /auth/login ─────────────────────────────────────────────────────────
 authRouter.post("/login", async (c) => {
@@ -27,11 +47,27 @@ authRouter.post("/login", async (c) => {
     );
   }
 
-  const ip = c.req.header("X-Forwarded-For") ??
-             c.req.header("CF-Connecting-IP") ??
-             "unknown";
+  const result = await AuthService.login(parsed.data, ipDelRequest(c));
+  return c.json(ok(result), 200);
+});
 
-  const result = await AuthService.login(parsed.data, ip);
+// ── POST /auth/refresh ───────────────────────────────────────────────────────
+// Renueva el access token con el refresh token. Público a propósito: se llama
+// justamente cuando el access token ya no sirve.
+authRouter.post("/refresh", async (c) => {
+  const body   = await c.req.json().catch(() => ({}));
+  const parsed = RefreshSchema.safeParse(body);
+
+  if (!parsed.success) {
+    throw new DomainError(
+      ErrorCode.VALIDATION_ERROR,
+      422,
+      "Datos de refresh inválidos",
+      parsed.error.issues ?? [],
+    );
+  }
+
+  const result = await AuthService.refresh(parsed.data);
   return c.json(ok(result), 200);
 });
 

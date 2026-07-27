@@ -12,18 +12,19 @@ vi.mock("../api/auth.ts", () => ({
 vi.mock("../lib/session.ts", () => ({
   getToken: vi.fn(),
   setToken: vi.fn(),
+  setSession: vi.fn(),
   clearToken: vi.fn(),
 }));
 
 import { AuthProvider, useAuth } from "./AuthContext.tsx";
 import { login, fetchMe, logoutRequest } from "../api/auth.ts";
-import { getToken, setToken, clearToken } from "../lib/session.ts";
+import { getToken, setSession, clearToken } from "../lib/session.ts";
 
 const mockLogin = vi.mocked(login);
 const mockFetchMe = vi.mocked(fetchMe);
 const mockLogoutRequest = vi.mocked(logoutRequest);
 const mockGetToken = vi.mocked(getToken);
-const mockSetToken = vi.mocked(setToken);
+const mockSetSession = vi.mocked(setSession);
 const mockClearToken = vi.mocked(clearToken);
 
 const USER: AuthUser = {
@@ -115,9 +116,9 @@ describe("AuthProvider", () => {
     expect(mockClearToken).not.toHaveBeenCalled();
   });
 
-  it("login guarda el token y deja la sesión activa", async () => {
+  it("login guarda el PAR de tokens y deja la sesión activa", async () => {
     mockGetToken.mockReturnValue(null);
-    mockLogin.mockResolvedValue({ token: "nuevo-jwt", user: USER });
+    mockLogin.mockResolvedValue({ token: "nuevo-jwt", refreshToken: "nuevo-refresh", user: USER });
     renderProvider();
     await waitFor(() =>
       expect(screen.getByTestId("status")).toHaveTextContent("anonymous"),
@@ -128,7 +129,8 @@ describe("AuthProvider", () => {
     await waitFor(() =>
       expect(screen.getByTestId("status")).toHaveTextContent("authenticated"),
     );
-    expect(mockSetToken).toHaveBeenCalledWith("nuevo-jwt");
+    // El refresh token es lo que permite renovar la sesión al vencer el access token.
+    expect(mockSetSession).toHaveBeenCalledWith("nuevo-jwt", "nuevo-refresh");
     expect(screen.getByTestId("user")).toHaveTextContent("Admin Demo");
   });
 

@@ -46,7 +46,7 @@ describe("LoginPage", () => {
     mockAuth.login.mockResolvedValue(undefined);
     renderPage();
 
-    await userEvent.type(screen.getByLabelText("Usuario"), "  admin_demo  ");
+    await userEvent.type(screen.getByLabelText("Usuario o email"), "  admin_demo  ");
     await userEvent.type(screen.getByLabelText("Contraseña"), "Demo1234!");
     await userEvent.click(screen.getByRole("button", { name: /Iniciar sesión/i }));
 
@@ -64,7 +64,7 @@ describe("LoginPage", () => {
     );
     renderPage();
 
-    await userEvent.type(screen.getByLabelText("Usuario"), "inactivo_test");
+    await userEvent.type(screen.getByLabelText("Usuario o email"), "inactivo_test");
     await userEvent.type(screen.getByLabelText("Contraseña"), "loquesea");
     await userEvent.click(screen.getByRole("button", { name: /Iniciar sesión/i }));
 
@@ -80,7 +80,7 @@ describe("LoginPage", () => {
     );
     renderPage();
 
-    await userEvent.type(screen.getByLabelText("Usuario"), "admin_demo");
+    await userEvent.type(screen.getByLabelText("Usuario o email"), "admin_demo");
     await userEvent.type(screen.getByLabelText("Contraseña"), "x");
     await userEvent.click(screen.getByRole("button", { name: /Iniciar sesión/i }));
 
@@ -94,7 +94,7 @@ describe("LoginPage", () => {
     mockAuth.login.mockReturnValue(new Promise<void>((res) => (resolver = () => res())));
     renderPage();
 
-    await userEvent.type(screen.getByLabelText("Usuario"), "admin_demo");
+    await userEvent.type(screen.getByLabelText("Usuario o email"), "admin_demo");
     await userEvent.type(screen.getByLabelText("Contraseña"), "Demo1234!");
     await userEvent.click(screen.getByRole("button", { name: /Iniciar sesión/i }));
 
@@ -102,6 +102,35 @@ describe("LoginPage", () => {
     expect(boton).toBeDisabled();
 
     resolver?.();
+  });
+
+  it("muestra el mensaje accionable ante identificador ambiguo (409)", async () => {
+    // Reintentar no lo resuelve: hay que decirle al usuario que use su email.
+    mockAuth.login.mockRejectedValue(
+      new ApiError(
+        "AMBIGUOUS_IDENTIFIER",
+        409,
+        "Ese nombre de usuario existe en más de una clínica. Ingresá con tu email.",
+      ),
+    );
+    renderPage();
+
+    await userEvent.type(screen.getByLabelText("Usuario o email"), "admin");
+    await userEvent.type(screen.getByLabelText("Contraseña"), "Demo1234!");
+    await userEvent.click(screen.getByRole("button", { name: /Iniciar sesión/i }));
+
+    expect(await screen.findByText(/existe en más de una clínica/i)).toBeInTheDocument();
+  });
+
+  it("el campo de usuario no autocapitaliza ni autocorrige", async () => {
+    // En mobile la autocapitalización convierte `juanpa` en `Juanpa`; el backend
+    // ya normaliza, pero el campo no debe pelear con lo que el usuario tipea.
+    renderPage();
+
+    const usuario = screen.getByLabelText("Usuario o email");
+    expect(usuario).toHaveAttribute("autocapitalize", "none");
+    expect(usuario).toHaveAttribute("autocorrect", "off");
+    expect(usuario).toHaveAttribute("spellcheck", "false");
   });
 
   it("redirige si ya está autenticado", () => {
