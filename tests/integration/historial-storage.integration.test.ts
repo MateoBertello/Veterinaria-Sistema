@@ -179,12 +179,16 @@ afterAll(async () => {
   // cascade del tenant no choca con la FK a usuarios. adjuntos_medicos cae por cascade.
   if (tenantAId) await serviceDb.from("historial_clinico").delete().eq("tenant_id", tenantAId);
 
+  // Los tenants ANTES que las cuentas de Auth: `usuarios.id` referencia a
+  // `auth.users` con ON DELETE CASCADE (migración 20260725000005), así que
+  // borrar la cuenta primero arrastra la fila espejo y choca con las FK que
+  // apuntan al usuario, dejando la cuenta sin borrar.
+  if (tenantAId) await serviceDb.from("tenants").delete().eq("id", tenantAId);
+  if (tenantBId) await serviceDb.from("tenants").delete().eq("id", tenantBId);
+
   const adminHeaders = { "Authorization": `Bearer ${SERVICE_ROLE_KEY}`, "apikey": SERVICE_ROLE_KEY };
   if (userAId) await fetch(`${SUPABASE_URL}/auth/v1/admin/users/${userAId}`, { method: "DELETE", headers: adminHeaders });
   if (userBId) await fetch(`${SUPABASE_URL}/auth/v1/admin/users/${userBId}`, { method: "DELETE", headers: adminHeaders });
-
-  if (tenantAId) await serviceDb.from("tenants").delete().eq("id", tenantAId);
-  if (tenantBId) await serviceDb.from("tenants").delete().eq("id", tenantBId);
 }, 30_000);
 
 // ─── 1. Tenant A registra evento + sube adjunto (Service real) ───────────────

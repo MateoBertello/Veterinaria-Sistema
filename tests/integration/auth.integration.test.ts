@@ -155,20 +155,25 @@ afterAll(async () => {
     "apikey": SERVICE_ROLE_KEY,
   };
 
-  // Buscar y eliminar todos los usuarios de auth creados para el tenant de prueba
+  // Buscar los usuarios de auth creados para el tenant de prueba…
   const { data: usuarios } = await serviceDb
     .from("usuarios")
     .select("id")
     .eq("tenant_id", tenantId);
+
+  // …borrar PRIMERO el tenant (su CASCADE se lleva usuarios y todo lo que los
+  // referencia) y recién después las cuentas de Auth. Desde que `usuarios.id`
+  // referencia a `auth.users` con ON DELETE CASCADE (migración 20260725000005),
+  // borrar la cuenta primero arrastra la fila espejo y cualquier FK que apunte
+  // al usuario frena el borrado, dejando cuentas huérfanas que rompen la
+  // corrida siguiente.
+  if (tenantId) await serviceDb.from("tenants").delete().eq("id", tenantId);
 
   for (const u of (usuarios ?? []) as { id: string }[]) {
     await fetch(`${SUPABASE_URL}/auth/v1/admin/users/${u.id}`, {
       method: "DELETE", headers: adminHeaders,
     });
   }
-
-  // CASCADE elimina todo lo demás
-  if (tenantId) await serviceDb.from("tenants").delete().eq("id", tenantId);
 });
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────

@@ -221,17 +221,21 @@ beforeAll(async () => {
 afterAll(async () => {
   if (!serviceDb) return;
 
-  // Limpiar usuarios de auth
   const adminHeaders = {
     "Authorization": `Bearer ${SERVICE_ROLE_KEY}`,
     "apikey": SERVICE_ROLE_KEY,
   };
-  if (userAId) await fetch(`${SUPABASE_URL}/auth/v1/admin/users/${userAId}`, { method: "DELETE", headers: adminHeaders });
-  if (userBId) await fetch(`${SUPABASE_URL}/auth/v1/admin/users/${userBId}`, { method: "DELETE", headers: adminHeaders });
 
-  // CASCADE en tenants elimina todo lo demás
+  // CASCADE en tenants elimina todo lo demás. Va PRIMERO: desde que
+  // `usuarios.id` referencia a `auth.users` con ON DELETE CASCADE (migración
+  // 20260725000005), borrar la cuenta de Auth arrastra la fila espejo y las FK
+  // que apuntan al usuario frenan el borrado, dejando cuentas huérfanas.
   if (tenantAId) await serviceDb.from("tenants").delete().eq("id", tenantAId);
   if (tenantBId) await serviceDb.from("tenants").delete().eq("id", tenantBId);
+
+  // Ahora sí, las cuentas de auth.
+  if (userAId) await fetch(`${SUPABASE_URL}/auth/v1/admin/users/${userAId}`, { method: "DELETE", headers: adminHeaders });
+  if (userBId) await fetch(`${SUPABASE_URL}/auth/v1/admin/users/${userBId}`, { method: "DELETE", headers: adminHeaders });
 });
 
 // ─── Guard: skip si no hay credenciales ──────────────────────────────────────

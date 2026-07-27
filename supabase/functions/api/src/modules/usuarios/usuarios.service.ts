@@ -51,7 +51,19 @@ function toPublicUser(row: Record<string, unknown>): UsuarioPublico {
   };
 }
 
-/** Cuenta admins activos del tenant (para RN-SEC6) */
+/**
+ * Cuenta admins activos del tenant (para RN-SEC6).
+ *
+ * Antes contaba `auth.admin.listUsers()`, que devuelve los usuarios de Auth del
+ * PROYECTO ENTERO —todos los tenants, y solo la primera página— con lo cual el
+ * número no tenía relación con la pregunta y la protección del último admin
+ * nunca se disparaba: se podía desactivar al único administrador y dejar a la
+ * clínica sin acceso administrativo. Ahora es un COUNT real sobre `usuarios`.
+ *
+ * Ante un error de consulta devuelve 0 a propósito: el llamador interpreta
+ * "0 o 1 admins" como "no se puede desactivar", o sea que la duda se resuelve
+ * bloqueando la baja en vez de arriesgar dejar al tenant sin administrador.
+ */
 async function countAdminsActivos(
   db: ReturnType<typeof getServiceDb>,
   tenantId: string,
@@ -66,15 +78,44 @@ async function countAdminsActivos(
 
   if (!rolAdmin) return 0;
 
-  // Contar usuarios activos con rol admin
-  const { data: users } = await (db.auth.admin as {
-    listUsers: () => Promise<{ data: { users: unknown[] }; error: unknown }>;
-  }).listUsers();
+  const { count, error } = await db
+    .from("usuarios")
+    .select("id", { count: "exact", head: true })
+    .eq("tenant_id", tenantId)
+    .eq("rol_id", (rolAdmin as { id: string }).id)
+    .eq("active", true);
 
-  // Alternativa: contar desde la tabla usuarios
-  // Usamos auth.admin.listUsers como proxy del mock;
-  // en producción se haría SELECT COUNT(*) FROM usuarios WHERE tenant_id=? AND rol_id=? AND active=true
-  return (users?.users.length as number) ?? 0;
+  if (error) return 0;
+
+  return count ?? 0;
+}
+
+/**
+ * Sincroniza el estado de la cuenta en Supabase Auth (RN-SEC6 / hallazgo de
+ * seguridad).
+ *
+ * `active` vivía SOLO en la tabla espejo `usuarios`. Desactivar a alguien le
+ * cerraba la API (el middleware de permisos filtra por `active`), pero su
+ * cuenta en GoTrue seguía habilitada: podía pedir un token nuevo contra el
+ * endpoint público de Auth y usarlo contra PostgREST, donde RLS solo miraba el
+ * tenant. Banear en Auth corta la emisión de tokens nuevos; los ya emitidos
+ * (hasta 1 h) quedan además neutralizados por el chequeo `usuario_activo()` que
+ * ahora hacen las políticas RLS.
+ */
+async function sincronizarEstadoEnAuth(
+  db: ReturnType<typeof getServiceDb>,
+  userId: string,
+  active: boolean,
+): Promise<void> {
+  await (db.auth.admin as {
+    updateUserById: (
+      uid: string,
+      attrs: { ban_duration: string },
+    ) => Promise<{ error: { message: string } | null }>;
+  }).updateUserById(userId, {
+    // GoTrue espera una duración; "none" levanta el baneo.
+    ban_duration: active ? "none" : "876000h", // ~100 años
+  });
 }
 
 // ─── UsuariosService ──────────────────────────────────────────────────────────
@@ -120,6 +161,27 @@ export const UsuariosService = {
 
     if (existeEmail) {
       throw new DomainError(ErrorCode.DUPLICATE_USER, 409, "El email ya está registrado");
+    }
+
+    // 3b. El rol tiene que ser de ESTE tenant (RN multi-tenant).
+    //     La FK de `usuarios.rol_id` apunta a `roles(id)` a secas, así que un
+    //     roleId de otra clínica entraba sin chistar y dejaba un usuario roto:
+    //     al resolver permisos, RLS no le deja ver ese rol y se queda sin
+    //     ninguno. Se valida ANTES de crear la cuenta en Auth para no tener que
+    //     deshacerla después.
+    const { data: rolDestino } = await db
+      .from("roles")
+      .select("id, name")
+      .eq("id", data.roleId)
+      .eq("tenant_id", ctx.tenantId)
+      .maybeSingle();
+
+    if (!rolDestino) {
+      throw new DomainError(
+        ErrorCode.VALIDATION_ERROR,
+        422,
+        "El rol indicado no existe en esta clínica",
+      );
     }
 
     // 4. Crear en Supabase Auth (con app_metadata.tenant_id)
@@ -172,15 +234,17 @@ export const UsuariosService = {
       );
     }
 
-    // 6. Si rol es 'veterinario' → crear Doctor automáticamente (RN-SEC5)
-    const { data: rol } = await db
-      .from("roles")
-      .select("id, name")
-      .eq("id", data.roleId)
-      .eq("tenant_id", ctx.tenantId)
-      .single();
+    // 5b. Alta creada ya desactivada: banear la cuenta en Auth para que el
+    //     estado de la app y el de Auth nazcan sincronizados.
+    if (!data.active) {
+      await sincronizarEstadoEnAuth(db, authUserId, false);
+    }
 
-    if (rol && (rol as { name: string }).name === "veterinario") {
+    // 6. Si rol es 'veterinario' → crear Doctor automáticamente (RN-SEC5).
+    //    El rol ya se validó y se leyó en el paso 3b: no se vuelve a consultar.
+    const rol = rolDestino as { id: string; name: string };
+
+    if (rol.name === "veterinario") {
       // UPSERT sobre UNIQUE(tenant_id, user_id) con DO NOTHING: si el perfil ya
       // existe se conserva tal cual (specialty/matrícula/available editadas a
       // mano en el ABM de Doctores no se pisan). El default solo aplica al alta.
@@ -217,7 +281,7 @@ export const UsuariosService = {
       phone:      data.phone ?? null,
       active:     data.active,
       rol_id:     data.roleId,
-      rolName:    (rol as { name: string } | null)?.name ?? "",
+      rolName:    rol.name,
       created_at: new Date().toISOString(),
     });
   },
@@ -331,6 +395,13 @@ export const UsuariosService = {
         throw new DomainError(ErrorCode.DUPLICATE_USER, 409, "Username o email ya en uso");
       }
       throw new DomainError(ErrorCode.INTERNAL_ERROR, 500, updateError.message);
+    }
+
+    // 4b. Si cambió el estado, espejarlo en Auth: sin esto la baja era solo
+    //     "de la app" y la cuenta seguía pudiendo autenticarse (ver
+    //     sincronizarEstadoEnAuth).
+    if (data.active !== undefined && data.active !== (usuarioActual as { active: boolean }).active) {
+      await sincronizarEstadoEnAuth(db, id, data.active);
     }
 
     // 5. Si cambió a rol veterinario → upsert Doctor (RN-SEC5)

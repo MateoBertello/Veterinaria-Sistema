@@ -37,6 +37,8 @@ type DbMockState = {
   insertResult?:      object;
   updateResult?:      object;
   rolName?:           string;
+  /** El roleId no pertenece al tenant (o no existe). */
+  rolInexistente?:    boolean;
 };
 
 function buildMockDb(state: DbMockState = {}) {
@@ -78,8 +80,29 @@ function buildMockDb(state: DbMockState = {}) {
         }
         return { data: null, error: { message: "not found" } };
       }),
-      // Para COUNT de admins activos
-      maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
+      // `crear` valida con maybeSingle que el rol sea DEL TENANT antes de
+      // crear la cuenta en Auth (FK compuesta rol/tenant).
+      maybeSingle: vi.fn().mockImplementation(async () => {
+        if (table === "roles") {
+          return {
+            data: state.rolInexistente
+              ? null
+              : { id: ADMIN_ROLE_ID, name: state.rolName ?? "admin" },
+            error: null,
+          };
+        }
+        return { data: null, error: null };
+      }),
+      // La cadena es "thenable" como la de supabase-js: así se puede esperar
+      // directamente una consulta sin terminal explícita. Es lo que hace el
+      // COUNT de admins activos (RN-SEC6), que ahora cuenta sobre `usuarios`
+      // en vez de listar TODAS las cuentas de Auth del proyecto.
+      then: (resolve: (v: unknown) => unknown) =>
+        resolve({
+          data:  [],
+          count: state.adminCount ?? 2,
+          error: (state.updateResult as { error?: unknown } | undefined)?.error ?? null,
+        }),
     })),
     rpc: vi.fn().mockResolvedValue({ error: null }),
     auth: {
@@ -545,5 +568,123 @@ describe("RN-SEC0/RN-SEC2: los permisos se heredan del rol, nunca se asignan por
     expect(insertPayload).toBeDefined();
     expect(insertPayload).not.toHaveProperty("permisos");
     expect(insertPayload).toMatchObject({ rol_id: dtoValido.roleId });
+  });
+});
+
+// ─── Estado de la cuenta y pertenencia del rol (hallazgos de seguridad) ──────
+
+describe("Desactivar un usuario lo desactiva TAMBIÉN en Supabase Auth", () => {
+  // `active` vivía solo en la tabla espejo: la baja cerraba la API pero la
+  // cuenta de GoTrue seguía habilitada y podía pedir tokens nuevos.
+
+  it("active=false → banea la cuenta en Auth", async () => {
+    const db = buildMockDb({
+      usuarioExistente: {
+        id: NEW_USER_ID, tenant_id: TENANT_ID, username: "u", email: "u@t.com",
+        full_name: "U", phone: null, active: true, rol_id: VET_ROLE_ID,
+        created_at: "2026-01-01T00:00:00Z",
+      },
+      rolName: "veterinario",
+      adminCount: 5,
+    });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    await UsuariosService.editar(NEW_USER_ID, { active: false }, callerContext);
+
+    expect(db.auth.admin.updateUserById).toHaveBeenCalledWith(
+      NEW_USER_ID,
+      expect.objectContaining({ ban_duration: expect.not.stringMatching(/^none$/) }),
+    );
+  });
+
+  it("active=true → levanta el baneo", async () => {
+    const db = buildMockDb({
+      usuarioExistente: {
+        id: NEW_USER_ID, tenant_id: TENANT_ID, username: "u", email: "u@t.com",
+        full_name: "U", phone: null, active: false, rol_id: VET_ROLE_ID,
+        created_at: "2026-01-01T00:00:00Z",
+      },
+      rolName: "veterinario",
+    });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    await UsuariosService.editar(NEW_USER_ID, { active: true }, callerContext);
+
+    expect(db.auth.admin.updateUserById).toHaveBeenCalledWith(
+      NEW_USER_ID,
+      { ban_duration: "none" },
+    );
+  });
+
+  it("si el estado NO cambia, no se toca Auth", async () => {
+    const db = buildMockDb({
+      usuarioExistente: {
+        id: NEW_USER_ID, tenant_id: TENANT_ID, username: "u", email: "u@t.com",
+        full_name: "U", phone: null, active: true, rol_id: VET_ROLE_ID,
+        created_at: "2026-01-01T00:00:00Z",
+      },
+      rolName: "veterinario",
+    });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    await UsuariosService.editar(NEW_USER_ID, { fullName: "Otro Nombre" }, callerContext);
+
+    expect(db.auth.admin.updateUserById).not.toHaveBeenCalled();
+  });
+});
+
+describe("El rol asignado tiene que ser del propio tenant", () => {
+  it("roleId de otra clínica → VALIDATION_ERROR y NO se crea la cuenta en Auth", async () => {
+    // La FK vieja apuntaba a `roles(id)` a secas: un rol ajeno entraba sin
+    // error y dejaba un usuario que ni siquiera podía loguear.
+    const db = buildMockDb({ rolInexistente: true });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    await expect(
+      UsuariosService.crear(dtoValido, callerContext),
+    ).rejects.toMatchObject({ code: ErrorCode.VALIDATION_ERROR });
+
+    // Se valida ANTES de tocar Auth: no queda una cuenta que después haya que
+    // borrar a mano.
+    expect(db.auth.admin.createUser).not.toHaveBeenCalled();
+  });
+});
+
+describe("RN-SEC6: el conteo de admins es real, no `listUsers()`", () => {
+  it("con un solo admin activo, desactivarlo → LAST_ADMIN", async () => {
+    const db = buildMockDb({
+      usuarioExistente: {
+        id: NEW_USER_ID, tenant_id: TENANT_ID, username: "admin", email: "a@t.com",
+        full_name: "A", phone: null, active: true, rol_id: ADMIN_ROLE_ID,
+        created_at: "2026-01-01T00:00:00Z",
+      },
+      rolName: "admin",
+      adminCount: 1,
+    });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    await expect(
+      UsuariosService.editar(NEW_USER_ID, { active: false }, callerContext),
+    ).rejects.toMatchObject({ code: ErrorCode.LAST_ADMIN });
+
+    // Y no se banea a nadie si la baja se rechazó.
+    expect(db.auth.admin.updateUserById).not.toHaveBeenCalled();
+  });
+
+  it("ya no consulta `listUsers()` (contaba las cuentas de TODOS los tenants)", async () => {
+    const db = buildMockDb({
+      usuarioExistente: {
+        id: NEW_USER_ID, tenant_id: TENANT_ID, username: "admin", email: "a@t.com",
+        full_name: "A", phone: null, active: true, rol_id: ADMIN_ROLE_ID,
+        created_at: "2026-01-01T00:00:00Z",
+      },
+      rolName: "admin",
+      adminCount: 3,
+    });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    await UsuariosService.editar(NEW_USER_ID, { active: false }, callerContext);
+
+    expect(db.auth.admin.listUsers).not.toHaveBeenCalled();
   });
 });

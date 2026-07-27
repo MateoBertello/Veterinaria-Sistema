@@ -324,11 +324,19 @@ afterAll(async () => {
   if (!serviceDb) return;
   for (const tid of tenantIdsCreados) {
     if (!tid) continue;
+    // ORDEN IMPORTANTE: primero el tenant, después las cuentas de Auth.
+    // Desde que `usuarios.id` referencia a `auth.users` con ON DELETE CASCADE
+    // (migración 20260725000005), borrar la cuenta arrastra la fila espejo — y
+    // eso lo frena cualquier FK que apunte al usuario, como
+    // `historial_clinico.professional_id`. Borrando primero el tenant, su
+    // cascade se lleva todo lo dependiente y la cuenta sale limpia. Al revés,
+    // el DELETE de Auth falla en silencio y deja cuentas huérfanas que hacen
+    // fallar la corrida SIGUIENTE (el email ya existe).
     const { data: usuarios } = await serviceDb.from("usuarios").select("id").eq("tenant_id", tid);
+    await serviceDb.from("tenants").delete().eq("id", tid);
     for (const u of (usuarios ?? []) as { id: string }[]) {
       await fetch(`${SUPABASE_URL}/auth/v1/admin/users/${u.id}`, { method: "DELETE", headers: adminHeaders() });
     }
-    await serviceDb.from("tenants").delete().eq("id", tid);
   }
 });
 

@@ -40,10 +40,30 @@ beforeAll(async () => {
   tenantId = tenant.id;
   await serviceDb.rpc("on_tenant_created", { p_tenant_id: tenantId });
 
-  // usuarios.id es un UUID plano (sin FK a auth.users): no hace falta Auth.
   const { data: rolVet } = await serviceDb
     .from("roles").select("id").eq("tenant_id", tenantId).eq("name", "veterinario").single();
-  usuarioId = crypto.randomUUID();
+
+  // `usuarios.id` ya NO es un UUID suelto: desde la migración
+  // 20260725000005 referencia a `auth.users`, así que la fila espejo necesita
+  // su cuenta de Auth (que es justamente lo que evita las filas huérfanas).
+  const resAuth = await fetch(`${SUPABASE_URL}/auth/v1/admin/users`, {
+    method: "POST",
+    headers: {
+      "Content-Type":  "application/json",
+      "Authorization": `Bearer ${SERVICE_ROLE_KEY}`,
+      "apikey":        SERVICE_ROLE_KEY,
+    },
+    body: JSON.stringify({
+      email:         "vet-dt1@test.com",
+      password:      "Password123!",
+      email_confirm: true,
+      app_metadata:  { tenant_id: tenantId },
+    }),
+  });
+  const authUser = (await resAuth.json()) as { id?: string; msg?: string };
+  if (!authUser.id) throw new Error(`No pude crear la cuenta de Auth: ${authUser.msg ?? "sin id"}`);
+  usuarioId = authUser.id;
+
   const { error: userError } = await serviceDb.from("usuarios").insert({
     id: usuarioId, tenant_id: tenantId, username: "vet_dt1",
     email: "vet-dt1@test.com", full_name: "Vet DT-1", rol_id: rolVet?.id, active: true,
@@ -55,6 +75,14 @@ afterAll(async () => {
   if (!serviceDb || !tenantId) return;
   // El ON DELETE CASCADE de tenants arrastra usuarios y doctores.
   await serviceDb.from("tenants").delete().eq("id", tenantId);
+
+  // La cuenta de Auth vive fuera del tenant: se borra aparte.
+  if (usuarioId) {
+    await fetch(`${SUPABASE_URL}/auth/v1/admin/users/${usuarioId}`, {
+      method:  "DELETE",
+      headers: { "Authorization": `Bearer ${SERVICE_ROLE_KEY}`, "apikey": SERVICE_ROLE_KEY },
+    });
+  }
 });
 
 describeIntegration("DT-1: UNIQUE(tenant_id, user_id) en doctores", () => {
