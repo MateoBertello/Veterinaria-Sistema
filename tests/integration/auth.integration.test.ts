@@ -13,7 +13,7 @@
 // Polyfill WebSocket solo en entorno de tests (NUNCA en código de funciones)
 globalThis.WebSocket = class FakeWebSocket {} as never;
 
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, beforeEach, afterAll } from "vitest";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import app from "../../supabase/functions/api/src/main.ts";
 import { SUPABASE_URL, SUPABASE_ANON_KEY, SERVICE_ROLE_KEY, describeIntegration } from "./_env.ts";
@@ -249,6 +249,19 @@ describeIntegration("tenantContext con JWT real de Supabase", () => {
 });
 
 describeIntegration("RN-AUT1: login vía POST /auth/login", () => {
+  // El rate limit dejó de vivir en memoria del proceso: ahora persiste en
+  // `intentos_login` (RN-AUT5), así que los intentos fallidos SOBREVIVEN entre
+  // corridas de la suite. Sin este reset, tras unas cuantas ejecuciones los
+  // tests que esperan 401 empiezan a recibir 429 y el fallo aparece muy lejos
+  // de su causa. Se limpia antes de cada test, no solo al principio, porque los
+  // propios tests de credenciales inválidas suman intentos.
+  beforeEach(async () => {
+    if (skipIfNoCredentials()) return;
+    await serviceDb.rpc("limpiar_intentos_login", {
+      p_claves: ["user:activo_test", "user:inactivo_test", "ip:unknown"],
+    });
+  });
+
   it("RN-AUT1: credenciales correctas → 200 con token, rol y permisos", async () => {
     if (skipIfNoCredentials()) return;
 
