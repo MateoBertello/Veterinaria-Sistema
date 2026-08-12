@@ -1,70 +1,21 @@
-```
-# Dependencies
 node_modules/
-
-# Build artifacts
 dist/
-build/
-*.js.map
-*.ts.map
-
-# Logs and temp files
-*.log
-*.tmp
-
-# Environment
 .env
 .env.local
-*.env.*
-
-# Editors
-.vscode/
-.idea/
-*.swp
-*.swo
-
-# Python
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
-.Python
-*.so
-.coverage
-coverage/
-htmlcov/
-
-# Testing
-.pytest_cache/
-.mypy_cache/
-.nyc_output/
-coverage/
-
-# OS generated files
+*.env.local
 .DS_Store
-Thumbs.db
+*.log
+.supabase/
+coverage/
 
-# Compression
-*.zip
-*.gz
-*.tar
-*.tgz
-*.bz2
-*.xz
-*.7z
-*.rar
-*.zst
-*.lz4
-*.lzh
-*.cab
-*.arj
-*.rpm
-*.deb
-*.Z
-*.lz
-*.lzo
-*.tar.gz
-*.tar.bz2
-*.tar.xz
-*.tar.zst
-```
+# Artefactos locales de la CLI de Supabase (estado del stack, no versionar)
+supabase/.temp/
+supabase/.branches/
+
+# Playwright (Etapa 9 — S9): sesión guardada por global-setup y reportes locales.
+playwright/.auth/
+playwright-report/
+test-results/
+
+# Referencia visual/UX de Repo 2 (Etapa 10): clon local, no versionar.
+docs/_ref-ui/
