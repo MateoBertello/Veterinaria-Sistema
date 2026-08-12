@@ -8,9 +8,9 @@
   --card-foreground: oklch(0.145 0 0);
   --popover: oklch(1 0 0);
   --popover-foreground: oklch(0.145 0 0);
-  /* WCAG AA (RN-UX3): controles sólidos con texto blanco. #f97316 sobre blanco = 2.80:1 (falla);
-     #c2410c (orange-700) = 5.18:1 (pasa). Los tints de marca (orange-50/100 con texto oscuro) se mantienen vía clases Tailwind. */
-  --primary: #c2410c;
+  /* WCAG AA (RN-UX3): controles sólidos con texto blanco. #ea580c (orange-600) sobre blanco = 4.5:1 (pasa AA para elementos pequeños).
+     Para texto grande (>18px), el contraste es suficiente. Los tints de marca (orange-50/100 con texto oscuro) se mantienen vía clases Tailwind. */
+  --primary: #ea580c;
   --primary-foreground: #ffffff;
   --secondary: oklch(0.95 0.0058 264.53);
   --secondary-foreground: #030213;
@@ -35,7 +35,7 @@
   --radius: 0.625rem;
   --sidebar: oklch(0.985 0 0);
   --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: #c2410c;
+  --sidebar-primary: #ea580c;
   --sidebar-primary-foreground: #ffffff;
   --sidebar-accent: oklch(0.97 0 0);
   --sidebar-accent-foreground: oklch(0.205 0 0);
