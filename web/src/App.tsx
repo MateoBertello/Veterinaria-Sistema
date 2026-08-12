@@ -137,7 +137,7 @@ export function Shell() {
         Saltar al contenido
       </a>
       <Navigation />
-      <main id="contenido" className="flex-1 overflow-x-auto px-4 py-6 md:px-8">
+      <main id="contenido" tabIndex="-1" className="flex-1 overflow-x-auto px-4 py-6 md:px-8">
         <Outlet />
       </main>
       <AccessibilityButton />
