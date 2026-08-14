@@ -1,0 +1,23 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022", "DOM"],
+    "types": ["node"],
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "allowImportingTsExtensions": true
+  },
+  "include": [
+    "tests/**/*",
+    "supabase/functions/api/src/shared/**/*"
+  ],
+  "exclude": [
+    "node_modules",
+    "web",
+    "supabase/functions/api/src/index.ts"
+  ]
+}

@@ -1,0 +1,16 @@
+# Proxy del backend a la Edge Function de Supabase (prod). El front llama
+# same-origin a /api/v1/* y Netlify reenvía; así el login evita CORS.
+#
+# OJO: es SINGLE api, no doble. Supabase hosted strippea solo `/functions/v1`
+# y conserva el nombre de la función (`api`), que coincide con el primer
+# segmento del basePath de Hono (`/api/v1`) → ese `api` se comparte.
+# Verificado contra prod: single `api` → 422 (ruta OK); doble `api` → 404.
+/api/v1/*  https://rvcbtcjsvhqchunribwl.supabase.co/functions/v1/api/v1/:splat  200
+
+# Catálogos (/rest/v1/*) NO se proxean acá: PostgREST exige el header `apikey`
+# y Netlify no puede inyectarlo en un proxy del _redirects. Se resuelven por
+# "modo directo" (web/src/api/catalogos.ts) con VITE_SUPABASE_URL +
+# VITE_SUPABASE_ANON_KEY seteadas en el build de Netlify.
+
+# SPA fallback (debe ir ÚLTIMO: primera coincidencia gana).
+/*  /index.html  200

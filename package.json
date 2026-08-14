@@ -1,0 +1,29 @@
+{
+  "name": "veterinaria-leo",
+  "private": true,
+  "version": "0.0.1",
+  "scripts": {
+    "test": "vitest run tests/unit",
+    "test:watch": "vitest",
+    "test:unit": "vitest run tests/unit",
+    "test:integration": "vitest run tests/integration",
+    "test:e2e": "playwright test",
+    "seed": "node scripts/seed.mjs",
+    "typecheck": "tsc -p supabase/functions/api/tsconfig.json --noEmit && tsc -p web/tsconfig.json --noEmit",
+    "lint": "eslint supabase/functions/api/src web/src"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.61.1",
+    "@supabase/supabase-js": "^2.108.1",
+    "@types/node": "^20.19.43",
+    "@types/ws": "^8.18.1",
+    "dotenv": "^17.4.2",
+    "hono": "^4.12.25",
+    "pdf-lib": "^1.17.1",
+    "typescript": "^5.9.3",
+    "vitest": "^1.6.1",
+    "ws": "^8.21.0",
+    "xlsx": "^0.18.5",
+    "zod": "^4.4.3"
+  }
+}
