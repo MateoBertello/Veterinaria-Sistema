@@ -1,44 +1,40 @@
 import { useState } from "react";
-import { Navigate, useLocation, type Location } from "react-router-dom";
-import {
-  Controller,
-  useForm,
-  type Control,
-  type FieldErrors,
-  type RegisterOptions,
-} from "react-hook-form";
-import { Dog, Loader2 } from "lucide-react";
+import { Navigate } from "react-router-dom";
+import { Controller, useForm, type Control, type FieldErrors } from "react-hook-form";
+import { Loader2, ShieldCheck } from "lucide-react";
 import {
   Card,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
-} from "../components/ui/card.tsx";
-import { Button } from "../components/ui/button.tsx";
-import { Input } from "../components/ui/input.tsx";
-import { Label } from "../components/ui/label.tsx";
-import { useAuth } from "../auth/AuthContext.tsx";
-import { ApiError, type LoginInput } from "../types/index.ts";
+} from "../../components/ui/card.tsx";
+import { Button } from "../../components/ui/button.tsx";
+import { Input } from "../../components/ui/input.tsx";
+import { Label } from "../../components/ui/label.tsx";
+import { usePlatformAuth } from "../../auth/PlatformAuthContext.tsx";
+import { ApiError, type PlatformLoginInput } from "../../types/index.ts";
 
-type FormValues = LoginInput;
+type FormValues = PlatformLoginInput;
 
-const VACIO: FormValues = { username: "", password: "" };
+const VACIO: FormValues = { email: "", password: "" };
 
-/** Traduce el error del envelope a un mensaje genérico (RN-AUT1: nunca revela si falló el usuario o la contraseña). */
+/**
+ * Mensaje del error del envelope.
+ *
+ * El backend responde el MISMO 401 para todo fracaso de credenciales —email
+ * inexistente, contraseña equivocada, cuenta sin el claim de plataforma—, así
+ * que acá tampoco se distingue: un único texto para los tres casos. Distinguir
+ * "no sos Super Admin" de "contraseña incorrecta" le confirmaría al que prueba
+ * que acertó la contraseña.
+ */
 function mensajeDeError(err: unknown): string {
   if (err instanceof ApiError) {
     if (err.statusCode === 429) {
       return "Demasiados intentos. Esperá unos minutos e intentá de nuevo.";
     }
-    // Homónimos en distintas clínicas: reintentar no lo resuelve, hay que
-    // decirle al usuario qué hacer. Se muestra el mensaje del backend, que es
-    // accionable ("ingresá con tu email") y no revela credenciales.
-    if (err.code === "AMBIGUOUS_IDENTIFIER") {
-      return err.message;
-    }
-    if (err.statusCode === 401) {
-      return "Usuario o contraseña incorrectos.";
+    if (err.statusCode === 401 || err.statusCode === 403) {
+      return "Credenciales inválidas.";
     }
     if (err.code === "NETWORK_ERROR") {
       return "No se pudo conectar con el servidor. Intentá de nuevo.";
@@ -47,9 +43,16 @@ function mensajeDeError(err: unknown): string {
   return "Ocurrió un error inesperado. Intentá de nuevo.";
 }
 
-export function LoginPage() {
-  const { status, login } = useAuth();
-  const location = useLocation();
+/**
+ * Login de la consola de plataforma.
+ *
+ * Pantalla propia y no una variante del login de la clínica: son identidades
+ * distintas (email de Supabase Auth contra usuario de un tenant) y caminos
+ * distintos en el backend. El fondo oscuro es el mismo del `AdminShell`, para
+ * que se vea de entrada que esto no es una clínica sino el plano de control.
+ */
+export function PlatformLoginPage() {
+  const { session, login } = usePlatformAuth();
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   const {
@@ -58,41 +61,37 @@ export function LoginPage() {
     formState: { errors, isSubmitting },
   } = useForm<FormValues>({ defaultValues: VACIO });
 
-  // Ya autenticado: nada que hacer en /login → al destino previo o al panel de inicio.
-  if (status === "authenticated") {
-    const from = (location.state as { from?: Location } | null)?.from?.pathname;
-    return <Navigate to={from ?? "/"} replace />;
+  // Ya hay sesión de plataforma: nada que hacer acá.
+  if (session) {
+    return <Navigate to="/admin/tenants" replace />;
   }
 
   async function onSubmit(values: FormValues) {
     setErrorMsg(null);
     try {
-      await login({
-        username: values.username.trim(),
-        password: values.password,
-      });
-      // El éxito cambia el status a "authenticated"; el <Navigate> de arriba
-      // redirige al destino preservado en el próximo render.
+      await login({ email: values.email.trim(), password: values.password });
+      // El éxito puebla la sesión; el <Navigate> de arriba entra a la consola
+      // en el próximo render.
     } catch (err) {
       setErrorMsg(mensajeDeError(err));
     }
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background px-4 py-10">
+    <div className="flex min-h-screen items-center justify-center bg-slate-900 px-4 py-10">
       <Card className="w-full max-w-sm">
         <CardHeader className="items-center text-center">
           <div className="mb-2 flex flex-col items-center gap-3">
             <div className="rounded-2xl bg-gradient-to-br from-orange-500 to-orange-600 p-3 shadow-lg">
-              <Dog className="size-9 text-white" aria-hidden />
+              <ShieldCheck className="size-9 text-white" aria-hidden />
             </div>
             <div>
-              <div className="text-2xl font-semibold text-orange-800">Veterinaria Leo</div>
-              <div className="text-sm text-muted-foreground">Sistema de Gestión Profesional</div>
+              <div className="text-2xl font-semibold text-orange-800">Plataforma</div>
+              <div className="text-sm text-muted-foreground">Consola Super Admin</div>
             </div>
           </div>
           <CardTitle className="text-lg font-semibold">Iniciar sesión</CardTitle>
-          <CardDescription>Ingresá tus credenciales para continuar.</CardDescription>
+          <CardDescription>Acceso restringido al equipo de plataforma.</CardDescription>
         </CardHeader>
 
         <CardContent>
@@ -109,18 +108,11 @@ export function LoginPage() {
             <Field
               control={control}
               errors={errors}
-              name="username"
-              label="Usuario o email"
+              name="email"
+              label="Email"
+              type="email"
               autoComplete="username"
               autoFocus
-              // El backend resuelve el identificador sin distinguir mayúsculas,
-              // pero igual se apagan las "ayudas" del teclado: en mobile la
-              // autocapitalización convierte `juanpa` en `Juanpa` y el
-              // autocorrector puede reescribir un usuario que no es una palabra.
-              autoCapitalize="none"
-              autoCorrect="off"
-              spellCheck={false}
-              rules={{ required: "El usuario es requerido" }}
             />
 
             <Field
@@ -130,7 +122,6 @@ export function LoginPage() {
               label="Contraseña"
               type="password"
               autoComplete="current-password"
-              rules={{ required: "La contraseña es requerida" }}
             />
 
             <Button type="submit" disabled={isSubmitting} className="mt-2">
@@ -162,25 +153,14 @@ function Field({
   type,
   autoComplete,
   autoFocus,
-  autoCapitalize,
-  autoCorrect,
-  spellCheck,
-  rules,
 }: {
-  control: Control<FormValues>;
-  errors: FieldErrors<FormValues>;
-  name: keyof FormValues;
-  label: string;
-  type?: string;
+  control:      Control<FormValues>;
+  errors:       FieldErrors<FormValues>;
+  name:         keyof FormValues;
+  label:        string;
+  type?:        string;
   autoComplete?: string;
-  autoFocus?: boolean;
-  autoCapitalize?: "none" | "sentences" | "words" | "characters";
-  autoCorrect?: "on" | "off";
-  spellCheck?: boolean;
-  rules?: Omit<
-    RegisterOptions<FormValues, keyof FormValues>,
-    "valueAsNumber" | "valueAsDate" | "setValueAs" | "disabled"
-  >;
+  autoFocus?:   boolean;
 }) {
   const error = errors[name]?.message;
   const describedBy = error ? `${name}-error` : undefined;
@@ -191,16 +171,16 @@ function Field({
       <Controller
         control={control}
         name={name}
-        rules={rules}
+        rules={{ required: `${label} es requerido` }}
         render={({ field: { ref: _ref, ...field } }) => (
           <Input
             id={name}
             type={type}
             autoComplete={autoComplete}
             autoFocus={autoFocus}
-            autoCapitalize={autoCapitalize}
-            autoCorrect={autoCorrect}
-            spellCheck={spellCheck}
+            autoCapitalize="none"
+            autoCorrect="off"
+            spellCheck={false}
             aria-invalid={Boolean(error)}
             aria-describedby={describedBy}
             {...field}

@@ -4,9 +4,21 @@
  * El Super Admin opera FUERA de todo tenant: es un usuario de Supabase Auth con
  * `app_metadata.platform_role = 'super_admin'` (lo exige el middleware
  * `requireSuperAdmin` y la función SQL `is_super_admin()`), SIN fila en
- * `usuarios` y SIN `tenant_id`. Por eso NO se loguea por `POST /auth/login`
- * (ese endpoint busca por username en `usuarios`): su sesión se obtiene
- * directamente contra Supabase Auth, que es lo que hace este script.
+ * `usuarios` y SIN `tenant_id`.
+ *
+ * Este script CREA la cuenta; NO es la forma de entrar. Para entrar está
+ * `/admin/login` en la aplicación, que habla con `POST /api/v1/admin/auth/login`
+ * y deja una sesión normal —con refresh token— que se renueva sola.
+ *
+ * Hasta que ese login existió, el script imprimía un access_token y había que
+ * pegarlo a mano en `localStorage.sb-token`. Esa sesión venía sin refresh token,
+ * así que moría a la hora exacta (`jwt_expiry = 3600`) y había que volver a
+ * correr el script; además compartía clave con la sesión de la clínica, así que
+ * cualquier 401 de la API del tenant la borraba. Nada de eso se hace más: el
+ * script no emite tokens.
+ *
+ * `platform_role` solo se puede escribir con la service_role key —nunca desde el
+ * browser—, y eso es justamente lo que hace este script.
  *
  * Idempotente: re-correrlo repara password, confirmación y el claim de plataforma.
  *
@@ -17,13 +29,10 @@
  * En producción, con las variables del entorno destino:
  *   export SUPABASE_URL="https://<ref>.supabase.co"
  *   export SUPABASE_SERVICE_ROLE_KEY="<service_role key>"
- *   export SUPABASE_ANON_KEY="<anon key>"                 # solo para imprimir el token
+ *   export SUPABASE_ANON_KEY="<anon key>"                 # opcional: verifica el login
  *   export SUPER_ADMIN_EMAIL="super@leo.vet"
  *   export SUPER_ADMIN_PASSWORD="una-password-fuerte"
  *   node scripts/crear-super-admin.mjs
- *
- * Al final imprime el access_token y la línea de consola para abrir la consola
- * de plataforma en el navegador (el front lee el JWT de `localStorage.sb-token`).
  */
 
 import { readFileSync } from "node:fs";
@@ -143,34 +152,39 @@ async function main() {
   if (!SUPABASE_ANON_KEY) {
     console.log(
       "\nℹ Exportá SUPABASE_ANON_KEY y volvé a correr el script si querés que además\n" +
-      "  imprima el access_token para abrir la consola en el navegador.",
+      "  verifique que la cuenta puede iniciar sesión en la consola.",
     );
-    return;
+  } else {
+    // Verificación de extremo a extremo de lo que se acaba de provisionar: que
+    // la contraseña sirve Y que el JWT emitido trae el claim. Es exactamente lo
+    // que va a comprobar `POST /admin/auth/login`. La sesión se cierra en el
+    // acto: este script no reparte tokens.
+    const anonDb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+      auth: { persistSession: false },
+      realtime: { transport: ws }, // Node < 22 no trae WebSocket nativo.
+    });
+
+    const { data: sesion, error: signInErr } = await anonDb.auth.signInWithPassword({
+      email: SUPER_ADMIN_EMAIL,
+      password: SUPER_ADMIN_PASSWORD,
+    });
+    if (signInErr || !sesion?.session) die("La cuenta no pudo iniciar sesión", signInErr);
+
+    const claims = JSON.parse(
+      Buffer.from(sesion.session.access_token.split(".")[1], "base64url").toString("utf-8"),
+    );
+    if (claims?.app_metadata?.platform_role !== "super_admin") {
+      die("El JWT emitido NO trae app_metadata.platform_role='super_admin'");
+    }
+
+    await anonDb.auth.signOut();
+    console.log("✓ Verificado: la cuenta inicia sesión y su JWT acredita plataforma.");
   }
 
-  // Sesión de plataforma: password grant contra Supabase Auth (GoTrue). Es la
-  // vía de login del Super Admin — /auth/login del backend es solo para
-  // usuarios de tenant.
-  const anonDb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-    auth: { persistSession: false },
-    realtime: { transport: ws },
-  });
-  const { data: sesion, error: signInErr } = await anonDb.auth.signInWithPassword({
-    email: SUPER_ADMIN_EMAIL,
-    password: SUPER_ADMIN_PASSWORD,
-  });
-  if (signInErr || !sesion?.session) die("No pude obtener el access_token", signInErr);
-
-  const token = sesion.session.access_token;
-  console.log("\n🔑 access_token (JWT de plataforma):\n");
-  console.log(token);
   console.log(
-    "\nPara abrir la consola: pegá esto en la consola del navegador con el front levantado\n" +
-    "y recargá — el guard `RequireSuperAdmin` lee el claim del token:\n",
-  );
-  console.log(`  localStorage.setItem("sb-token", "${token}"); location.href = "/admin/tenants";`);
-  console.log(
-    `\n⚠ El token vence (por defecto 1 h). Volvé a correr el script para renovarlo.`,
+    `\n▶ Entrá por la aplicación: /admin/login (usuario: ${SUPER_ADMIN_EMAIL}).\n` +
+    "  La consola renueva la sesión sola con su refresh token; no hay que volver\n" +
+    "  a correr este script salvo para crear o reparar la cuenta.",
   );
 }
 

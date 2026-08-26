@@ -2,6 +2,12 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { DomainError, ErrorCode } from "../../shared/errors.ts";
 import { recordAudit } from "../../shared/audit.ts";
 import { getDb, getServiceDb } from "../../shared/db.ts";
+import {
+  bucketsDeIntento,
+  limpiarIntentos,
+  registrarIntento,
+  WINDOW_MINUTES,
+} from "../../shared/loginRateLimit.ts";
 import type {
   LoginDto,
   RecuperarPasswordDto,
@@ -9,77 +15,6 @@ import type {
   RefreshDto,
   ResetPasswordDto,
 } from "./auth.schemas.ts";
-
-// ─── Rate Limiter (RN-AUT5) ──────────────────────────────────────────────────
-// El estado vive en la tabla `intentos_login`, NO en memoria del isolate: en
-// serverless el proceso se recicla constantemente y hay varias instancias en
-// paralelo, así que un Map de módulo se reiniciaba solo y no frenaba nada.
-// Ver la migración 20260725000004 para el detalle del diseño.
-
-const WINDOW_MINUTES = 15;
-
-/** Intentos permitidos contra UNA cuenta antes de bloquearla. */
-const MAX_POR_USUARIO = 5;
-
-/**
- * Intentos permitidos desde UNA IP. Deliberadamente holgado: una clínica entera
- * sale por una sola IP pública, así que un umbral bajo acá castiga al local
- * completo por las contraseñas mal tipeadas de cualquiera. Sirve para frenar el
- * barrido automatizado de muchas cuentas, no para proteger una cuenta puntual
- * —de eso se ocupa MAX_POR_USUARIO—.
- */
-const MAX_POR_IP = 50;
-
-/**
- * Buckets contra los que se cuenta un intento, con su techo respectivo.
- *
- * El bucket por IDENTIFICADOR es el que hace el trabajo: quien ataca una cuenta
- * concreta no puede escaparle, porque el identificador es justamente lo que
- * necesita mantener fijo. El bucket por IP es defensa secundaria y se asume
- * falsificable (llega de un header).
- */
-function bucketsDeIntento(ip: string, identificador: string): {
-  claves: string[];
-  maximos: number[];
-} {
-  return {
-    claves:  [`user:${identificador.trim().toLowerCase()}`, `ip:${ip}`],
-    maximos: [MAX_POR_USUARIO, MAX_POR_IP],
-  };
-}
-
-/** Suma el intento y devuelve `true` si quedó bloqueado. */
-async function registrarIntento(
-  db: ReturnType<typeof getServiceDb>,
-  buckets: { claves: string[]; maximos: number[] },
-): Promise<boolean> {
-  const { data, error } = await db.rpc("registrar_intento_login", {
-    p_claves:          buckets.claves,
-    p_maximos:         buckets.maximos,
-    p_ventana_minutos: WINDOW_MINUTES,
-  });
-
-  if (error) {
-    // Si el contador no está disponible no se bloquea el login: sin base de
-    // datos el login va a fallar igual unas líneas más abajo, y dejar a todo el
-    // mundo afuera por un problema del limitador es peor que el riesgo que cubre.
-    console.error("[rate-limit] No se pudo registrar el intento:", error.message);
-    return false;
-  }
-
-  return data === true;
-}
-
-/** Limpia los buckets tras un login exitoso. */
-async function limpiarIntentos(
-  db: ReturnType<typeof getServiceDb>,
-  buckets: { claves: string[] },
-): Promise<void> {
-  const { error } = await db.rpc("limpiar_intentos_login", { p_claves: buckets.claves });
-  if (error) {
-    console.error("[rate-limit] No se pudieron limpiar los intentos:", error.message);
-  }
-}
 
 // ─── Rol y permisos del usuario ───────────────────────────────────────────────
 

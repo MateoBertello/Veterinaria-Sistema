@@ -16,6 +16,11 @@ export const SEED = {
     rocky:    "Rocky",    // de Carlos Gómez
   },
   servicio: "Consulta general",
+  /**
+   * Super Admin de PLATAFORMA. No es un usuario del tenant: entra por
+   * `/admin/login` con su email, no por `/login` con un username.
+   */
+  superAdmin: { email: "super@leo.local", password: "Super1234!" },
 } as const;
 
 /** Sufijo único por corrida: la stack local no se resetea entre ejecuciones de la suite. */
@@ -60,4 +65,12 @@ export async function login(page: Page, username: string, password: string): Pro
   // El aterrizaje post-login es el panel de inicio ("/", Etapa 12B). Se espera el
   // saludo y no la URL: "/" hace match con cualquier ruta en los patrones glob.
   await page.getByRole("heading", { name: /^Bienvenido/ }).waitFor();
+}
+
+/** Entra a la consola de plataforma por su propio login (`/admin/login`). */
+export async function loginPlataforma(page: Page, email: string, password: string): Promise<void> {
+  await page.goto("/admin/login");
+  await page.getByLabel("Email").pressSequentially(email);
+  await page.getByLabel("Contraseña").pressSequentially(password);
+  await page.getByRole("button", { name: "Iniciar sesión" }).click();
 }

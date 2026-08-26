@@ -4,7 +4,9 @@ import { verifyJwt } from "../shared/jwt.ts";
 
 declare module "hono" {
   interface ContextVariableMap {
-    superAdminId: string;
+    superAdminId:    string;
+    /** Email del claim `email`, solo para etiquetar la auditoría de plataforma. */
+    superAdminEmail: string | null;
   }
 }
 
@@ -23,7 +25,10 @@ declare module "hono" {
  *   consola de plataforma entera: listar, crear, editar y suspender tenants.
  * - Rechaza con 401 si falta el header Authorization o el JWT es inválido.
  * - Rechaza con 403 FORBIDDEN si el JWT no acredita platform_role='super_admin'.
- * - Adjunta superAdminId al contexto para auditoría (RN-SA5).
+ * - Adjunta superAdminId (y el email del claim) al contexto para auditoría
+ *   (RN-SA5). El Super Admin no tiene fila en `usuarios`, así que `recordAudit`
+ *   no puede resolver su nombre por id: el asiento se etiqueta con lo que trae
+ *   el token YA VERIFICADO, nunca con algo que mande el cliente en el body.
  */
 export async function requireSuperAdmin(c: Context, next: Next): Promise<Response | void> {
   const authHeader = c.req.header("Authorization");
@@ -61,6 +66,7 @@ export async function requireSuperAdmin(c: Context, next: Next): Promise<Respons
   }
 
   c.set("superAdminId", superAdminId);
+  c.set("superAdminEmail", typeof payload.email === "string" ? payload.email : null);
 
   await next();
 }

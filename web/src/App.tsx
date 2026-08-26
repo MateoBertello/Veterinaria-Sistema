@@ -9,6 +9,7 @@ import { RequirePermission } from "./auth/RequirePermission.tsx";
 import { RequireSuperAdmin } from "./auth/RequireSuperAdmin.tsx";
 import { AdminShell } from "./components/admin/AdminShell.tsx";
 import { SidebarNav } from "./components/shell/SidebarNav.tsx";
+import { PlatformLoginPage } from "./pages/admin/PlatformLoginPage.tsx";
 import { TenantsPage } from "./pages/admin/TenantsPage.tsx";
 import { TenantDetallePage } from "./pages/admin/TenantDetallePage.tsx";
 import { LoginPage } from "./pages/LoginPage.tsx";
@@ -149,6 +150,12 @@ export function App() {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
+
+      {/* Login de plataforma: FUERA del RequireSuperAdmin (es donde se cae sin
+          sesión, así que no puede exigirla) y fuera del ProtectedRoute del
+          tenant. React Router prioriza este path estático sobre el `*` de la
+          consola, así que no compite con las rutas de abajo. */}
+      <Route path="/admin/login" element={<PlatformLoginPage />} />
 
       {/* Consola de plataforma: shell propio y guard propio (claim super_admin del
           JWT). Fuera del ProtectedRoute del tenant: el Super Admin no tiene

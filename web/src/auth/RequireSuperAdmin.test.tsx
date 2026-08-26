@@ -1,7 +1,16 @@
-import { describe, it, expect, afterEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { describe, it, expect, vi, afterEach } from "vitest";
+import { render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
+
+// El provider intenta renovar al arrancar si el token venció; acá no hay backend.
+vi.mock("../api/platformAuth.ts", () => ({
+  platformLogin:         vi.fn(),
+  platformLogoutRequest: vi.fn(),
+  platformRefresh:       vi.fn(() => new Promise(() => {})),
+}));
+
 import { RequireSuperAdmin } from "./RequireSuperAdmin.tsx";
+import { PlatformAuthProvider } from "./PlatformAuthContext.tsx";
 
 /** JWT de mentira: el front solo lee claims; la firma la valida el backend. */
 function makeJwt(payload: Record<string, unknown>): string {
@@ -14,21 +23,22 @@ const EXP_FUTURO = Math.floor(Date.now() / 1000) + 3600;
 
 function renderApp() {
   return render(
-    <MemoryRouter initialEntries={["/admin/tenants"]}>
-      <Routes>
-        {/* "/" es el shell del tenant: quien no sea super admin termina acá (y si
-            tampoco tiene sesión de tenant, ProtectedRoute lo manda a /login). */}
-        <Route path="/" element={<p>Shell del tenant</p>} />
-        <Route
-          path="/admin/tenants"
-          element={
-            <RequireSuperAdmin>
-              <p>Consola de plataforma</p>
-            </RequireSuperAdmin>
-          }
-        />
-      </Routes>
-    </MemoryRouter>,
+    <PlatformAuthProvider>
+      <MemoryRouter initialEntries={["/admin/tenants"]}>
+        <Routes>
+          {/* Sin sesión de plataforma se cae acá: el login propio de la consola. */}
+          <Route path="/admin/login" element={<p>Login de plataforma</p>} />
+          <Route
+            path="/admin/tenants"
+            element={
+              <RequireSuperAdmin>
+                <p>Consola de plataforma</p>
+              </RequireSuperAdmin>
+            }
+          />
+        </Routes>
+      </MemoryRouter>
+    </PlatformAuthProvider>,
   );
 }
 
@@ -39,7 +49,7 @@ afterEach(() => {
 describe("RequireSuperAdmin", () => {
   it("con el claim platform_role=super_admin renderiza la consola", () => {
     localStorage.setItem(
-      "sb-token",
+      "sb-platform-token",
       makeJwt({ sub: "sa-1", exp: EXP_FUTURO, app_metadata: { platform_role: "super_admin" } }),
     );
 
@@ -48,7 +58,16 @@ describe("RequireSuperAdmin", () => {
     expect(screen.getByText("Consola de plataforma")).toBeInTheDocument();
   });
 
-  it("un usuario de tenant (sin el claim) es rechazado y vuelve a su shell", () => {
+  it("sin sesión de plataforma manda al login de la consola", () => {
+    renderApp();
+
+    expect(screen.getByText("Login de plataforma")).toBeInTheDocument();
+    expect(screen.queryByText("Consola de plataforma")).not.toBeInTheDocument();
+  });
+
+  it("una sesión de TENANT no abre la consola: es otra identidad", () => {
+    // Aunque el usuario de la clínica esté logueado, su token vive en otra clave
+    // y no acredita plataforma.
     localStorage.setItem(
       "sb-token",
       makeJwt({ sub: "u-1", exp: EXP_FUTURO, app_metadata: { tenant_id: "t-1" } }),
@@ -56,19 +75,42 @@ describe("RequireSuperAdmin", () => {
 
     renderApp();
 
-    expect(screen.getByText("Shell del tenant")).toBeInTheDocument();
-    expect(screen.queryByText("Consola de plataforma")).not.toBeInTheDocument();
+    expect(screen.getByText("Login de plataforma")).toBeInTheDocument();
   });
 
-  it("sin sesión alguna, sale del área de plataforma", () => {
+  it("un token de plataforma SIN el claim tampoco entra", () => {
+    localStorage.setItem(
+      "sb-platform-token",
+      makeJwt({ sub: "u-1", exp: EXP_FUTURO, app_metadata: { tenant_id: "t-1" } }),
+    );
+
     renderApp();
 
-    expect(screen.getByText("Shell del tenant")).toBeInTheDocument();
+    expect(screen.getByText("Login de plataforma")).toBeInTheDocument();
   });
 
-  it("con el token de plataforma vencido, sale del área de plataforma", () => {
+  it("con el token vencido pero un refresh token guardado, espera en vez de expulsar", async () => {
+    // La sesión es recuperable: mandar al login acá sería el mismo "se murió a
+    // la hora" con otra cara.
     localStorage.setItem(
-      "sb-token",
+      "sb-platform-token",
+      makeJwt({
+        sub: "sa-1",
+        exp: Math.floor(Date.now() / 1000) - 60,
+        app_metadata: { platform_role: "super_admin" },
+      }),
+    );
+    localStorage.setItem("sb-platform-refresh-token", "refresh-vivo");
+
+    renderApp();
+
+    await waitFor(() => expect(screen.getByRole("status")).toBeInTheDocument());
+    expect(screen.queryByText("Login de plataforma")).not.toBeInTheDocument();
+  });
+
+  it("con el token de plataforma vencido y sin refresh, sale del área de plataforma", () => {
+    localStorage.setItem(
+      "sb-platform-token",
       makeJwt({
         sub: "sa-1",
         exp: Math.floor(Date.now() / 1000) - 60,
@@ -78,6 +120,6 @@ describe("RequireSuperAdmin", () => {
 
     renderApp();
 
-    expect(screen.getByText("Shell del tenant")).toBeInTheDocument();
+    expect(screen.getByText("Login de plataforma")).toBeInTheDocument();
   });
 });

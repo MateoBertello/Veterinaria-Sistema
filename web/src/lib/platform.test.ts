@@ -83,9 +83,9 @@ describe("platformSessionFromToken", () => {
 });
 
 describe("getPlatformSession / isSuperAdmin", () => {
-  it("leen el token guardado en la sesión", () => {
+  it("leen el token guardado en la sesión de PLATAFORMA", () => {
     localStorage.setItem(
-      "sb-token",
+      "sb-platform-token",
       makeJwt({ sub: "sa-9", exp: FUTURO, app_metadata: { platform_role: "super_admin" } }),
     );
 
@@ -94,6 +94,20 @@ describe("getPlatformSession / isSuperAdmin", () => {
   });
 
   it("sin token guardado, no hay super admin", () => {
+    expect(getPlatformSession()).toBeNull();
+    expect(isSuperAdmin()).toBe(false);
+  });
+
+  it("no mira la sesión de la clínica: cada identidad tiene su propia clave", () => {
+    // `sb-token` es del tenant. Que ahí hubiera un token con el claim de
+    // plataforma era el síntoma del workaround viejo (pegarlo a mano por
+    // consola); ahora el de plataforma se guarda en `sb-platform-token` y esta
+    // función no debe encontrarlo en ningún otro lado.
+    localStorage.setItem(
+      "sb-token",
+      makeJwt({ sub: "sa-9", exp: FUTURO, app_metadata: { platform_role: "super_admin" } }),
+    );
+
     expect(getPlatformSession()).toBeNull();
     expect(isSuperAdmin()).toBe(false);
   });

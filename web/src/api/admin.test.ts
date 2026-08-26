@@ -48,7 +48,8 @@ const TENANT = {
 beforeEach(() => {
   fetchMock.mockReset();
   vi.stubGlobal("fetch", fetchMock);
-  localStorage.setItem("sb-token", "jwt-super-admin");
+  // La consola viaja con el token de PLATAFORMA, no con el de la clínica.
+  localStorage.setItem("sb-platform-token", "jwt-super-admin");
 });
 
 afterEach(() => {
@@ -74,6 +75,19 @@ describe("listarTenants", () => {
     expect(items).toHaveLength(1);
     expect(items[0]?.nombre).toBe("Veterinaria San Roque");
     expect(meta).toEqual({ page: 2, limit: 20, total: 25 });
+  });
+
+  it("usa el token de plataforma aunque haya una sesión de tenant abierta", async () => {
+    // Las dos sesiones conviven en el mismo browser. Si /admin/* saliera con el
+    // token de la clínica, el backend respondería 403 (no acredita super_admin)
+    // y la consola sería inusable para quien además tenga sesión de tenant.
+    localStorage.setItem("sb-token", "jwt-de-la-clinica");
+    fetchMock.mockResolvedValue(envelope([], { page: 1, limit: 20, total: 0 }));
+
+    await listarTenants();
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect((init.headers as Record<string, string>)["Authorization"]).toBe("Bearer jwt-super-admin");
   });
 
   it("sin parámetros pide /admin/tenants sin query string", async () => {

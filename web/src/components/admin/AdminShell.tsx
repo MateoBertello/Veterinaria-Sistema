@@ -2,8 +2,7 @@ import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { Building2, LogOut, ShieldCheck } from "lucide-react";
 import { Button } from "../ui/button.tsx";
 import { cn } from "../ui/utils.ts";
-import { getPlatformSession } from "../../lib/platform.ts";
-import { clearToken } from "../../lib/session.ts";
+import { usePlatformAuth } from "../../auth/PlatformAuthContext.tsx";
 
 /**
  * Shell del área de plataforma. Deliberadamente distinto del shell del tenant
@@ -12,14 +11,15 @@ import { clearToken } from "../../lib/session.ts";
  */
 export function AdminShell() {
   const navigate = useNavigate();
-  const sesion = getPlatformSession();
+  const { session: sesion, logout } = usePlatformAuth();
 
-  // El Super Admin no tiene sesión de tenant: `POST /auth/logout` pasa por
-  // `tenantContext` y rechazaría su token. Se limpia la sesión local y se vuelve
-  // al login; el guard hace el resto.
-  function cerrarSesion() {
-    clearToken();
-    navigate("/login", { replace: true });
+  // Logout propio de plataforma (`POST /admin/auth/logout`): el del tenant pasa
+  // por `tenantContext` y rechazaría este token. Además de limpiar el par local
+  // invalida la sesión en GoTrue — importante ahora que la consola guarda un
+  // refresh token, que de otro modo seguiría sirviendo para renovar.
+  async function cerrarSesion() {
+    await logout();
+    navigate("/admin/login", { replace: true });
   }
 
   return (
@@ -70,7 +70,7 @@ export function AdminShell() {
             variant="ghost"
             size="sm"
             className="w-full justify-start text-slate-300 hover:bg-slate-800 hover:text-white"
-            onClick={cerrarSesion}
+            onClick={() => void cerrarSesion()}
           >
             <LogOut aria-hidden />
             Cerrar sesión

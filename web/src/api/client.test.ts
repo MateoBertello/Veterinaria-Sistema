@@ -8,7 +8,12 @@
  * pantalla perdía el único dato útil: el status.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { apiClient, apiClientBlob, setUnauthorizedHandler } from "./client.ts";
+import {
+  apiClient,
+  apiClientBlob,
+  setPlatformUnauthorizedHandler,
+  setUnauthorizedHandler,
+} from "./client.ts";
 import { ApiError } from "../types/index.ts";
 
 const fetchMock = vi.fn();
@@ -51,6 +56,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.unstubAllGlobals();
   setUnauthorizedHandler(null);
+  setPlatformUnauthorizedHandler(null);
   localStorage.clear();
 });
 
@@ -251,5 +257,118 @@ describe("client.ts — refresh automático ante 401", () => {
     await expect(apiClient("/clientes")).rejects.toBeInstanceOf(ApiError);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(alExpirar).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Aislamiento entre la sesión del tenant y la de plataforma
+// ─────────────────────────────────────────────────────────────────────────────
+// Las dos conviven en el mismo browser y no tienen nada que ver entre sí. Antes
+// compartían la clave `sb-token` y un único handler de 401: cualquier token
+// vencido de la clínica borraba la sesión del Super Admin y lo echaba de la
+// consola, que era justamente el token que había costado conseguir a mano.
+
+describe("client.ts — las dos sesiones no se pisan", () => {
+  const SESION_PLATAFORMA = {
+    token:   "jwt-plataforma",
+    refresh: "refresh-plataforma",
+  };
+
+  function abrirSesionDePlataforma() {
+    localStorage.setItem("sb-platform-token", SESION_PLATAFORMA.token);
+    localStorage.setItem("sb-platform-refresh-token", SESION_PLATAFORMA.refresh);
+  }
+
+  it("un request a /admin/* viaja con el token de plataforma, no con el del tenant", async () => {
+    abrirSesionDePlataforma();
+    fetchMock.mockResolvedValue(envelope([]));
+
+    await apiClient("/admin/tenants");
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect((init.headers as Record<string, string>)["Authorization"])
+      .toBe(`Bearer ${SESION_PLATAFORMA.token}`);
+  });
+
+  it("un 401 irrecuperable de la API del TENANT no borra la sesión de plataforma", async () => {
+    abrirSesionDePlataforma();
+    const alExpirarPlataforma = vi.fn();
+    setPlatformUnauthorizedHandler(alExpirarPlataforma);
+
+    // 401 del tenant sin refresh token que valga → cierre de esa sesión.
+    fetchMock.mockResolvedValue(envelopeError("UNAUTHORIZED", 401, "Token vencido"));
+
+    await expect(apiClient("/clientes")).rejects.toBeInstanceOf(ApiError);
+
+    expect(localStorage.getItem("sb-token")).toBeNull();
+    expect(localStorage.getItem("sb-platform-token")).toBe(SESION_PLATAFORMA.token);
+    expect(localStorage.getItem("sb-platform-refresh-token")).toBe(SESION_PLATAFORMA.refresh);
+    expect(alExpirarPlataforma).not.toHaveBeenCalled();
+  });
+
+  it("tampoco al revés: un 401 de /admin/* deja intacta la sesión del tenant", async () => {
+    abrirSesionDePlataforma();
+    localStorage.setItem("sb-refresh-token", "refresh-tenant");
+    const alExpirarTenant = vi.fn();
+    setUnauthorizedHandler(alExpirarTenant);
+
+    fetchMock.mockResolvedValue(envelopeError("UNAUTHORIZED", 401, "Token vencido"));
+
+    await expect(apiClient("/admin/tenants")).rejects.toBeInstanceOf(ApiError);
+
+    expect(localStorage.getItem("sb-token")).toBe("jwt-de-prueba");
+    expect(localStorage.getItem("sb-refresh-token")).toBe("refresh-tenant");
+    expect(alExpirarTenant).not.toHaveBeenCalled();
+  });
+
+  it("la sesión de plataforma renueva sola contra /admin/auth/refresh y reintenta", async () => {
+    // Es lo que faltaba del todo: sin refresh token, la consola moría a la hora
+    // exacta y había que volver a generar un token por fuera de la aplicación.
+    abrirSesionDePlataforma();
+
+    fetchMock
+      .mockResolvedValueOnce(envelopeError("UNAUTHORIZED", 401, "Token vencido"))
+      .mockResolvedValueOnce(envelope({ token: "jwt-plataforma-2", refreshToken: "refresh-plataforma-2" }))
+      .mockResolvedValueOnce(envelope([{ id: "t-1" }]));
+
+    await expect(apiClient("/admin/tenants")).resolves.toEqual([{ id: "t-1" }]);
+
+    expect(fetchMock.mock.calls[1]?.[0]).toContain("/admin/auth/refresh");
+    // GoTrue rota el refresh token: queda guardado el par nuevo, en las claves
+    // de plataforma.
+    expect(localStorage.getItem("sb-platform-token")).toBe("jwt-plataforma-2");
+    expect(localStorage.getItem("sb-platform-refresh-token")).toBe("refresh-plataforma-2");
+    // Y el reintento sale con el token renovado.
+    const [, initReintento] = fetchMock.mock.calls[2] as [string, RequestInit];
+    expect((initReintento.headers as Record<string, string>)["Authorization"])
+      .toBe("Bearer jwt-plataforma-2");
+  });
+
+  it("cada sesión renueva con SU refresh token", async () => {
+    abrirSesionDePlataforma();
+    localStorage.setItem("sb-refresh-token", "refresh-tenant");
+
+    fetchMock
+      .mockResolvedValueOnce(envelopeError("UNAUTHORIZED", 401, "Token vencido"))
+      .mockResolvedValueOnce(envelope({ token: "jwt-plataforma-2", refreshToken: "r2" }))
+      .mockResolvedValueOnce(envelope([]));
+
+    await apiClient("/admin/tenants");
+
+    const [, initRefresh] = fetchMock.mock.calls[1] as [string, RequestInit];
+    expect(JSON.parse(initRefresh.body as string))
+      .toEqual({ refreshToken: SESION_PLATAFORMA.refresh });
+    // El refresh token del tenant no se tocó.
+    expect(localStorage.getItem("sb-refresh-token")).toBe("refresh-tenant");
+  });
+
+  it("no intenta renovar el 401 del login de plataforma (son credenciales mal)", async () => {
+    fetchMock.mockResolvedValueOnce(envelopeError("UNAUTHORIZED", 401, "Credenciales inválidas"));
+
+    await expect(
+      apiClient("/admin/auth/login", { method: "POST", body: "{}" }),
+    ).rejects.toBeInstanceOf(ApiError);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });

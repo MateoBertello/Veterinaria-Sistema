@@ -91,6 +91,19 @@ const TENANT = {
 };
 
 const PASSWORD = "Demo1234!";
+
+/**
+ * Super Admin de PLATAFORMA para desarrollo. No pertenece a ningún tenant: es
+ * un usuario de Supabase Auth con `app_metadata.platform_role='super_admin'` y
+ * sin fila en `usuarios` (esa tabla exige `tenant_id NOT NULL`). Entra por
+ * `/admin/login`, que es su propio camino de autenticación.
+ *
+ * Se siembra acá para que el entorno de DEV quede completo con `npm run seed`
+ * —incluida la suite E2E, que da por sentado el seed—. Para provisionarlo en un
+ * entorno real está `scripts/crear-super-admin.mjs`, que pide las credenciales
+ * por variables de entorno en vez de traerlas fijas.
+ */
+const SUPER_ADMIN = { email: "super@leo.local", password: "Super1234!" };
 const USERS = [
   { email: "admin@demo.local",     username: "admin_demo",     fullName: "Admin Demo",          roleName: "admin" },
   { email: "vet@demo.local",       username: "vet_demo",       fullName: "Dr. Vet Demo",        roleName: "veterinario" },
@@ -172,6 +185,35 @@ async function findAuthUserByEmail(email) {
 }
 
 /** Crea (o reutiliza) un usuario de Auth + su fila en `usuarios`; veterinario → fila en `doctores`. */
+async function ensureSuperAdmin() {
+  const { data: created, error: createErr } = await db.auth.admin.createUser({
+    email: SUPER_ADMIN.email,
+    password: SUPER_ADMIN.password,
+    email_confirm: true,
+    app_metadata: { platform_role: "super_admin" },
+  });
+
+  if (!createErr) {
+    console.log(`✓ Super Admin de plataforma creado → ${created.user.id}`);
+    return;
+  }
+
+  if (!/already|registered|exists/i.test(createErr.message ?? "")) {
+    die(`createUser falló para ${SUPER_ADMIN.email}`, createErr);
+  }
+
+  const existing = await findAuthUserByEmail(SUPER_ADMIN.email);
+  if (!existing) die(`Auth dice que ${SUPER_ADMIN.email} ya existe pero no pude localizarlo`);
+
+  // Conserva el resto de app_metadata y (re)afirma el claim de plataforma.
+  await db.auth.admin.updateUserById(existing.id, {
+    password: SUPER_ADMIN.password,
+    email_confirm: true,
+    app_metadata: { ...(existing.app_metadata ?? {}), platform_role: "super_admin" },
+  });
+  console.log(`• Super Admin de plataforma ya existía — reuso ${existing.id} (password/claim re-seteados)`);
+}
+
 async function ensureUser(tenantId, spec) {
   // 1. Resolver rol_id del tenant.
   const { data: rol, error: rolErr } = await db
@@ -756,6 +798,7 @@ async function main() {
 
   console.log("\n— Usuarios —");
   for (const u of USERS) await ensureUser(tenantId, u);
+  await ensureSuperAdmin();
 
   console.log("\n— Datos demo —");
   await ensureDemoData(tenantId);
@@ -769,6 +812,9 @@ async function main() {
 
   console.log("\n✓ Seed completo. Credenciales (todas con password " + PASSWORD + "):");
   for (const u of USERS) console.log(`    ${u.roleName.padEnd(13)} ${u.email}`);
+  console.log(
+    `\n  Consola de plataforma (/admin/login): ${SUPER_ADMIN.email} / ${SUPER_ADMIN.password}`,
+  );
   console.log("");
 }
 

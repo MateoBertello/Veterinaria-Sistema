@@ -97,10 +97,15 @@ Tenant: **Veterinaria Demo** · plan **premium** (los 3 módulos visibles).
 
 El Super Admin de plataforma **no es un usuario de tenant**: es un usuario de
 Supabase Auth con `app_metadata.platform_role = 'super_admin'`, sin fila en
-`usuarios` y sin `tenant_id`. Por eso **no entra por `POST /auth/login`** (ese
-endpoint busca por username en `usuarios`): su sesión sale directo de Supabase
-Auth. `node scripts/crear-super-admin.mjs` hace las dos cosas — lo provisiona
-(idempotente) e imprime el `access_token` con la línea para abrir la consola:
+`usuarios` y sin `tenant_id`. Por eso **no entra por `POST /auth/login`** — ese
+endpoint resuelve el identificador contra `usuarios` y ahí no está —, sino por su
+propio login de plataforma.
+
+Son dos pasos separados: **el script crea la cuenta, la aplicación la usa.**
+
+**1. Provisionar la cuenta** (idempotente: re-correrlo repara password,
+confirmación y el claim). Es la única forma de escribir `platform_role`, porque
+requiere la `service_role` key:
 
 ```bash
 # DEV local: toma SUPABASE_URL / SERVICE_ROLE / ANON del .env (acepta las TEST_*)
@@ -108,9 +113,26 @@ SUPER_ADMIN_EMAIL=super@leo.local SUPER_ADMIN_PASSWORD='Super1234!' \
   node scripts/crear-super-admin.mjs
 ```
 
-El front lee el JWT de `localStorage.sb-token`: pegando la línea que imprime el
-script y recargando, `/admin/tenants` abre. El token vence (1 h por defecto) —
-volvé a correr el script para renovarlo.
+Con `SUPABASE_ANON_KEY` presente, el script además verifica que la cuenta puede
+iniciar sesión y que su JWT trae el claim. No imprime ningún token.
+
+**2. Entrar por la aplicación**: `/admin/login`, con el email y la contraseña de
+la cuenta. Va contra `POST /api/v1/admin/auth/login`, que valida las credenciales
+en Supabase Auth y solo devuelve sesión si el JWT acredita
+`platform_role = 'super_admin'`; cualquier otro fracaso responde el mismo
+`401 Credenciales inválidas`, sin decir cuál falló.
+
+La sesión de plataforma vive en `localStorage` bajo sus propias claves
+(`sb-platform-token` / `sb-platform-refresh-token`), aparte de la de la clínica
+(`sb-token`), y **se renueva sola** con su refresh token contra
+`/admin/auth/refresh`. No hay que volver a correr el script para seguir
+trabajando.
+
+> **Nota para sesiones viejas.** Antes de que existiera `/admin/login`, la forma
+> de entrar era pegar a mano el `access_token` que imprimía el script en
+> `localStorage.sb-token`. Eso ya no se usa y conviene limpiarlo: esa sesión no
+> tenía refresh token (moría a la hora exacta) y compartía clave con la de la
+> clínica, así que cualquier 401 de la API del tenant la borraba.
 
 ## Errores comunes (troubleshooting)
 

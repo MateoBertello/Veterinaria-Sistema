@@ -664,6 +664,28 @@ export interface LoginInput {
   password: string;
 }
 
+// ─── Autenticación de plataforma (Super Admin) ──────────────────────────────
+
+/**
+ * Credenciales del Super Admin. Es EMAIL y no username a propósito: el Super
+ * Admin no tiene fila en `usuarios` (esa tabla exige tenant), así que no tiene
+ * nombre de usuario — existe solo en Supabase Auth, identificado por su email.
+ */
+export interface PlatformLoginInput {
+  email:    string;
+  password: string;
+}
+
+/** Respuesta de `POST /admin/auth/login`: par de tokens + identidad de plataforma. */
+export interface PlatformLoginResult {
+  token:        string;
+  refreshToken: string;
+  superAdmin: {
+    id:    string;
+    email: string | null;
+  };
+}
+
 // ─── Auditoría ──────────────────────────────────────────────────────────────
 
 // Espejo de AUDIT_MODULES/AUDIT_ACTIONS del backend (auditoria.schemas.ts). Deben
