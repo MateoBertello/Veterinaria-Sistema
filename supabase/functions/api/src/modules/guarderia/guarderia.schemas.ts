@@ -48,9 +48,9 @@ export const ListarEstadiasQuerySchema = z.object({
     { message: "dateTo debe ser posterior o igual a dateFrom", path: ["dateTo"] },
   );
 
-/** Modificar Estadía (Etapa 7; RN-ME1..ME2). Todos los campos son opcionales
- *  en el schema; el controller pre-rellena los valores vigentes antes de llamar
- *  al service, que los envía al RPC siempre completos. */
+/** Modificar Estadía (Etapa 7; RN-ME1..ME2). Todos los campos son opcionales:
+ *  el Service lee la estadía vigente y completa los ausentes antes de enviarlos
+ *  al RPC, que reemplaza los cuatro. `notes: null` borra la nota. */
 export const ModificarEstadiaSchema = z.object({
   checkInDate:  z.string().regex(YMD, "checkInDate debe ser YYYY-MM-DD").optional(),
   checkOutDate: z.string().regex(YMD, "checkOutDate debe ser YYYY-MM-DD").optional(),
