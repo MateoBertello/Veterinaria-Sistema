@@ -23,6 +23,7 @@ import {
   HAS_INTEGRATION_CONFIG,
   describeIntegration,
 } from "./_env.ts";
+import { crearUsuarioAuth, limpiarTenant } from "./_teardown.ts";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 globalThis.WebSocket = class FakeWebSocket {} as any;
@@ -90,21 +91,7 @@ beforeAll(async () => {
   });
 
   // Usuario de ese tenant (cuenta de Auth + fila espejo).
-  const resUser = await fetch(`${SUPABASE_URL}/auth/v1/admin/users`, {
-    method:  "POST",
-    headers: {
-      "Content-Type":  "application/json",
-      "Authorization": `Bearer ${SERVICE_ROLE_KEY}`,
-      "apikey":        SERVICE_ROLE_KEY,
-    },
-    body: JSON.stringify({
-      email:         EMAIL_USUARIO,
-      password:      PASSWORD,
-      email_confirm: true,
-      app_metadata:  { tenant_id: tenantId },
-    }),
-  });
-  userId = ((await resUser.json()) as { id?: string }).id ?? "";
+  userId = await crearUsuarioAuth(EMAIL_USUARIO, { tenant_id: tenantId }, PASSWORD);
 
   await serviceDb.from("usuarios").insert({
     id:        userId,
@@ -134,20 +121,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   if (!HAS_INTEGRATION_CONFIG || !serviceDb) return;
-
-  // El tenant primero: su CASCADE se lleva clientes, usuarios y roles. Recién
-  // después la cuenta de Auth — al revés, el CASCADE de `usuarios.id →
-  // auth.users` choca con las FK que apuntan al usuario y la cuenta queda viva,
-  // rompiendo la corrida siguiente por email duplicado.
-  if (clienteId) await serviceDb.from("clientes").delete().eq("id", clienteId);
-  if (tenantId)  await serviceDb.from("tenants").delete().eq("id", tenantId);
-
-  if (userId) {
-    await fetch(`${SUPABASE_URL}/auth/v1/admin/users/${userId}`, {
-      method:  "DELETE",
-      headers: { "Authorization": `Bearer ${SERVICE_ROLE_KEY}`, "apikey": SERVICE_ROLE_KEY },
-    });
-  }
+  await limpiarTenant(serviceDb, tenantId);
   await serviceDb.rpc("limpiar_intentos_login", { p_claves: ["user:qa_rate_limit", "ip:203.0.113.7"] });
 });
 

@@ -15,6 +15,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import app from "../../supabase/functions/api/src/main.ts";
 import { SUPABASE_URL, SUPABASE_ANON_KEY, SERVICE_ROLE_KEY, describeIntegration } from "./_env.ts";
+import { adminHeaders, crearUsuarioAuth, limpiarTenant } from "./_teardown.ts";
 
 function skipIfNoCredentials(): boolean {
   if (!SUPABASE_URL || !SERVICE_ROLE_KEY || !SUPABASE_ANON_KEY) {
@@ -32,12 +33,6 @@ let jwtTenantNormal:  string;   // usuario de un tenant (sin platform_role)
 let createdTenantIds: string[] = [];
 let tenantNormalId:   string;
 
-const adminHeaders = () => ({
-  "Content-Type":  "application/json",
-  "Authorization": `Bearer ${SERVICE_ROLE_KEY}`,
-  "apikey":        SERVICE_ROLE_KEY,
-});
-
 async function signIn(email: string, password: string): Promise<string> {
   const res = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=password`, {
     method:  "POST",
@@ -46,16 +41,6 @@ async function signIn(email: string, password: string): Promise<string> {
   });
   const data = await res.json() as { access_token?: string };
   return data.access_token ?? "";
-}
-
-async function createAuthUser(email: string, appMetadata: Record<string, unknown>): Promise<string> {
-  const res = await fetch(`${SUPABASE_URL}/auth/v1/admin/users`, {
-    method:  "POST",
-    headers: adminHeaders(),
-    body:    JSON.stringify({ email, password: "TestPass123!", email_confirm: true, app_metadata: appMetadata }),
-  });
-  const user = await res.json() as { id?: string };
-  return user.id ?? "";
 }
 
 async function callApp(path: string, opts: { method?: string; jwt?: string; body?: unknown } = {}) {
@@ -74,7 +59,7 @@ beforeAll(async () => {
   serviceDb = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, { auth: { persistSession: false } });
 
   // 1. Super Admin de plataforma (sin tenant_id, con platform_role).
-  await createAuthUser("super@admin-test.com", { platform_role: "super_admin" });
+  await crearUsuarioAuth("super@admin-test.com", { platform_role: "super_admin" });
   jwtSuperAdmin = await signIn("super@admin-test.com", "TestPass123!");
 
   // 2. Tenant "normal" + usuario para probar aislamiento y suspensión (RN-SA3).
@@ -88,7 +73,7 @@ beforeAll(async () => {
     createdTenantIds.push(tenantNormalId);
     await serviceDb.rpc("on_tenant_created", { p_tenant_id: tenantNormalId });
 
-    const userId = await createAuthUser("user@normal-test.com", { tenant_id: tenantNormalId });
+    const userId = await crearUsuarioAuth("user@normal-test.com", { tenant_id: tenantNormalId });
     const { data: rolAdmin } = await serviceDb
       .from("roles").select("id").eq("tenant_id", tenantNormalId).eq("name", "admin").single();
     if (userId && rolAdmin) {
@@ -103,22 +88,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   if (!serviceDb) return;
-  // Eliminar usuarios de auth de los tenants de prueba.
-  for (const tid of createdTenantIds) {
-    // ORDEN IMPORTANTE: primero el tenant, después las cuentas de Auth.
-    // Desde que `usuarios.id` referencia a `auth.users` con ON DELETE CASCADE
-    // (migración 20260725000005), borrar la cuenta arrastra la fila espejo — y
-    // eso lo frena cualquier FK que apunte al usuario, como
-    // `historial_clinico.professional_id`. Borrando primero el tenant, su
-    // cascade se lleva todo lo dependiente y la cuenta sale limpia. Al revés,
-    // el DELETE de Auth falla en silencio y deja cuentas huérfanas que hacen
-    // fallar la corrida SIGUIENTE (el email ya existe).
-    const { data: usuarios } = await serviceDb.from("usuarios").select("id").eq("tenant_id", tid);
-    await serviceDb.from("tenants").delete().eq("id", tid);
-    for (const u of (usuarios ?? []) as { id: string }[]) {
-      await fetch(`${SUPABASE_URL}/auth/v1/admin/users/${u.id}`, { method: "DELETE", headers: adminHeaders() });
-    }
-  }
+  for (const tid of createdTenantIds) await limpiarTenant(serviceDb, tid);
   // Borrar el super admin.
   const { data: list } = await serviceDb.auth.admin.listUsers();
   const sa = list?.users?.find((u) => u.email === "super@admin-test.com");

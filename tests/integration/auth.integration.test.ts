@@ -17,6 +17,7 @@ import { describe, it, expect, beforeAll, beforeEach, afterAll } from "vitest";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import app from "../../supabase/functions/api/src/main.ts";
 import { SUPABASE_URL, SUPABASE_ANON_KEY, SERVICE_ROLE_KEY, describeIntegration } from "./_env.ts";
+import { crearUsuarioAuth, limpiarTenant } from "./_teardown.ts";
 
 function skipIfNoCredentials() {
   if (!SUPABASE_URL || !SERVICE_ROLE_KEY || !SUPABASE_ANON_KEY) {
@@ -64,24 +65,7 @@ beforeAll(async () => {
   if (rpcErr) throw new Error(`on_tenant_created falló: ${rpcErr.message}`);
 
   // 3. Crear usuario activo en Supabase Auth
-  const adminHeaders = {
-    "Content-Type": "application/json",
-    "Authorization": `Bearer ${SERVICE_ROLE_KEY}`,
-    "apikey": SERVICE_ROLE_KEY,
-  };
-
-  const resActivo = await fetch(`${SUPABASE_URL}/auth/v1/admin/users`, {
-    method:  "POST",
-    headers: adminHeaders,
-    body: JSON.stringify({
-      email:         "activo@auth-test.com",
-      password:      "TestPass123!",
-      email_confirm: true,
-      app_metadata:  { tenant_id: tenantId },
-    }),
-  });
-  const userActivo = await resActivo.json() as { id?: string };
-  userId = userActivo.id ?? "";
+  userId = await crearUsuarioAuth("activo@auth-test.com", { tenant_id: tenantId });
 
   // 4. Insertar en tabla usuarios (rol admin)
   const { data: rolAdmin } = await serviceDb
@@ -113,21 +97,11 @@ beforeAll(async () => {
   jwtActivo = tokenData.access_token ?? "";
 
   // 6. Crear usuario inactivo para probar RN-AUT1
-  const resInactivo = await fetch(`${SUPABASE_URL}/auth/v1/admin/users`, {
-    method:  "POST",
-    headers: adminHeaders,
-    body: JSON.stringify({
-      email:         "inactivo@auth-test.com",
-      password:      "TestPass123!",
-      email_confirm: true,
-      app_metadata:  { tenant_id: tenantId },
-    }),
-  });
-  const userInactivo = await resInactivo.json() as { id?: string };
+  const userInactivoId = await crearUsuarioAuth("inactivo@auth-test.com", { tenant_id: tenantId });
 
-  if (userInactivo.id && rolAdmin) {
+  if (rolAdmin) {
     await serviceDb.from("usuarios").insert({
-      id:        userInactivo.id,
+      id:        userInactivoId,
       tenant_id: tenantId,
       username:  "inactivo_test",
       email:     "inactivo@auth-test.com",
@@ -149,31 +123,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   if (!serviceDb) return;
-
-  const adminHeaders = {
-    "Authorization": `Bearer ${SERVICE_ROLE_KEY}`,
-    "apikey": SERVICE_ROLE_KEY,
-  };
-
-  // Buscar los usuarios de auth creados para el tenant de prueba…
-  const { data: usuarios } = await serviceDb
-    .from("usuarios")
-    .select("id")
-    .eq("tenant_id", tenantId);
-
-  // …borrar PRIMERO el tenant (su CASCADE se lleva usuarios y todo lo que los
-  // referencia) y recién después las cuentas de Auth. Desde que `usuarios.id`
-  // referencia a `auth.users` con ON DELETE CASCADE (migración 20260725000005),
-  // borrar la cuenta primero arrastra la fila espejo y cualquier FK que apunte
-  // al usuario frena el borrado, dejando cuentas huérfanas que rompen la
-  // corrida siguiente.
-  if (tenantId) await serviceDb.from("tenants").delete().eq("id", tenantId);
-
-  for (const u of (usuarios ?? []) as { id: string }[]) {
-    await fetch(`${SUPABASE_URL}/auth/v1/admin/users/${u.id}`, {
-      method: "DELETE", headers: adminHeaders,
-    });
-  }
+  await limpiarTenant(serviceDb, tenantId);
 });
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────

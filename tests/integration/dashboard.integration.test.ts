@@ -25,6 +25,7 @@ import { it, expect, beforeAll, afterAll } from "vitest";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import app from "../../supabase/functions/api/src/main.ts";
 import { SUPABASE_URL, SUPABASE_ANON_KEY, SERVICE_ROLE_KEY, describeIntegration } from "./_env.ts";
+import { crearUsuarioAuth, limpiarTenant } from "./_teardown.ts";
 
 function skipIfNoCredentials(): boolean {
   if (!SUPABASE_URL || !SERVICE_ROLE_KEY || !SUPABASE_ANON_KEY) {
@@ -36,12 +37,6 @@ function skipIfNoCredentials(): boolean {
 
 // ─── Helpers de arnés ─────────────────────────────────────────────────────────
 
-const adminHeaders = () => ({
-  "Content-Type":  "application/json",
-  "Authorization": `Bearer ${SERVICE_ROLE_KEY}`,
-  "apikey":        SERVICE_ROLE_KEY,
-});
-
 async function signIn(email: string, password: string): Promise<string> {
   const res = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=password`, {
     method:  "POST",
@@ -50,16 +45,6 @@ async function signIn(email: string, password: string): Promise<string> {
   });
   const data = await res.json() as { access_token?: string };
   return data.access_token ?? "";
-}
-
-async function createAuthUser(email: string, appMetadata: Record<string, unknown>): Promise<string> {
-  const res = await fetch(`${SUPABASE_URL}/auth/v1/admin/users`, {
-    method:  "POST",
-    headers: adminHeaders(),
-    body:    JSON.stringify({ email, password: "TestPass123!", email_confirm: true, app_metadata: appMetadata }),
-  });
-  const user = await res.json() as { id?: string };
-  return user.id ?? "";
 }
 
 function userClient(jwt: string): SupabaseClient {
@@ -137,7 +122,7 @@ async function crearUsuario(
   sufijo: string,
 ): Promise<string> {
   const email  = `${rol}-dashboard-${sufijo}-${Date.now()}@test.com`;
-  const userId = await createAuthUser(email, { tenant_id: tenantId });
+  const userId = await crearUsuarioAuth(email, { tenant_id: tenantId });
   const { data: rolRow } = await serviceDb
     .from("roles").select("id").eq("tenant_id", tenantId).eq("name", rol).single();
 
@@ -322,22 +307,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   if (!serviceDb) return;
-  for (const tid of tenantIdsCreados) {
-    if (!tid) continue;
-    // ORDEN IMPORTANTE: primero el tenant, después las cuentas de Auth.
-    // Desde que `usuarios.id` referencia a `auth.users` con ON DELETE CASCADE
-    // (migración 20260725000005), borrar la cuenta arrastra la fila espejo — y
-    // eso lo frena cualquier FK que apunte al usuario, como
-    // `historial_clinico.professional_id`. Borrando primero el tenant, su
-    // cascade se lleva todo lo dependiente y la cuenta sale limpia. Al revés,
-    // el DELETE de Auth falla en silencio y deja cuentas huérfanas que hacen
-    // fallar la corrida SIGUIENTE (el email ya existe).
-    const { data: usuarios } = await serviceDb.from("usuarios").select("id").eq("tenant_id", tid);
-    await serviceDb.from("tenants").delete().eq("id", tid);
-    for (const u of (usuarios ?? []) as { id: string }[]) {
-      await fetch(`${SUPABASE_URL}/auth/v1/admin/users/${u.id}`, { method: "DELETE", headers: adminHeaders() });
-    }
-  }
+  for (const tid of tenantIdsCreados) await limpiarTenant(serviceDb, tid);
 });
 
 // ─── BLOQUEANTE: aislamiento de conteos entre tenants ─────────────────────────

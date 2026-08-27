@@ -18,6 +18,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { SUPABASE_URL, SUPABASE_ANON_KEY, SERVICE_ROLE_KEY, describeIntegration } from "./_env.ts";
+import { borrarUsuarioAuth, crearUsuarioAuth } from "./_teardown.ts";
 
 globalThis.WebSocket = class FakeWebSocket {} as any;
 
@@ -57,23 +58,7 @@ beforeAll(async () => {
     return;
   }
 
-  const adminHeaders = {
-    "Content-Type": "application/json",
-    "Authorization": `Bearer ${SERVICE_ROLE_KEY}`,
-    "apikey": SERVICE_ROLE_KEY,
-  };
-
-  const resUser = await fetch(`${SUPABASE_URL}/auth/v1/admin/users`, {
-    method: "POST",
-    headers: adminHeaders,
-    body: JSON.stringify({
-      email: "grants-dt5@test.com",
-      password: "Password123!",
-      email_confirm: true,
-    }),
-  });
-  const userData = (await resUser.json()) as { id?: string };
-  userId = userData.id ?? "";
+  userId = await crearUsuarioAuth("grants-dt5@test.com", {}, "Password123!");
 
   const signIn = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=password`, {
     method: "POST",
@@ -86,11 +71,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   if (!SUPABASE_URL || !SERVICE_ROLE_KEY) return;
-  const adminHeaders = {
-    "Authorization": `Bearer ${SERVICE_ROLE_KEY}`,
-    "apikey": SERVICE_ROLE_KEY,
-  };
-  if (userId) await fetch(`${SUPABASE_URL}/auth/v1/admin/users/${userId}`, { method: "DELETE", headers: adminHeaders });
+  await borrarUsuarioAuth(userId);
 });
 
 // ─── Tests ───────────────────────────────────────────────────────────────────

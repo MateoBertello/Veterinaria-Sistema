@@ -33,6 +33,7 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import app from "../../supabase/functions/api/src/main.ts";
 import { NotificacionService } from "../../supabase/functions/api/src/modules/notificaciones/notificaciones.service.ts";
 import { SUPABASE_URL, SERVICE_ROLE_KEY, describeIntegration } from "./_env.ts";
+import { limpiarTenant } from "./_teardown.ts";
 
 // Reloj fijo lejano: aísla el barrido all-tenants de datos in-window de otros archivos.
 const NOW = new Date("2026-09-01T09:00:00Z");
@@ -189,9 +190,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   if (!serviceDb) return;
-  for (const tid of [tPro.tenantId, tBasico.tenantId]) {
-    if (tid) await serviceDb.from("tenants").delete().eq("id", tid); // cascade → turnos, plan_vacunacion, notificaciones
-  }
+  for (const tid of [tPro.tenantId, tBasico.tenantId]) await limpiarTenant(serviceDb, tid);
 });
 
 // ─── RN-NT5: el barrido dispara y NO spamea (idempotencia real por UNIQUE) ────────
