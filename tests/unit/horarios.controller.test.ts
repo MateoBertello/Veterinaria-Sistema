@@ -165,3 +165,43 @@ describe("montaje de /doctores — el gate de horarios no invade el listado", ()
     expect(res.status).toBe(403);
   });
 });
+
+// ─── Guard: ninguna ruta de horariosDoctorRouter puede quedar sin autenticación ─
+// Este router comparte el prefijo /doctores con el de profesionales, así que no
+// puede gatearse con un `use("/*")` (le devolvería 403 a la recepcionista en
+// GET /doctores). El gate va adosado a cada ruta, y este test es lo que impide
+// que una ruta nueva se declare sin él: recorre las rutas REALMENTE registradas
+// —no una lista escrita a mano— y exige que todas rechacen al anónimo.
+
+/** Rutas declaradas por el router, sin las entradas de middleware (method ALL). */
+const rutasDeHorariosDoctor = [
+  ...new Map(
+    horariosDoctorRouter.routes
+      .filter((r) => r.method !== "ALL")
+      .map((r) => [`${r.method} ${r.path}`, { method: r.method, path: r.path }]),
+  ).values(),
+];
+
+describe("horariosDoctorRouter — toda ruta declarada exige autenticación", () => {
+  it("el router declara rutas (si no, el guard de abajo no probaría nada)", () => {
+    expect(rutasDeHorariosDoctor.length).toBeGreaterThan(0);
+  });
+
+  it.each(rutasDeHorariosDoctor)(
+    "$method $path sin Authorization → 401 UNAUTHORIZED",
+    async ({ method, path }) => {
+      // Se monta SOLO este router: si una ruta quedara sin gate, no queremos que
+      // la tape el middleware del router de doctores montado en el mismo prefijo.
+      const app = new Hono();
+      app.onError(errorHandler);
+      app.route("/doctores", horariosDoctorRouter);
+
+      const concreta = path.replace(/:[A-Za-z0-9_]+/g, DOCTOR_ID);
+      const res  = await app.request(`http://localhost/doctores${concreta}`, { method });
+      const body = await res.json();
+
+      expect(res.status).toBe(401);
+      expect(body.error.code).toBe("UNAUTHORIZED");
+    },
+  );
+});
