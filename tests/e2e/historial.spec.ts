@@ -15,7 +15,7 @@ async function crearMascotaPropia(page: import("@playwright/test").Page, nombreC
   await page.getByRole("button", { name: "Nueva mascota" }).click();
   const nombreMascota = unico("MascotaHist");
   await page.getByLabel("Nombre *").fill(nombreMascota);
-  await page.getByRole("combobox").filter({ hasText: "Buscar dueño..." }).click();
+  await page.getByRole("combobox").filter({ hasText: "Buscar tutor..." }).click();
   await page.getByPlaceholder("Buscar por nombre o DNI...").fill(nombreCliente);
   await page.getByRole("option", { name: new RegExp(nombreCliente) }).click();
   await page.getByLabel("Especie *").click();

@@ -20,7 +20,7 @@ test("alta encadenada: cliente nuevo → mascota nueva con ese dueño", async ({
   const nombreMascota = unico("Mascota");
   await page.getByLabel("Nombre *").fill(nombreMascota);
 
-  await page.getByRole("combobox").filter({ hasText: "Buscar dueño..." }).click();
+  await page.getByRole("combobox").filter({ hasText: "Buscar tutor..." }).click();
   await page.getByPlaceholder("Buscar por nombre o DNI...").fill(nombreCliente);
   await page.getByRole("option", { name: new RegExp(nombreCliente) }).click();
 
@@ -52,7 +52,7 @@ test("cambio de dueño de una mascota nueva (no toca los fixtures fijos del seed
   await page.getByRole("button", { name: "Nueva mascota" }).click();
   const nombreMascota = unico("CambioDueno");
   await page.getByLabel("Nombre *").fill(nombreMascota);
-  await page.getByRole("combobox").filter({ hasText: "Buscar dueño..." }).click();
+  await page.getByRole("combobox").filter({ hasText: "Buscar tutor..." }).click();
   await page.getByPlaceholder("Buscar por nombre o DNI...").fill(SEED.clientes.juana.nombre);
   await page.getByRole("option", { name: new RegExp(SEED.clientes.juana.nombre) }).click();
   await page.getByLabel("Especie *").click();
@@ -67,7 +67,7 @@ test("cambio de dueño de una mascota nueva (no toca los fixtures fijos del seed
   const fila = page.getByRole("row", { name: new RegExp(nombreMascota) });
   await fila.getByRole("button", { name: `Cambiar tutor de ${nombreMascota}` }).click();
 
-  await page.getByRole("combobox").filter({ hasText: "Buscar nuevo dueño..." }).click();
+  await page.getByRole("combobox").filter({ hasText: "Buscar nuevo tutor..." }).click();
   await page.getByPlaceholder("Buscar por nombre o DNI...").fill(SEED.clientes.carlos.nombre);
   await page.getByRole("option", { name: new RegExp(SEED.clientes.carlos.nombre) }).click();
   await page.getByRole("button", { name: "Confirmar cambio" }).click();
