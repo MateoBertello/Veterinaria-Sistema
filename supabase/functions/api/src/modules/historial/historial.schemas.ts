@@ -17,8 +17,7 @@ export type ListarHistorialQuery = z.infer<typeof ListarHistorialQuerySchema>;
 // ─── Registrar Evento Clínico (RN-EC1, RN-EC6) ──────────────────────────────────
 // Etapa 5 sin eutanasia: `Eutanasia` se excluye del enum aceptado (→ VALIDATION_ERROR);
 // se reincorpora con su RPC transaccional y `euthanasiaConfirmed` en la próxima sesión.
-// `proximaDosis` (plan_vacunacion) se difiere a Etapa 8.
-export const CrearEventoClinicoSchema = z.object({
+const CrearEventoClinicoBaseSchema = z.object({
   date:              z.string().date(),
   eventType:         z.enum([
     "Consulta", "Vacunación", "Cirugía", "Análisis", "Radiografía",
@@ -34,9 +33,28 @@ export const CrearEventoClinicoSchema = z.object({
   medication:        z.string().max(2000).optional(),
   notes:             z.string().max(2000).optional(),
   sendEmailToClient: z.boolean().default(false),
+  // RN-EC13: opcional, y solo tiene sentido si eventType='Vacunación'. Es el
+  // único puente entre el registro libre de un evento de Vacunación y el
+  // catálogo de vacunas (RN-PV3/RN-PV11 los valida VacunacionService.programarDosis,
+  // que este campo termina invocando) — sin esto, 'Vacunación' era una puerta de
+  // texto libre que nunca tocaba el catálogo ni plan_vacunacion.
+  proximaDosis: z.object({
+    tipoVacunaId:  z.string().uuid(),
+    fechaEstimada: z.string().date(),
+  }).optional(),
 });
 
-export type CrearEventoClinicoDto = z.infer<typeof CrearEventoClinicoSchema>;
+export const CrearEventoClinicoSchema = CrearEventoClinicoBaseSchema.superRefine((v, ctx) => {
+  if (v.proximaDosis && v.eventType !== "Vacunación") {
+    ctx.addIssue({
+      code:    "custom",
+      path:    ["proximaDosis"],
+      message: "proximaDosis solo es válido cuando eventType es 'Vacunación'",
+    });
+  }
+});
+
+export type CrearEventoClinicoDto = z.infer<typeof CrearEventoClinicoBaseSchema>;
 
 // ─── Registrar Eutanasia (RN-EC10, RN-EC11) ─────────────────────────────────────
 // Ruta dedicada (POST /mascotas/:petId/eutanasia), separada del Registrar Evento

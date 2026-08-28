@@ -9,13 +9,22 @@ vi.mock("../../supabase/functions/api/src/shared/audit.ts", () => ({
   recordAudit: vi.fn().mockResolvedValue(undefined),
 }));
 
+// RN-EC13: crearRegistro delega en VacunacionService.programarDosis para
+// validar/crear la próxima dosis; se mockea entero (no se re-testean acá las
+// guardas RN-PV2/PV3/PV4/PV11, ya cubiertas en vacunacion.service.test.ts).
+vi.mock("../../supabase/functions/api/src/modules/vacunacion/vacunacion.service.ts", () => ({
+  VacunacionService: { programarDosis: vi.fn() },
+}));
+
 import { getServiceDb } from "../../supabase/functions/api/src/shared/db.ts";
 import { recordAudit } from "../../supabase/functions/api/src/shared/audit.ts";
 import { HistorialService } from "../../supabase/functions/api/src/modules/historial/historial.service.ts";
-import { ErrorCode } from "../../supabase/functions/api/src/shared/errors.ts";
+import { VacunacionService } from "../../supabase/functions/api/src/modules/vacunacion/vacunacion.service.ts";
+import { DomainError, ErrorCode } from "../../supabase/functions/api/src/shared/errors.ts";
 
-const mockGetServiceDb = vi.mocked(getServiceDb);
-const mockRecordAudit  = vi.mocked(recordAudit);
+const mockGetServiceDb   = vi.mocked(getServiceDb);
+const mockRecordAudit    = vi.mocked(recordAudit);
+const mockProgramarDosis = vi.mocked(VacunacionService.programarDosis);
 
 const TENANT_ID  = "11111111-1111-4111-8111-111111111111";
 const PET_ID     = "22222222-2222-4222-8222-222222222222";
@@ -23,6 +32,7 @@ const EVENT_ID   = "33333333-3333-4333-8333-333333333333";
 const CLIENT_A   = "44444444-4444-4444-8444-444444444444";
 const CLIENT_B   = "55555555-5555-4555-8555-555555555555";
 const PROF_ID    = "66666666-6666-4666-8666-666666666666";
+const TIPO_VACUNA_ID = "77777777-7777-4777-8777-777777777777";
 
 // ─── Mock builder ─────────────────────────────────────────────────────────────
 
@@ -526,6 +536,123 @@ describe("crearRegistro", () => {
 
     expect(canalEmail.enviar).not.toHaveBeenCalled();
     expect(evento.emailSent).toBe(false);
+  });
+});
+
+// ─── crearRegistro — RN-EC13 (proximaDosis: el puente al catálogo de vacunas) ──
+// Antes de este puente, `eventType: 'Vacunación'` con solo `description` de
+// texto libre era un segundo camino para asentar "se vacunó" que NUNCA pasaba
+// por RN-PV3/RN-PV11 (catálogo / especie aplicable). Sigue siendo válido
+// registrar así una Vacunación sin dosis asociada (ver docs/Addendum v1.1 y
+// docs/PLAN_ETAPAS.md: 'proximaDosis' es explícitamente OPCIONAL) — lo que
+// cambia es que, si el usuario SÍ pide programar la próxima dosis, esa dosis
+// pasa por las mismas guardas que el resto del Plan de Vacunación.
+
+describe("crearRegistro — RN-EC13 (proximaDosis)", () => {
+  it("RN-EC13: proximaDosis con eventType distinto de 'Vacunación' → VALIDATION_ERROR", async () => {
+    mockGetServiceDb.mockReturnValue(buildMockDb() as never);
+
+    await expect(
+      HistorialService.crearRegistro(
+        PET_ID,
+        dtoBase({
+          eventType:    "Consulta",
+          proximaDosis: { tipoVacunaId: TIPO_VACUNA_ID, fechaEstimada: "2026-08-01" },
+        }) as never,
+        CTX,
+      ),
+    ).rejects.toMatchObject({ code: ErrorCode.VALIDATION_ERROR, statusCode: 422 });
+
+    expect(mockProgramarDosis).not.toHaveBeenCalled();
+  });
+
+  it("RN-EC13: 'Vacunación' SIN proximaDosis sigue siendo un registro libre válido (no se toca el catálogo)", async () => {
+    const db = buildMockDb({
+      singleResults: [
+        { data: mascotaViva, error: null },
+        { data: { id: PROF_ID }, error: null },
+        { data: { id: EVENT_ID, date: "2026-06-04", event_type: "Vacunación" }, error: null },
+      ],
+    });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    const evento = await HistorialService.crearRegistro(
+      PET_ID, dtoBase({ eventType: "Vacunación" }) as never, CTX,
+    );
+
+    expect(mockProgramarDosis).not.toHaveBeenCalled();
+    expect(evento.planVacunacionId).toBeNull();
+  });
+
+  it("RN-EC13: proximaDosis que no aplica a la especie → VACCINE_NOT_APPLICABLE_TO_SPECIES, y NO se crea el evento", async () => {
+    const db = buildMockDb({
+      singleResults: [
+        { data: mascotaViva, error: null },
+        { data: { id: PROF_ID }, error: null },
+      ],
+    });
+    mockGetServiceDb.mockReturnValue(db as never);
+    mockProgramarDosis.mockRejectedValue(
+      new DomainError(ErrorCode.VACCINE_NOT_APPLICABLE_TO_SPECIES, 422, "La vacuna no aplica a la especie de la mascota"),
+    );
+
+    await expect(
+      HistorialService.crearRegistro(
+        PET_ID,
+        dtoBase({
+          eventType:    "Vacunación",
+          proximaDosis: { tipoVacunaId: TIPO_VACUNA_ID, fechaEstimada: "2026-08-01" },
+        }) as never,
+        CTX,
+      ),
+    ).rejects.toMatchObject({ code: ErrorCode.VACCINE_NOT_APPLICABLE_TO_SPECIES, statusCode: 422 });
+
+    // La validación corta ANTES del insert del evento clínico: nada se persiste.
+    expect(db.builder["insert"]).not.toHaveBeenCalled();
+  });
+
+  it("RN-EC13: proximaDosis válida programa la dosis (RN-PV2/PV3/PV11 vía VacunacionService) y enlaza evento_origen_id", async () => {
+    const db = buildMockDb({
+      singleResults: [
+        { data: mascotaViva, error: null },
+        { data: { id: PROF_ID }, error: null },
+        { data: { id: EVENT_ID, date: "2026-06-04", event_type: "Vacunación" }, error: null },
+      ],
+    });
+    mockGetServiceDb.mockReturnValue(db as never);
+    mockProgramarDosis.mockResolvedValue({
+      id:                 "dosis-1",
+      petId:              PET_ID,
+      tipoVacunaId:       TIPO_VACUNA_ID,
+      tipoVacunaNombre:   "Antirrábica",
+      eventoOrigenId:     null,
+      eventoAplicacionId: null,
+      fechaEstimada:      "2026-08-01",
+      estado:             "Pendiente",
+      estadoVisual:       "Proxima",
+      notas:              null,
+      createdAt:          "2026-06-04T00:00:00.000Z",
+    } as never);
+
+    const evento = await HistorialService.crearRegistro(
+      PET_ID,
+      dtoBase({
+        eventType:    "Vacunación",
+        proximaDosis: { tipoVacunaId: TIPO_VACUNA_ID, fechaEstimada: "2026-08-01" },
+      }) as never,
+      CTX,
+    );
+
+    // Se valida/crea la dosis ANTES de tener el id del evento (todavía no hay
+    // eventoOrigenId disponible en ese momento).
+    expect(mockProgramarDosis).toHaveBeenCalledWith(
+      PET_ID,
+      { tipoVacunaId: TIPO_VACUNA_ID, fechaEstimada: "2026-08-01" },
+      CTX,
+    );
+    // Y el evento recién creado se enlaza a la dosis con un UPDATE puntual.
+    expect(db.builder["update"]).toHaveBeenCalledWith({ evento_origen_id: EVENT_ID });
+    expect(evento.planVacunacionId).toBe("dosis-1");
   });
 });
 

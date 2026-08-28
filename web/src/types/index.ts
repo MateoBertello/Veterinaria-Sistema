@@ -542,6 +542,8 @@ export interface EventoCreado {
   clientNameAtTime: string;
   attachmentsCount: number;
   emailSent:        boolean;
+  /** RN-EC13: id de la dosis programada en el Plan de Vacunación si se pidió `proximaDosis`. */
+  planVacunacionId: string | null;
 }
 
 /** Body de `POST /mascotas/:petId/historial` (espejo de `CrearEventoClinicoSchema`). */
@@ -557,6 +559,8 @@ export interface CrearEventoClinicoInput {
   medication?:        string | null;
   notes?:             string | null;
   sendEmailToClient?: boolean;
+  /** RN-EC13: opcional, solo válido si eventType='Vacunación'. */
+  proximaDosis?:      { tipoVacunaId: string; fechaEstimada: string } | null;
 }
 
 /** Body de `POST /mascotas/:petId/eutanasia` (espejo de `RegistrarEutanasiaSchema`, RN-EC10). */

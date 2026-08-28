@@ -38,6 +38,7 @@ function makeEventoCreado(over: Partial<EventoCreado> = {}): EventoCreado {
   return {
     id: "e1", petId: "pet1", date: "2026-06-01", eventType: "Consulta",
     clientNameAtTime: "Juan Pérez", attachmentsCount: 0, emailSent: false,
+    planVacunacionId: null,
     ...over,
   };
 }

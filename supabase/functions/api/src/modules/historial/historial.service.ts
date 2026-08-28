@@ -16,6 +16,7 @@ import {
   type CrearEventoClinicoDto,
   type RegistrarEutanasiaDto,
 } from "./historial.schemas.ts";
+import { VacunacionService } from "../vacunacion/vacunacion.service.ts";
 
 // ─── DTOs públicos ────────────────────────────────────────────────────────────
 
@@ -83,6 +84,9 @@ export interface EventoCreado {
   clientNameAtTime: string;
   attachmentsCount: number;
   emailSent:        boolean;
+  // RN-EC13: id de la dosis programada en plan_vacunacion si el evento vino con
+  // proximaDosis; null si no se pidió (o el evento no es 'Vacunación').
+  planVacunacionId: string | null;
 }
 
 /**
@@ -571,6 +575,22 @@ export class HistorialService {
       throw new DomainError(ErrorCode.FORBIDDEN, 403, "El profesional no pertenece a este tenant");
     }
 
+    // RN-EC13: si se pidió programar la próxima dosis, se valida y crea ANTES
+    // del evento — vía VacunacionService.programarDosis, que aplica RN-PV2
+    // (fecha futura), RN-PV3 (catálogo) y RN-PV11 (especie de la mascota). Si
+    // cualquiera de esas guardas rechaza la dosis, no se crea nada (ni la dosis
+    // ni el evento): mejor que quede un evento de Vacunación sin ningún enlace
+    // real al catálogo, sea el estado imposible en vez del normal.
+    let planVacunacionId: string | null = null;
+    if (data.eventType === "Vacunación" && data.proximaDosis) {
+      const dosis = await VacunacionService.programarDosis(
+        petId,
+        { tipoVacunaId: data.proximaDosis.tipoVacunaId, fechaEstimada: data.proximaDosis.fechaEstimada },
+        ctx,
+      );
+      planVacunacionId = dosis.id;
+    }
+
     const payload = {
       tenant_id:           ctx.tenantId,
       pet_id:              petId,
@@ -604,6 +624,23 @@ export class HistorialService {
 
     // deno-lint-ignore no-explicit-any
     const created = row as any;
+
+    // RN-EC13: enlaza la dosis ya creada con el evento que la originó (columna
+    // `evento_origen_id`, no disponible hasta tener el id del evento).
+    if (planVacunacionId) {
+      const { error: linkError } = await db
+        .from("plan_vacunacion")
+        .update({ evento_origen_id: created.id })
+        .eq("id", planVacunacionId)
+        .eq("tenant_id", ctx.tenantId);
+
+      if (linkError) {
+        throw new DomainError(
+          ErrorCode.INTERNAL_ERROR, 500,
+          "El evento y la dosis se crearon, pero no se pudo enlazarlos",
+        );
+      }
+    }
 
     // RN-EC8: auditoría CREATE en módulo medical_records.
     await recordAudit(db as never, {
@@ -667,6 +704,7 @@ export class HistorialService {
       clientNameAtTime,
       attachmentsCount: 0,
       emailSent,
+      planVacunacionId,
     };
   }
 
