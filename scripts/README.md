@@ -135,6 +135,64 @@ trabajando.
 > tenía refresh token (moría a la hora exacta) y compartía clave con la de la
 > clínica, así que cualquier 401 de la API del tenant la borraba.
 
+### Ver y dar de baja Super Admins
+
+El acceso de plataforma **es** el claim `app_metadata.platform_role='super_admin'`,
+y el dashboard de Supabase no muestra `app_metadata` en Authentication → Users.
+Para no tener que abrir usuario por usuario está `scripts/super-admins.mjs`:
+
+```bash
+node scripts/super-admins.mjs list                  # quiénes tienen acceso hoy
+node scripts/super-admins.mjs revoke viejo@leo.vet  # saca el claim, deja la cuenta
+node scripts/super-admins.mjs delete viejo@leo.vet  # borra la cuenta de Auth
+```
+
+**`revoke` es lo que se quiere casi siempre.** Deja el usuario de Auth en pie, así
+que un id que aparezca en `registros_auditoria.user_id` sigue siendo resoluble, y
+devolver el acceso es re-correr `crear-super-admin.mjs`. `delete` es para una
+cuenta que no debería existir (un email de prueba, uno mal escrito). Ninguno de
+los dos toca la auditoría: `registros_auditoria.user_id` no tiene FK a
+`auth.users`, así que los registros históricos quedan intactos — que es
+exactamente lo que se espera de un log append-only (RN-S3).
+
+Los dos se niegan a dejar la plataforma **sin ningún** Super Admin: no hay camino
+de recuperación por la aplicación (`platform_role` solo se escribe con la
+service_role key), así que quedarse sin ninguno significa perder la consola hasta
+volver a correr un script con esa llave. Se puede forzar con `--force`.
+
+#### Olvidé la contraseña del Super Admin en producción
+
+**No hace falta crear otro.** `crear-super-admin.mjs` es idempotente: con un email
+que ya existe hace `updateUserById` y re-setea password, confirmación y claim,
+conservando el resto de `app_metadata`.
+
+```bash
+export SUPABASE_URL="https://<ref>.supabase.co"
+export SUPABASE_SERVICE_ROLE_KEY="<service_role key>"
+export SUPABASE_ANON_KEY="<anon key>"          # opcional: verifica el login end-to-end
+export SUPER_ADMIN_EMAIL="super@leo.vet"       # el MISMO email de siempre
+export SUPER_ADMIN_PASSWORD="<password nueva>"
+node scripts/crear-super-admin.mjs
+```
+
+Con `SUPABASE_ANON_KEY` presente el script inicia sesión y comprueba que el JWT
+trae el claim antes de terminar, así que si imprime `✓ Verificado` la cuenta
+funciona. No imprime ningún token.
+
+Si en cambio querés **reemplazar la identidad** (el email es de una persona que se
+fue, o está mal escrito), el orden importa — nunca des de baja la vieja antes de
+comprobar la nueva:
+
+```bash
+# 1. Crear la nueva y verificar que entra
+SUPER_ADMIN_EMAIL=nuevo@leo.vet SUPER_ADMIN_PASSWORD='…' node scripts/crear-super-admin.mjs
+# 2. Entrar de verdad por /admin/login con la nueva  ← no saltear este paso
+# 3. Recién ahí, sacarle el acceso a la vieja
+node scripts/super-admins.mjs revoke viejo@leo.vet
+# 4. Confirmar cómo quedó
+node scripts/super-admins.mjs list
+```
+
 ## Errores comunes (troubleshooting)
 
 Estos síntomas parecen "login roto" pero casi siempre son del entorno local:
