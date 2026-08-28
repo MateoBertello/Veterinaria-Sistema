@@ -87,7 +87,17 @@ export enum ErrorCode {
   // ── Horarios ──────────────────────────────────────────────────────
   INVALID_RANGE    = "INVALID_RANGE",
   SCHEDULE_OVERLAP = "SCHEDULE_OVERLAP",
-  /** RN-HOR8: crear o reactivar una franja de un profesional dado de baja (`doctores.available=false`). */
+  /**
+   * RN-HOR8: se intentó dar trabajo NUEVO a un profesional dado de baja
+   * (`doctores.available=false`). Cubre todos los caminos de asignación, no
+   * sólo el de Horarios donde nació la regla: crear/reactivar una franja,
+   * agendar un turno, reasignar el profesional de un turno existente, y firmar
+   * un evento clínico, una eutanasia o una aplicación de vacuna.
+   *
+   * La baja NO es destructiva: lo ya asignado sigue en pie (un turno agendado
+   * antes de la baja se puede reprogramar sin cambiar de profesional, y el
+   * historial que ese profesional firmó es inmutable).
+   */
   DOCTOR_INACTIVE  = "DOCTOR_INACTIVE",
 
   // ── Notificaciones ────────────────────────────────────────────────

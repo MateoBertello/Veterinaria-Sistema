@@ -4,6 +4,7 @@
 import { DomainError, ErrorCode } from "../../shared/errors.ts";
 import { recordAudit } from "../../shared/audit.ts";
 import { getServiceDb } from "../../shared/db.ts";
+import { assertProfesionalAsignable } from "../../shared/profesional.ts";
 import { neutralizeFormula } from "../../shared/sanitize.ts";
 import {
   CanalEmailResend,
@@ -575,6 +576,11 @@ export class HistorialService {
       throw new DomainError(ErrorCode.FORBIDDEN, 403, "El profesional no pertenece a este tenant");
     }
 
+    // RN-HOR8: un profesional dado de baja no firma eventos clínicos NUEVOS.
+    // Lo que ya firmó queda intacto: el historial es inmutable, esta guarda
+    // sólo mira hacia adelante.
+    await assertProfesionalAsignable(db, ctx.tenantId, data.professionalId);
+
     // RN-EC13: si se pidió programar la próxima dosis, se valida y crea ANTES
     // del evento — vía VacunacionService.programarDosis, que aplica RN-PV2
     // (fecha futura), RN-PV3 (catálogo) y RN-PV11 (especie de la mascota). Si
@@ -745,6 +751,11 @@ export class HistorialService {
     }
 
     const db = getServiceDb();
+
+    // RN-HOR8: un profesional dado de baja no firma la eutanasia. Se valida
+    // ANTES del RPC, igual que RN-EC10: no se inicia la transacción
+    // irreversible para después abortarla.
+    await assertProfesionalAsignable(db, ctx.tenantId, data.professionalId);
 
     // RN-EC11: transacción atómica única. p_tenant_id SIEMPRE del JWT (regla 1).
     // RN-S3: el asiento de auditoría se hace DENTRO del RPC (atómico con la

@@ -67,6 +67,8 @@ export const ErrorCode = {
   CUPO_GUARDERIA_AGOTADO: "CUPO_GUARDERIA_AGOTADO",
   INVALID_RANGE:       "INVALID_RANGE",
   SCHEDULE_OVERLAP:    "SCHEDULE_OVERLAP",
+  /** RN-HOR8: se intentó asignar trabajo nuevo a un profesional dado de baja. */
+  DOCTOR_INACTIVE:     "DOCTOR_INACTIVE",
   EMPTY_HISTORY:                    "EMPTY_HISTORY",
   HISTORIAL_NOT_FOUND:              "HISTORIAL_NOT_FOUND",
   EUTHANASIA_CONFIRMATION_REQUIRED: "EUTHANASIA_CONFIRMATION_REQUIRED",
@@ -216,6 +218,12 @@ export interface TurnoServicio {
 export interface TurnoDoctor {
   id:   string;
   name: string;
+  /**
+   * RN-HOR8: `false` cuando el profesional fue dado de baja DESPUÉS de agendar
+   * el turno. La asignación se conserva y se sigue mostrando; lo que cambia es
+   * que el selector ya no lo ofrece para asignaciones nuevas.
+   */
+  available: boolean;
 }
 
 export interface TurnoMascota {

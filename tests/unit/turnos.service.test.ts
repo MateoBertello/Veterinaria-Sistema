@@ -49,6 +49,14 @@ function dtoBase(overrides: Record<string, unknown> = {}) {
   };
 }
 
+/**
+ * Fila de `doctores` tal como la lee la guarda RN-HOR8 antes de asignar el
+ * profesional (existe en el tenant y está disponible).
+ */
+function doctorRow(over: Record<string, unknown> = {}) {
+  return { id: DOCTOR_ID, available: true, ...over };
+}
+
 function servicioRow(over: Record<string, unknown> = {}) {
   return { id: SERVICE_ID, duracion_minutos: 30, requiere_profesional: false, activo: true, ...over };
 }
@@ -283,12 +291,61 @@ describe("TurnoService.crearTurno", () => {
     });
   });
 
+  // ── RN-HOR8 (baja lógica del profesional) ────────────────────────────────────
+
+  it("RN-HOR8: agendar con un doctor dado de baja → DOCTOR_INACTIVE (no llega al insert)", async () => {
+    const db = makeDb([
+      { data: servicioRow({ requiere_profesional: true }) },  // servicio
+      { data: { id: PET_ID, estado: "Activa" } },             // mascota
+      { data: doctorRow({ available: false }) },              // doctor dado de baja
+    ]);
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    await expect(
+      TurnoService.crearTurno(dtoBase({ doctorId: DOCTOR_ID }), ctx),
+    ).rejects.toMatchObject({ code: ErrorCode.DOCTOR_INACTIVE, statusCode: 422 });
+
+    expect(db["insert"]).not.toHaveBeenCalled();
+  });
+
+  it("RN-HOR8: la baja se chequea ANTES de la franja (un doctor de baja conserva sus franjas)", async () => {
+    // Sin la guarda, este turno se agendaba: el doctor está de baja pero su
+    // franja 08:00–18:00 sigue activa y contiene el bloque.
+    const db = makeDb([
+      { data: servicioRow({ requiere_profesional: true }) },
+      { data: { id: PET_ID, estado: "Activa" } },
+      { data: doctorRow({ available: false }) },
+      { data: [{ start_time: "08:00", end_time: "18:00" }] },
+    ]);
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    await expect(
+      TurnoService.crearTurno(dtoBase({ doctorId: DOCTOR_ID }), ctx),
+    ).rejects.toMatchObject({ code: ErrorCode.DOCTOR_INACTIVE });
+  });
+
+  it("RN-HOR8: doctorId de otro tenant → FORBIDDEN (la FK no lleva el tenant en la clave)", async () => {
+    const db = makeDb([
+      { data: servicioRow({ requiere_profesional: true }) },
+      { data: { id: PET_ID, estado: "Activa" } },
+      { data: null },                                         // no existe en ESTE tenant
+    ]);
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    await expect(
+      TurnoService.crearTurno(dtoBase({ doctorId: DOCTOR_ID }), ctx),
+    ).rejects.toMatchObject({ code: ErrorCode.FORBIDDEN, statusCode: 403 });
+
+    expect(db["insert"]).not.toHaveBeenCalled();
+  });
+
   // ── RN-TU2 (bloque fuera de las franjas del profesional) ─────────────────────
 
   it("RN-TU2/RN-HOR3: bloque fuera de toda franja activa del doctor → VALIDATION_ERROR", async () => {
     const db = makeDb([
       { data: servicioRow({ requiere_profesional: true }) },  // servicio
       { data: { id: PET_ID, estado: "Activa" } },             // mascota
+      { data: doctorRow() },                                  // RN-HOR8: doctor disponible
       { data: [] },                                           // franjas: ninguna contiene el bloque
     ]);
     mockGetServiceDb.mockReturnValue(db as never);
@@ -483,6 +540,56 @@ describe("TurnoService.modificarTurno", () => {
     const updatePayload = (db["update"] as ReturnType<typeof vi.fn>).mock.calls[0][0] as Record<string, unknown>;
     expect(updatePayload["end_time"]).toBe("15:00"); // 14:00 + 60min
     expect(updatePayload["servicio_id"]).toBe(NUEVO_SERVICIO_ID);
+  });
+
+  // ── RN-HOR8 en la reprogramación ─────────────────────────────────────────────
+  // La baja del profesional corta lo NUEVO y respeta lo ya asignado: cambiar de
+  // doctor a uno de baja se rechaza, pero mover la hora conservando el doctor
+  // que ya tenía el turno sigue funcionando aunque ese doctor esté de baja.
+
+  it("RN-HOR8: reasignar el turno a un doctor dado de baja → DOCTOR_INACTIVE", async () => {
+    const OTRO_DOCTOR_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    const db = makeDb([
+      { data: turnoActual("Confirmado") },                    // fetch turno actual
+      { data: servicioRow() },                                // servicio vigente
+      { data: { id: OTRO_DOCTOR_ID, available: false } },     // doctor destino, de baja
+    ]);
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    await expect(
+      TurnoService.modificarTurno(TURNO_ID, { doctorId: OTRO_DOCTOR_ID }, ctx),
+    ).rejects.toMatchObject({ code: ErrorCode.DOCTOR_INACTIVE, statusCode: 422 });
+
+    expect(db["update"]).not.toHaveBeenCalled();
+  });
+
+  it("RN-HOR8: reprogramar la hora conservando el doctor ya asignado (hoy de baja) → OK", async () => {
+    const turnoModificado = {
+      ...turnoActual(), start_time: "11:00", end_time: "11:30",
+      servicio: null, doctor: null, mascota: null, cliente: null,
+    };
+    const db = makeDb([
+      { data: turnoActual("Confirmado") },                      // fetch turno actual
+      { data: servicioRow() },                                  // servicio vigente
+      { data: [{ start_time: "08:00", end_time: "18:00" }] },   // franjas (el doctor de baja las conserva)
+      { data: turnoModificado },                                // UPDATE result
+    ]);
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    // El frontend reenvía el mismo doctorId al reprogramar: no es un cambio de
+    // profesional y por eso NO se consulta `doctores` (la cola no tiene esa fila).
+    await expect(
+      TurnoService.modificarTurno(
+        TURNO_ID, { doctorId: DOCTOR_ID, startTime: "11:00" }, ctx,
+      ),
+    ).resolves.toMatchObject({ startTime: "11:00" });
+
+    expect(db["update"]).toHaveBeenCalled();
+    // Explícito, para que el test falle si alguien "arregla" la guarda mirando
+    // el doctor efectivo en vez del cambio de doctor: reprogramar no consulta
+    // `doctores` cuando el profesional no cambia.
+    const tablas = (db["from"] as ReturnType<typeof vi.fn>).mock.calls.flat();
+    expect(tablas).not.toContain("doctores");
   });
 
   // ── RN-TU1 extendida vía RN-MC2 (reprogramar a hora ya pasada de hoy) ────────

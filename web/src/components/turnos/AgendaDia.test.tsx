@@ -37,7 +37,7 @@ function makeTurno(over: Partial<Turno> = {}): Turno {
     cancellationReason: null,
     cancelledAt: null,
     servicio: { id: "s1", nombre: "Consulta general", tipo: "clinica", duracionMinutos: 30 },
-    doctor: { id: "d1", name: "Dra. Ana Gómez" },
+    doctor: { id: "d1", name: "Dra. Ana Gómez", available: true },
     mascota: { id: "p1", name: "Max" },
     cliente: { id: "c1", fullName: "María García" },
     accionesDisponibles: [],

@@ -34,6 +34,14 @@ const CLIENT_B   = "55555555-5555-4555-8555-555555555555";
 const PROF_ID    = "66666666-6666-4666-8666-666666666666";
 const TIPO_VACUNA_ID = "77777777-7777-4777-8777-777777777777";
 
+/**
+ * RN-HOR8: antes de firmar un registro nuevo, el Service resuelve el perfil
+ * profesional (`doctores` por `user_id`) para comprobar que no está dado de
+ * baja. Esta entrada es esa consulta con el perfil disponible — el camino feliz
+ * de todos los tests que llegan a escribir.
+ */
+const perfilDoctorDisponible = { data: { id: "88888888-8888-4888-8888-888888888888", available: true }, error: null };
+
 // ─── Mock builder ─────────────────────────────────────────────────────────────
 
 type MockOpts = {
@@ -401,11 +409,46 @@ describe("crearRegistro", () => {
     expect(db.builder["insert"]).not.toHaveBeenCalled();
   });
 
+  it("RN-HOR8: profesional con perfil de doctor dado de baja → DOCTOR_INACTIVE (no persiste)", async () => {
+    const db = buildMockDb({
+      singleResults: [
+        { data: mascotaViva, error: null },
+        { data: { id: PROF_ID }, error: null },                    // usuario del tenant, OK
+        { data: { id: "88888888-8888-4888-8888-888888888888", available: false }, error: null },
+      ],
+    });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    await expect(
+      HistorialService.crearRegistro(PET_ID, dtoBase() as never, CTX),
+    ).rejects.toMatchObject({ code: ErrorCode.DOCTOR_INACTIVE, statusCode: 422 });
+
+    // Corta antes del insert: el historial ya firmado por ese profesional no se
+    // toca, pero tampoco se le agregan registros nuevos.
+    expect(db.builder["insert"]).not.toHaveBeenCalled();
+  });
+
+  it("RN-HOR8: un usuario del tenant sin perfil de doctor sigue pudiendo firmar (alcance acotado)", async () => {
+    const db = buildMockDb({
+      singleResults: [
+        { data: mascotaViva, error: null },
+        { data: { id: PROF_ID }, error: null },
+        { data: null, error: null },                               // sin fila en `doctores`
+        { data: { id: EVENT_ID, date: "2026-06-04", event_type: "Consulta" }, error: null },
+      ],
+    });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    const evento = await HistorialService.crearRegistro(PET_ID, dtoBase() as never, CTX);
+    expect(evento.id).toBe(EVENT_ID);
+  });
+
   it("RN-EC5: persiste clientIdAtTime/clientNameAtTime del dueño vigente", async () => {
     const db = buildMockDb({
       singleResults: [
         { data: mascotaViva, error: null },
         { data: { id: PROF_ID }, error: null },
+        perfilDoctorDisponible,
         { data: { id: EVENT_ID, date: "2026-06-04", event_type: "Consulta" }, error: null },
       ],
     });
@@ -430,6 +473,7 @@ describe("crearRegistro", () => {
       singleResults: [
         { data: mascotaViva, error: null },
         { data: { id: PROF_ID }, error: null },
+        perfilDoctorDisponible,
         { data: { id: EVENT_ID, date: "2026-06-04", event_type: "Consulta" }, error: null },
       ],
     });
@@ -463,6 +507,7 @@ describe("crearRegistro", () => {
       singleResults: [
         { data: mascotaViva, error: null },
         { data: { id: PROF_ID }, error: null },
+        perfilDoctorDisponible,
         { data: { id: EVENT_ID, date: "2026-06-04", event_type: "Consulta" }, error: null },
       ],
     });
@@ -485,6 +530,7 @@ describe("crearRegistro", () => {
       singleResults: [
         { data: { ...mascotaViva, cliente: { full_name: "Juan Pérez", email: null } }, error: null },
         { data: { id: PROF_ID }, error: null },
+        perfilDoctorDisponible,
         { data: { id: EVENT_ID, date: "2026-06-04", event_type: "Consulta" }, error: null },
       ],
     });
@@ -504,6 +550,7 @@ describe("crearRegistro", () => {
       singleResults: [
         { data: mascotaViva, error: null },
         { data: { id: PROF_ID }, error: null },
+        perfilDoctorDisponible,
         { data: { id: EVENT_ID, date: "2026-06-04", event_type: "Consulta" }, error: null },
       ],
     });
@@ -524,6 +571,7 @@ describe("crearRegistro", () => {
       singleResults: [
         { data: mascotaViva, error: null },
         { data: { id: PROF_ID }, error: null },
+        perfilDoctorDisponible,
         { data: { id: EVENT_ID, date: "2026-06-04", event_type: "Consulta" }, error: null },
       ],
     });
@@ -571,6 +619,7 @@ describe("crearRegistro — RN-EC13 (proximaDosis)", () => {
       singleResults: [
         { data: mascotaViva, error: null },
         { data: { id: PROF_ID }, error: null },
+        perfilDoctorDisponible,
         { data: { id: EVENT_ID, date: "2026-06-04", event_type: "Vacunación" }, error: null },
       ],
     });
@@ -589,6 +638,7 @@ describe("crearRegistro — RN-EC13 (proximaDosis)", () => {
       singleResults: [
         { data: mascotaViva, error: null },
         { data: { id: PROF_ID }, error: null },
+        perfilDoctorDisponible,
       ],
     });
     mockGetServiceDb.mockReturnValue(db as never);
@@ -616,6 +666,7 @@ describe("crearRegistro — RN-EC13 (proximaDosis)", () => {
       singleResults: [
         { data: mascotaViva, error: null },
         { data: { id: PROF_ID }, error: null },
+        perfilDoctorDisponible,
         { data: { id: EVENT_ID, date: "2026-06-04", event_type: "Vacunación" }, error: null },
       ],
     });
@@ -885,7 +936,7 @@ describe("registrarEutanasia", () => {
     // El RPC lanza PET_DECEASED (p. ej. mascota ya fallecida). El Service NO debe
     // hacer escrituras por partes: delega TODO en el único rpc('registrar_eutanasia').
     const db = buildMockDb({
-      singleResults: [{ data: null, error: { message: "PET_DECEASED" } }],
+      singleResults: [perfilDoctorDisponible, { data: null, error: { message: "PET_DECEASED" } }],
     });
     mockGetServiceDb.mockReturnValue(db as never);
 
@@ -907,7 +958,7 @@ describe("registrarEutanasia", () => {
 
   it("RN-EC11: éxito ejecuta una única transacción y mapea { evento, mascota }", async () => {
     const db = buildMockDb({
-      singleResults: [{ data: eutanasiaRpcRow(), error: null }],
+      singleResults: [perfilDoctorDisponible, { data: eutanasiaRpcRow(), error: null }],
     });
     mockGetServiceDb.mockReturnValue(db as never);
 
@@ -940,7 +991,7 @@ describe("registrarEutanasia", () => {
     // junto con todo). El Service por tanto no debe llamar a recordAudit; sí pasa
     // p_user_id para que el asiento registre al usuario que ejecuta.
     const db = buildMockDb({
-      singleResults: [{ data: eutanasiaRpcRow(), error: null }],
+      singleResults: [perfilDoctorDisponible, { data: eutanasiaRpcRow(), error: null }],
     });
     mockGetServiceDb.mockReturnValue(db as never);
 
@@ -953,7 +1004,7 @@ describe("registrarEutanasia", () => {
 
   it("RN-PV4: cancelledDoses refleja las dosis pendientes canceladas por el RPC", async () => {
     const db = buildMockDb({
-      singleResults: [{ data: eutanasiaRpcRow({ cancelled_doses: 3 }), error: null }],
+      singleResults: [perfilDoctorDisponible, { data: eutanasiaRpcRow({ cancelled_doses: 3 }), error: null }],
     });
     mockGetServiceDb.mockReturnValue(db as never);
 
@@ -964,9 +1015,25 @@ describe("registrarEutanasia", () => {
     expect(result.cancelledDoses).toBe(3);
   });
 
+  it("RN-HOR8: profesional dado de baja → DOCTOR_INACTIVE sin abrir la transacción irreversible", async () => {
+    const db = buildMockDb({
+      singleResults: [
+        { data: { id: "88888888-8888-4888-8888-888888888888", available: false }, error: null },
+      ],
+    });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    await expect(
+      HistorialService.registrarEutanasia(PET_ID, eutanasiaDto({ euthanasiaConfirmed: true }) as never, CTX),
+    ).rejects.toMatchObject({ code: ErrorCode.DOCTOR_INACTIVE, statusCode: 422 });
+
+    // Mismo criterio que RN-EC10: la operación irreversible ni se inicia.
+    expect(db.rpc).not.toHaveBeenCalled();
+  });
+
   it("registrarEutanasia: RPC MASCOTA_NOT_FOUND → 404", async () => {
     const db = buildMockDb({
-      singleResults: [{ data: null, error: { message: "MASCOTA_NOT_FOUND" } }],
+      singleResults: [perfilDoctorDisponible, { data: null, error: { message: "MASCOTA_NOT_FOUND" } }],
     });
     mockGetServiceDb.mockReturnValue(db as never);
 
@@ -977,7 +1044,7 @@ describe("registrarEutanasia", () => {
 
   it("registrarEutanasia: RPC FORBIDDEN (profesional de otro tenant) → 403", async () => {
     const db = buildMockDb({
-      singleResults: [{ data: null, error: { message: "FORBIDDEN" } }],
+      singleResults: [perfilDoctorDisponible, { data: null, error: { message: "FORBIDDEN" } }],
     });
     mockGetServiceDb.mockReturnValue(db as never);
 

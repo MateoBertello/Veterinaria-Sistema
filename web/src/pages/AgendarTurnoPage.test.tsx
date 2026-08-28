@@ -262,7 +262,7 @@ describe("AgendarTurnoPage", () => {
       { startTime: "09:00", endTime: "09:30" },
       { startTime: "09:30", endTime: "10:00" },
     ]);
-    mockCrearTurno.mockResolvedValue(makeTurno({ doctor: { id: "d1", name: doctor.name } }));
+    mockCrearTurno.mockResolvedValue(makeTurno({ doctor: { id: "d1", name: doctor.name, available: true } }));
 
     renderPage();
     await screen.findByRole("combobox", { name: "Servicio" });
@@ -431,6 +431,23 @@ describe("AgendarTurnoPage", () => {
       );
       expect(mockCrearTurno).not.toHaveBeenCalled();
       expect(await screen.findByText("Agenda de turnos")).toBeInTheDocument();
+    });
+
+    it("RN-HOR8: sigue mostrando el profesional asignado aunque haya sido dado de baja", async () => {
+      // Filtrar las opciones nuevas del selector no es lo mismo que ocultar lo
+      // ya asignado: el turno conserva su profesional y se puede reprogramar.
+      const cliente = makeCliente();
+      const mascota = makeMascota();
+      mockObtenerTurno.mockResolvedValue(
+        makeTurno({ doctor: { id: "d1", name: "Dra. Ana Gómez", available: false } }),
+      );
+      mockListarClientes.mockResolvedValue({ items: [cliente], meta: { page: 1, limit: 15, total: 1 } });
+      mockListarMascotas.mockResolvedValue({ items: [mascota], meta: { page: 1, limit: 100, total: 1 } });
+
+      renderEditPage();
+
+      expect(await screen.findByRole("combobox", { name: "Doctor" })).toHaveTextContent("Dra. Ana Gómez");
+      expect(await screen.findByText(/fue dado de baja/i)).toBeInTheDocument();
     });
 
     it("muestra APPOINTMENT_LOCKED como toast al modificar un turno bloqueado", async () => {

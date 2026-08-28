@@ -1,6 +1,7 @@
 import { DomainError, ErrorCode } from "../../shared/errors.ts";
 import { recordAudit } from "../../shared/audit.ts";
 import { getServiceDb } from "../../shared/db.ts";
+import { assertProfesionalAsignable } from "../../shared/profesional.ts";
 import type { ProgramarDosisDto, EditarDosisDto, MarcarAplicadaDto } from "./vacunacion.schemas.ts";
 
 // ─── DTOs públicos ────────────────────────────────────────────────────────────
@@ -507,6 +508,11 @@ export class VacunacionService {
     }
 
     const db = getServiceDb();
+
+    // RN-HOR8: un profesional dado de baja no firma la aplicación de una dosis
+    // (el RPC crea a su nombre un evento clínico 'Vacunación'). Se valida antes
+    // del RPC para no abrir la transacción y tener que abortarla.
+    await assertProfesionalAsignable(db, ctx.tenantId, dto.professionalId);
 
     const { error } = await db
       .rpc("marcar_dosis_aplicada", {

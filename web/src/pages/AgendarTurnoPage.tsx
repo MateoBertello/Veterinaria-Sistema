@@ -144,11 +144,15 @@ export function AgendarTurnoPage() {
               }
             : null,
         );
+        // RN-HOR8: el profesional asignado se muestra tal cual, incluso si fue
+        // dado de baja después de agendar el turno (`available: false`). El
+        // selector filtra las OPCIONES nuevas; eso no es lo mismo que ocultar
+        // lo ya asignado.
         setDoctor(
           t.doctor
             ? {
                 id: t.doctor.id, userId: null, name: t.doctor.name,
-                specialty: null, licenseNumber: null, available: true,
+                specialty: null, licenseNumber: null, available: t.doctor.available,
                 createdAt: "", usuario: null,
               }
             : null,
@@ -446,7 +450,15 @@ export function AgendarTurnoPage() {
                       />
                     )}
                   />
-                  <p className="text-xs text-muted-foreground">Requerido por este servicio.</p>
+                  {doctor && !doctor.available ? (
+                    <p className="text-xs text-amber-700">
+                      {doctor.name} fue dado de baja. Podés reprogramar el turno tal
+                      como está; si cambiás de profesional, solo vas a ver los
+                      disponibles.
+                    </p>
+                  ) : (
+                    <p className="text-xs text-muted-foreground">Requerido por este servicio.</p>
+                  )}
                   <FieldError message={errors.doctorId?.message} />
                 </div>
               ) : null}

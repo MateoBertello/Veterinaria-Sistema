@@ -1,6 +1,7 @@
 import { DomainError, ErrorCode } from "../../shared/errors.ts";
 import { recordAudit } from "../../shared/audit.ts";
 import { getServiceDb } from "../../shared/db.ts";
+import { assertDoctorAsignable } from "../../shared/profesional.ts";
 import {
   CrearTurnoSchema,
   type CrearTurnoDto,
@@ -29,7 +30,13 @@ export interface TurnoPublico {
   cancellationReason:  string | null;
   cancelledAt:         string | null;
   servicio:            { id: string; nombre: string; tipo: string; duracionMinutos: number } | null;
-  doctor:              { id: string; name: string } | null;
+  /**
+   * RN-HOR8: `available` viaja en el DTO para que la pantalla de reprogramar
+   * pueda seguir MOSTRANDO el profesional asignado cuando fue dado de baja
+   * después de agendar el turno (el selector, en cambio, sólo ofrece
+   * disponibles). Filtrar las opciones nuevas no es ocultar lo ya asignado.
+   */
+  doctor:              { id: string; name: string; available: boolean } | null;
   mascota:             { id: string; name: string } | null;
   cliente:             { id: string; fullName: string } | null;
   accionesDisponibles: string[];
@@ -61,7 +68,7 @@ export interface SlotDisponible {
 const TURNO_SELECT =
   "id, date, start_time, end_time, status, reason, notes, cancellation_reason, cancelled_at, " +
   "servicio:servicios(id, nombre, tipo, duracion_minutos), " +
-  "doctor:doctores(id, name), " +
+  "doctor:doctores(id, name, available), " +
   "mascota:mascotas(id, name), " +
   "cliente:clientes(id, full_name)";
 
@@ -163,7 +170,15 @@ function toPublic(row: Record<string, unknown>, accionesDisponibles: string[] = 
           duracionMinutos: svc["duracion_minutos"] as number,
         }
       : null,
-    doctor:              doc ? { id: doc["id"] as string, name: doc["name"] as string } : null,
+    doctor:              doc
+      ? {
+          id:        doc["id"]   as string,
+          name:      doc["name"] as string,
+          // Turnos viejos leídos por un select sin la columna: se asume
+          // disponible (el caso "de baja" es el excepcional y se marca).
+          available: (doc["available"] as boolean | undefined) ?? true,
+        }
+      : null,
     mascota:             pet ? { id: pet["id"] as string, name: pet["name"] as string } : null,
     cliente:             cli ? { id: cli["id"] as string, fullName: cli["full_name"] as string } : null,
     accionesDisponibles,
@@ -266,8 +281,12 @@ export const TurnoService = {
     }
     const endTime = fromMinutes(finMin);
 
-    // RN-TU2: si hay doctor, el bloque [start, end) debe caber en una franja activa.
     if (data.doctorId) {
+      // RN-HOR8: un profesional dado de baja no recibe turnos nuevos. Va ANTES
+      // de la franja porque un doctor de baja conserva sus franjas: sin esta
+      // guarda el bloque encajaba y el turno se agendaba igual.
+      await assertDoctorAsignable(db, ctx.tenantId, data.doctorId);
+      // RN-TU2: el bloque [start, end) debe caber en una franja activa.
       await this._assertBloqueEnFranja(db, ctx.tenantId, data.doctorId, data.date, inicioMin, finMin);
     }
 
@@ -471,6 +490,18 @@ export const TurnoService = {
         throw new DomainError(ErrorCode.VALIDATION_ERROR, 422, "La duración del servicio excede el final del día");
       }
       efectivoEndTime = fromMinutes(finMin);
+
+      // RN-HOR8: la baja del profesional corta las asignaciones NUEVAS, no las
+      // que ya existen. Por eso la guarda mira si el turno CAMBIA de doctor y
+      // no el doctor efectivo: mover la hora de un turno cuyo profesional fue
+      // dado de baja después de agendarlo sigue permitido (bloquearlo
+      // castigaría al paciente por una decisión administrativa). Sólo se exige
+      // un profesional disponible cuando el usuario elige uno distinto.
+      // El frontend reenvía `doctorId` sin cambios al reprogramar, así que la
+      // comparación es contra el valor actual, no contra `!== undefined`.
+      if (efectivoDoctorId && efectivoDoctorId !== (cur["doctor_id"] as string | null)) {
+        await assertDoctorAsignable(db, ctx.tenantId, efectivoDoctorId);
+      }
 
       // RN-TU2: bloque debe caber en franja si hay doctor.
       if (efectivoDoctorId) {

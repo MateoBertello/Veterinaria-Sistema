@@ -28,6 +28,13 @@ const USER_ID     = "55555555-5555-4555-8555-555555555555";
 const PROF_ID     = "66666666-6666-4666-8666-666666666666";
 const EVENT_ID    = "77777777-7777-4777-8777-777777777777";
 
+/**
+ * RN-HOR8: antes del RPC, `marcarDosisAplicada` resuelve el perfil profesional
+ * (`doctores` por `user_id`) para no dejar firmar a un doctor dado de baja.
+ * Esta entrada es esa consulta con el perfil disponible.
+ */
+const perfilDoctorDisponible = { data: { id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", available: true }, error: null };
+
 const ctx = {
   tenantId:     TENANT_ID,
   callerUserId: USER_ID,
@@ -634,6 +641,7 @@ describe("VacunacionService.marcarDosisAplicada", () => {
     });
     return buildMockDb({
       singleResults: [
+        perfilDoctorDisponible,                                            // RN-HOR8
         { data: { event_id: EVENT_ID, dosis_id: DOSIS_ID }, error: null }, // RPC
         { data: aplicada, error: null },                                    // read-back
       ],
@@ -642,7 +650,7 @@ describe("VacunacionService.marcarDosisAplicada", () => {
 
   it("RN-PV5: dosis no Pendiente (RPC) → VACCINE_PLAN_ALREADY_APPLIED (422)", async () => {
     const db = buildMockDb({
-      singleResults: [{ data: null, error: { message: "VACCINE_PLAN_ALREADY_APPLIED" } }],
+      singleResults: [perfilDoctorDisponible, { data: null, error: { message: "VACCINE_PLAN_ALREADY_APPLIED" } }],
     });
     mockGetServiceDb.mockReturnValue(db as never);
 
@@ -653,7 +661,7 @@ describe("VacunacionService.marcarDosisAplicada", () => {
 
   it("dosis inexistente (RPC) → VACCINE_PLAN_NOT_FOUND (404)", async () => {
     const db = buildMockDb({
-      singleResults: [{ data: null, error: { message: "VACCINE_PLAN_NOT_FOUND" } }],
+      singleResults: [perfilDoctorDisponible, { data: null, error: { message: "VACCINE_PLAN_NOT_FOUND" } }],
     });
     mockGetServiceDb.mockReturnValue(db as never);
 
@@ -664,7 +672,7 @@ describe("VacunacionService.marcarDosisAplicada", () => {
 
   it("mascota Fallecida (RPC) → PET_DECEASED (422)", async () => {
     const db = buildMockDb({
-      singleResults: [{ data: null, error: { message: "PET_DECEASED" } }],
+      singleResults: [perfilDoctorDisponible, { data: null, error: { message: "PET_DECEASED" } }],
     });
     mockGetServiceDb.mockReturnValue(db as never);
 
@@ -675,13 +683,30 @@ describe("VacunacionService.marcarDosisAplicada", () => {
 
   it("profesional ajeno al tenant (RPC) → FORBIDDEN (403)", async () => {
     const db = buildMockDb({
-      singleResults: [{ data: null, error: { message: "FORBIDDEN" } }],
+      singleResults: [perfilDoctorDisponible, { data: null, error: { message: "FORBIDDEN" } }],
     });
     mockGetServiceDb.mockReturnValue(db as never);
 
     await expect(
       VacunacionService.marcarDosisAplicada(DOSIS_ID, dtoValido, ctx),
     ).rejects.toMatchObject({ code: ErrorCode.FORBIDDEN, statusCode: 403 });
+  });
+
+  it("RN-HOR8: profesional dado de baja → DOCTOR_INACTIVE sin invocar el RPC", async () => {
+    const db = buildMockDb({
+      singleResults: [
+        { data: { id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", available: false }, error: null },
+      ],
+    });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    await expect(
+      VacunacionService.marcarDosisAplicada(DOSIS_ID, dtoValido, ctx),
+    ).rejects.toMatchObject({ code: ErrorCode.DOCTOR_INACTIVE, statusCode: 422 });
+
+    // El RPC crea un evento clínico 'Vacunación' a nombre del profesional: si
+    // está de baja, la transacción no se abre.
+    expect(db.rpc).not.toHaveBeenCalled();
   });
 
   it("date futura → VALIDATION_ERROR (422) sin invocar el RPC", async () => {
