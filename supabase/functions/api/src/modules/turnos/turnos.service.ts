@@ -89,6 +89,33 @@ function diaSemana(date: string): number {
   return new Date(`${date}T00:00:00Z`).getUTCDay();
 }
 
+/**
+ * Fecha ("YYYY-MM-DD") y hora ("minutos desde medianoche") de "ahora", en UTC.
+ *
+ * El sistema no tiene zona horaria de clínica configurada: `vacunacion.service.ts`
+ * (`today()`) y `web/src/components/turnos/fechas.ts` ya usan UTC de punta a punta
+ * ("Todo en UTC para evitar corrimientos por zona horaria"). Se sigue el mismo
+ * criterio acá para que frontend y backend coincidan en qué es "hoy"/"ahora"; si
+ * la clínica opera en otra zona, es una decisión de producto pendiente, no algo
+ * para inventar en este Service.
+ */
+function ahoraUTC(): { fecha: string; horaMin: number } {
+  const iso = new Date().toISOString(); // "YYYY-MM-DDTHH:MM:SS.sssZ"
+  return { fecha: iso.slice(0, 10), horaMin: toMinutes(iso.slice(11, 16)) };
+}
+
+/**
+ * RN-TU1: no se agenda ni se reprograma a una fecha/hora ya pasada. Compartida por
+ * `crearTurno` y `modificarTurno` para que la regla no vuelva a divergir entre las
+ * dos rutas (el bug original: solo se comparaba la fecha, nunca la hora).
+ */
+function assertFechaHoraFutura(date: string, startTime: string, mensaje: string): void {
+  const { fecha: hoy, horaMin: ahoraMin } = ahoraUTC();
+  if (date < hoy || (date === hoy && toMinutes(startTime) <= ahoraMin)) {
+    throw new DomainError(ErrorCode.PAST_DATE, 422, mensaje);
+  }
+}
+
 function unwrapEmbed<T>(v: unknown): T | null {
   // PostgREST devuelve el embed como objeto o como array de un elemento según la relación.
   if (Array.isArray(v)) return (v[0] as T) ?? null;
@@ -181,11 +208,8 @@ export const TurnoService = {
       );
     }
 
-    // RN-TU1: no se agenda en fechas pasadas (comparación lexicográfica de YYYY-MM-DD).
-    const hoy = new Date().toISOString().slice(0, 10);
-    if (data.date < hoy) {
-      throw new DomainError(ErrorCode.PAST_DATE, 422, "No se puede agendar en una fecha pasada");
-    }
+    // RN-TU1: no se agenda en fecha/hora ya pasada.
+    assertFechaHoraFutura(data.date, data.startTime, "No se puede agendar en una fecha u hora ya pasada");
 
     // RN-TU6: la mascota debe existir en el tenant y estar viva (estado='Activa').
     const { data: mascota } = await db
@@ -410,11 +434,13 @@ export const TurnoService = {
         );
       }
 
-      // RN-TU1: no fechas pasadas.
-      const hoy = new Date().toISOString().slice(0, 10);
-      if (efectivaDate < hoy) {
-        throw new DomainError(ErrorCode.PAST_DATE, 422, "No se puede mover el turno a una fecha pasada");
-      }
+      // RN-TU1: no se reprograma a una fecha/hora ya pasada (incluye un turno
+      // vencido sin cerrar: solo puede moverse a un horario efectivamente futuro).
+      assertFechaHoraFutura(
+        efectivaDate,
+        efectivoStartTime,
+        "No se puede mover el turno a una fecha u hora ya pasada",
+      );
 
       const duracion  = svc["duracion_minutos"] as number;
       const inicioMin = toMinutes(efectivoStartTime);

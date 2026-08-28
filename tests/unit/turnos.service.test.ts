@@ -137,6 +137,76 @@ describe("TurnoService.crearTurno", () => {
     });
   });
 
+  // ── RN-TU1 (extendida: fecha DE HOY con hora ya pasada) ─────────────────────
+  // Bug original: la comparación lexicográfica YYYY-MM-DD solo miraba la fecha;
+  // cuando la fecha era la de hoy, start_time nunca se validaba.
+
+  describe("RN-TU1 extendida: hora del día de hoy", () => {
+    beforeEach(() => {
+      // "Ahora" fijo en UTC (mismo criterio que el resto del sistema: sin zona
+      // horaria de clínica configurada, todo corre en UTC).
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2026-06-15T14:30:00.000Z"));
+    });
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("agendar hoy a una hora ya pasada → PAST_DATE", async () => {
+      mockGetServiceDb.mockReturnValue(makeDb([{ data: servicioRow() }]) as never);
+      await expect(
+        TurnoService.crearTurno(dtoBase({ date: "2026-06-15", startTime: "10:00" }), ctx),
+      ).rejects.toMatchObject({ code: ErrorCode.PAST_DATE, statusCode: 422 });
+    });
+
+    it("agendar hoy a la hora actual exacta → PAST_DATE (no es 'posterior')", async () => {
+      mockGetServiceDb.mockReturnValue(makeDb([{ data: servicioRow() }]) as never);
+      await expect(
+        TurnoService.crearTurno(dtoBase({ date: "2026-06-15", startTime: "14:30" }), ctx),
+      ).rejects.toMatchObject({ code: ErrorCode.PAST_DATE, statusCode: 422 });
+    });
+
+    it("agendar hoy a una hora futura → OK", async () => {
+      const db = makeDb([
+        { data: servicioRow() },
+        { data: { id: PET_ID, estado: "Activa" } },
+        { data: turnoRowInsertado({ date: "2026-06-15", start_time: "15:00", end_time: "15:30" }) },
+      ]);
+      mockGetServiceDb.mockReturnValue(db as never);
+      await expect(
+        TurnoService.crearTurno(dtoBase({ date: "2026-06-15", startTime: "15:00" }), ctx),
+      ).resolves.toMatchObject({ date: "2026-06-15" });
+    });
+
+    it("borde de medianoche UTC: 21:30 hora local (UTC-3) ya es el día siguiente en UTC — agendar 'hoy' (UTC) a hora futura → OK", async () => {
+      // "Ahora" = 2026-06-15T23:45:00Z (23:45 UTC). Un turno para el mismo día
+      // UTC a las 23:50 debe aceptarse: sigue siendo hora futura de hoy en UTC.
+      vi.setSystemTime(new Date("2026-06-15T23:45:00.000Z"));
+      const db = makeDb([
+        { data: servicioRow({ duracion_minutos: 10 }) },
+        { data: { id: PET_ID, estado: "Activa" } },
+        { data: turnoRowInsertado({ date: "2026-06-15", start_time: "23:50", end_time: "00:00" }) },
+      ]);
+      mockGetServiceDb.mockReturnValue(db as never);
+      await expect(
+        TurnoService.crearTurno(dtoBase({ date: "2026-06-15", startTime: "23:50" }), ctx),
+      ).resolves.toMatchObject({ date: "2026-06-15" });
+    });
+
+    it("borde de medianoche UTC: agendar el 'día siguiente' (UTC) ya no cae en la validación de hoy → OK aunque la hora sea 'temprano'", async () => {
+      vi.setSystemTime(new Date("2026-06-15T23:45:00.000Z"));
+      const db = makeDb([
+        { data: servicioRow() },
+        { data: { id: PET_ID, estado: "Activa" } },
+        { data: turnoRowInsertado({ date: "2026-06-16", start_time: "00:15", end_time: "00:45" }) },
+      ]);
+      mockGetServiceDb.mockReturnValue(db as never);
+      await expect(
+        TurnoService.crearTurno(dtoBase({ date: "2026-06-16", startTime: "00:15" }), ctx),
+      ).resolves.toMatchObject({ date: "2026-06-16" });
+    });
+  });
+
   // ── RN-TU6 ────────────────────────────────────────────────────────────────
 
   it("RN-TU6: mascota fallecida → PET_DECEASED", async () => {
@@ -345,6 +415,55 @@ describe("TurnoService.modificarTurno", () => {
     const updatePayload = (db["update"] as ReturnType<typeof vi.fn>).mock.calls[0][0] as Record<string, unknown>;
     expect(updatePayload["end_time"]).toBe("15:00"); // 14:00 + 60min
     expect(updatePayload["servicio_id"]).toBe(NUEVO_SERVICIO_ID);
+  });
+
+  // ── RN-TU1 extendida vía RN-MC2 (reprogramar a hora ya pasada de hoy) ────────
+
+  describe("RN-TU1 extendida: reprogramar a hora pasada de hoy", () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2026-06-15T14:30:00.000Z"));
+    });
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("reprogramar startTime a una hora ya pasada de hoy → PAST_DATE", async () => {
+      const db = makeDb([
+        { data: turnoActual("Confirmado", { date: "2026-06-15" }) }, // fetch turno actual
+        { data: servicioRow() },                                     // servicio vigente (mismo id, sin cambiar)
+      ]);
+      mockGetServiceDb.mockReturnValue(db as never);
+      await expect(
+        TurnoService.modificarTurno(TURNO_ID, { startTime: "10:00" }, ctx),
+      ).rejects.toMatchObject({ code: ErrorCode.PAST_DATE, statusCode: 422 });
+    });
+
+    it("reprogramar un turno de ayer (vencido, sin cerrar) a una fecha futura → OK", async () => {
+      const turnoDeAyer = turnoActual("Confirmado", { date: "2026-06-14", start_time: "10:00", end_time: "10:30" });
+      const db = makeDb([
+        { data: turnoDeAyer },                                    // fetch turno actual
+        { data: servicioRow() },                                  // servicio vigente
+        { data: [{ start_time: "08:00", end_time: "18:00" }] },   // franjas del doctor (cubre 10:00-10:30)
+        { data: { ...turnoDeAyer, date: "2026-06-20", start_time: "10:00", end_time: "10:30", servicio: null, doctor: null, mascota: null, cliente: null } },
+      ]);
+      mockGetServiceDb.mockReturnValue(db as never);
+      await expect(
+        TurnoService.modificarTurno(TURNO_ID, { date: "2026-06-20" }, ctx),
+      ).resolves.toMatchObject({ date: "2026-06-20" });
+    });
+
+    it("reprogramar un turno de ayer (vencido, sin cerrar) a otra hora del mismo día pasado → PAST_DATE", async () => {
+      const turnoDeAyer = turnoActual("Confirmado", { date: "2026-06-14", start_time: "10:00", end_time: "10:30" });
+      const db = makeDb([
+        { data: turnoDeAyer },
+        { data: servicioRow() },
+      ]);
+      mockGetServiceDb.mockReturnValue(db as never);
+      await expect(
+        TurnoService.modificarTurno(TURNO_ID, { startTime: "11:00" }, ctx),
+      ).rejects.toMatchObject({ code: ErrorCode.PAST_DATE, statusCode: 422 });
+    });
   });
 
   it("RN-MC2: servicio inactivo al modificar → SERVICE_NOT_FOUND", async () => {
