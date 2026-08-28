@@ -52,6 +52,10 @@ export default defineConfig({
     },
   ],
   globalSetup: "./tests/e2e/global-setup.ts",
+  // Los specs crean entidades con nombre único (`unico()`) y la stack local no
+  // se resetea entre corridas: sin esto, cada ejecución sedimenta filas
+  // "Especie E2E …" / "Cliente E2E …" que quedan a la vista en la app.
+  globalTeardown: "./tests/e2e/global-teardown.ts",
   webServer: {
     command: "npm run dev --prefix web",
     url: "http://127.0.0.1:5173",

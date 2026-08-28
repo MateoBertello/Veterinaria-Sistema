@@ -9,6 +9,7 @@
     "test:unit": "vitest run tests/unit",
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "test:e2e": "playwright test",
+    "e2e:limpiar": "node scripts/limpiar-e2e.mjs",
     "seed": "node scripts/seed.mjs",
     "typecheck": "tsc -p supabase/functions/api/tsconfig.json --noEmit && tsc -p web/tsconfig.json --noEmit",
     "lint": "eslint supabase/functions/api/src web/src"
