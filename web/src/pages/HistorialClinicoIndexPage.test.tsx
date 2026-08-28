@@ -51,7 +51,7 @@ function renderPage() {
 }
 
 async function elegirCliente(cliente: Cliente) {
-  await userEvent.click(screen.getByRole("combobox", { name: "Dueño" }));
+  await userEvent.click(screen.getByRole("combobox", { name: "Tutor" }));
   await userEvent.click(await screen.findByText(cliente.fullName));
 }
 
@@ -61,12 +61,12 @@ beforeEach(() => {
 });
 
 describe("HistorialClinicoIndexPage", () => {
-  it("muestra el mensaje inicial antes de elegir un dueño", () => {
+  it("muestra el mensaje inicial antes de elegir un tutor", () => {
     renderPage();
-    expect(screen.getByText(/Elegí primero un dueño/i)).toBeInTheDocument();
+    expect(screen.getByText(/Elegí primero un tutor/i)).toBeInTheDocument();
   });
 
-  it("al elegir un dueño, carga y lista sus mascotas", async () => {
+  it("al elegir un tutor, carga y lista sus mascotas", async () => {
     const cliente = makeCliente();
     mockListarClientes.mockResolvedValue({ items: [cliente], meta: { page: 1, limit: 15, total: 1 } });
     mockListarMascotas.mockResolvedValue({ items: [makeMascota()], meta: { page: 1, limit: 100, total: 1 } });

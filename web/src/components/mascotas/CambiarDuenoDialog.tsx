@@ -60,11 +60,11 @@ export function CambiarDuenoDialog({ mascota, open, onOpenChange, onSuccess, cam
         reason:      values.reason.trim() || null,
         notes:       values.notes.trim() || null,
       });
-      toast.success("Dueño cambiado correctamente");
+      toast.success("Tutor cambiado correctamente");
       onOpenChange(false);
       onSuccess();
     } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : "No se pudo cambiar el dueño");
+      toast.error(err instanceof ApiError ? err.message : "No se pudo cambiar el tutor");
     }
   }
 
@@ -72,19 +72,19 @@ export function CambiarDuenoDialog({ mascota, open, onOpenChange, onSuccess, cam
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Cambiar dueño</DialogTitle>
+          <DialogTitle>Cambiar tutor</DialogTitle>
           <DialogDescription>
-            Mascota: <strong>{mascota?.name}</strong> — dueño actual: {mascota?.ownerName ?? "—"}
+            Mascota: <strong>{mascota?.name}</strong> — tutor actual: {mascota?.ownerName ?? "—"}
           </DialogDescription>
         </DialogHeader>
 
         <form onSubmit={handleSubmit(onSubmit)} className="grid gap-4" noValidate>
           <div className="grid gap-1.5">
-            <Label>Nuevo dueño *</Label>
+            <Label>Nuevo tutor *</Label>
             <Controller
               control={control}
               name="newClientId"
-              rules={{ required: "El nuevo dueño es requerido" }}
+              rules={{ required: "El nuevo tutor es requerido" }}
               render={({ field }) => (
                 <NuevoDuenoCombobox
                   value={field.value}
@@ -176,7 +176,7 @@ function NuevoDuenoCombobox({
           aria-invalid={invalid}
           className={cn("w-full justify-between font-normal", !value && "text-muted-foreground")}
         >
-          {selected?.fullName ?? (value ? "Cargando..." : "Buscar nuevo dueño...")}
+          {selected?.fullName ?? (value ? "Cargando..." : "Buscar nuevo tutor...")}
           <ChevronsUpDown className="ml-2 size-4 shrink-0 opacity-50" aria-hidden />
         </Button>
       </PopoverTrigger>

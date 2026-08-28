@@ -634,6 +634,30 @@ describe("Desactivar un usuario lo desactiva TAMBIÉN en Supabase Auth", () => {
 });
 
 describe("El rol asignado tiene que ser del propio tenant", () => {
+  it("A3 — editar con un roleId de otra clínica → VALIDATION_ERROR y NO se escribe rol_id", async () => {
+    // `crear()` ya validaba que el rol fuera del tenant; `editar()` NO. El
+    // roleId viene del body, la FK de `usuarios.rol_id` apunta a `roles(id)` a
+    // secas y la consulta corre con service role (RLS bypasseada), así que el
+    // id de un rol de OTRA clínica se escribía sin chistar. Como los permisos
+    // se resuelven desde el rol, era un camino de escalada cross-tenant.
+    const db = buildMockDb({
+      usuarioExistente: {
+        id: NEW_USER_ID, tenant_id: TENANT_ID, username: "operador",
+        email: "op@test.com", full_name: "Operador", phone: null, active: true,
+        rol_id: ADMIN_ROLE_ID, created_at: "2026-01-01T00:00:00Z",
+      },
+      rolInexistente: true, // el rol no aparece filtrando por este tenant
+    });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    await expect(
+      UsuariosService.editar(NEW_USER_ID, { roleId: VET_ROLE_ID }, callerContext),
+    ).rejects.toMatchObject({ code: ErrorCode.VALIDATION_ERROR });
+
+    // Se valida ANTES de tocar Auth y antes del UPDATE: no queda un estado a medias.
+    expect(db.auth.admin.updateUserById).not.toHaveBeenCalled();
+  });
+
   it("roleId de otra clínica → VALIDATION_ERROR y NO se crea la cuenta en Auth", async () => {
     // La FK vieja apuntaba a `roles(id)` a secas: un rol ajeno entraba sin
     // error y dejaba un usuario que ni siquiera podía loguear.

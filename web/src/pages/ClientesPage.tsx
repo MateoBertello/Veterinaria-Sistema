@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Pencil, Search, Trash2, UserPlus, Users } from "lucide-react";
 import {
   Table,
+  TableScrollContainer,
   TableBody,
   TableCell,
   TableHead,
@@ -107,9 +108,9 @@ export function ClientesPage() {
         />
       </div>
 
-      <div className="rounded-lg border">
-        <Table>
-          <TableHeader>
+      <TableScrollContainer aria-label="Listado de clientes">
+        <Table containerClassName="overflow-visible">
+          <TableHeader className="sticky top-0 z-10">
             <TableRow className="bg-orange-50 hover:bg-orange-50">
               <TableHead>Nombre</TableHead>
               <TableHead>DNI/CUIT</TableHead>
@@ -143,11 +144,11 @@ export function ClientesPage() {
             ) : (
               clientes.map((cliente) => (
                 <TableRow key={cliente.id}>
-                  <TableCell className="font-medium">{cliente.fullName}</TableCell>
+                  <TableCell className="whitespace-normal font-medium">{cliente.fullName}</TableCell>
                   <TableCell>{cliente.dniCuit}</TableCell>
                   <TableCell className="hidden md:table-cell">{cliente.phone}</TableCell>
-                  <TableCell className="hidden lg:table-cell">{cliente.email ?? "—"}</TableCell>
-                  <TableCell className="hidden xl:table-cell">{cliente.address}</TableCell>
+                  <TableCell className="hidden whitespace-normal lg:table-cell">{cliente.email ?? "—"}</TableCell>
+                  <TableCell className="hidden whitespace-normal xl:table-cell">{cliente.address}</TableCell>
                   <TableCell className="hidden md:table-cell">
                     <Badge variant={cliente.livePetCount > 0 ? "secondary" : "outline"}>
                       {cliente.livePetCount}
@@ -171,7 +172,7 @@ export function ClientesPage() {
             )}
           </TableBody>
         </Table>
-      </div>
+      </TableScrollContainer>
 
       {!loading && !error && clientes.length > 0 ? (
         <div className="flex items-center justify-between">

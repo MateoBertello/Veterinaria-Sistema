@@ -1,13 +1,12 @@
 import { describe, it, expect } from "vitest";
-import type { TipoVacuna } from "../api/catalogos.ts";
+import type { TipoVacunaAplicable } from "../types/index.ts";
 import { calcularRefuerzoSugerido } from "./vacunacion.ts";
 
-function makeTipo(over: Partial<TipoVacuna> = {}): TipoVacuna {
+function makeTipo(over: Partial<TipoVacunaAplicable> = {}): TipoVacunaAplicable {
   return {
     id: "t1",
     nombre: "Antirrábica",
-    especie_aplicable: null,
-    meses_refuerzo_sugerido: 12,
+    mesesRefuerzoSugerido: 12,
     ...over,
   };
 }
@@ -24,8 +23,8 @@ describe("calcularRefuerzoSugerido (RN-PV10)", () => {
     expect(sugerido?.mensaje).toContain("Antirrábica");
   });
 
-  it("RN-PV10: sin meses_refuerzo_sugerido no hay sugerencia", () => {
-    expect(calcularRefuerzoSugerido(makeTipo({ meses_refuerzo_sugerido: null }), "2026-07-25")).toBeNull();
+  it("RN-PV10: sin mesesRefuerzoSugerido no hay sugerencia", () => {
+    expect(calcularRefuerzoSugerido(makeTipo({ mesesRefuerzoSugerido: null }), "2026-07-25")).toBeNull();
   });
 
   it("RN-PV10: un tipo de vacuna fuera del catálogo cargado no sugiere nada", () => {
@@ -33,7 +32,7 @@ describe("calcularRefuerzoSugerido (RN-PV10)", () => {
   });
 
   it("RN-PV2/RN-PV10: si el refuerzo cae en el pasado, propone hoy y lo explica", () => {
-    const sugerido = calcularRefuerzoSugerido(makeTipo({ meses_refuerzo_sugerido: 6 }), "2025-01-10", "2026-07-25");
+    const sugerido = calcularRefuerzoSugerido(makeTipo({ mesesRefuerzoSugerido: 6 }), "2025-01-10", "2026-07-25");
 
     expect(sugerido?.fechaCalculada).toBe("2025-07-10");
     expect(sugerido?.fechaEstimada).toBe("2026-07-25");
@@ -42,14 +41,14 @@ describe("calcularRefuerzoSugerido (RN-PV10)", () => {
   });
 
   it("un refuerzo que cae justo hoy se propone tal cual (no es pasado)", () => {
-    const sugerido = calcularRefuerzoSugerido(makeTipo({ meses_refuerzo_sugerido: 12 }), "2025-07-25", "2026-07-25");
+    const sugerido = calcularRefuerzoSugerido(makeTipo({ mesesRefuerzoSugerido: 12 }), "2025-07-25", "2026-07-25");
 
     expect(sugerido?.fechaEstimada).toBe("2026-07-25");
     expect(sugerido?.mensaje).not.toMatch(/ya pasada/i);
   });
 
   it("singulariza el mensaje con un refuerzo mensual", () => {
-    const sugerido = calcularRefuerzoSugerido(makeTipo({ meses_refuerzo_sugerido: 1 }), "2026-01-31", "2026-01-31");
+    const sugerido = calcularRefuerzoSugerido(makeTipo({ mesesRefuerzoSugerido: 1 }), "2026-01-31", "2026-01-31");
 
     expect(sugerido?.mensaje).toContain("cada mes");
     expect(sugerido?.fechaEstimada).toBe("2026-02-28");

@@ -20,7 +20,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import app from "../../supabase/functions/api/src/main.ts";
 import { SUPABASE_URL, SUPABASE_ANON_KEY, SERVICE_ROLE_KEY, describeIntegration } from "./_env.ts";
-import { crearUsuarioAuth, limpiarTenant } from "./_teardown.ts";
+import { crearUsuarioAuth, limpiarTenant, catalogoDelTenant } from "./_teardown.ts";
 
 function skipIfNoCredentials(): boolean {
   if (!SUPABASE_URL || !SERVICE_ROLE_KEY || !SUPABASE_ANON_KEY) {
@@ -87,7 +87,6 @@ async function provisionTenant(serviceDb: SupabaseClient, sufijo: string) {
 let serviceDb: SupabaseClient;
 let tenantA = { tenantId: "", jwt: "", userId: "", clienteId: "" };
 let tenantB = { tenantId: "", jwt: "", userId: "", clienteId: "" };
-let especieId = "";
 
 // Fecha futura fija; la franja del doctor se siembra con su día de la semana real.
 const FECHA = "2099-12-31";
@@ -96,9 +95,6 @@ const DOW   = new Date(`${FECHA}T00:00:00Z`).getUTCDay(); // 0=Dom … 6=Sáb
 beforeAll(async () => {
   if (skipIfNoCredentials()) return;
   serviceDb = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, { auth: { persistSession: false } });
-
-  const { data: especie } = await serviceDb.from("especies").select("id").limit(1).single();
-  especieId = especie?.id ?? "";
 
   tenantA = await provisionTenant(serviceDb, "TA");
   tenantB = await provisionTenant(serviceDb, "TB");
@@ -139,6 +135,9 @@ async function seedDoctorConFranja(tenantId: string): Promise<string> {
 }
 
 async function seedMascota(tenantId: string, clienteId: string, name: string): Promise<string> {
+  // El catálogo es DEL TENANT desde 20260827000001_catalogos_por_tenant.sql: la
+  // FK compuesta (especie_id, tenant_id) rechaza la especie de otra clínica.
+  const { especieId } = await catalogoDelTenant(serviceDb, tenantId);
   const { data } = await serviceDb
     .from("mascotas")
     .insert({

@@ -32,6 +32,11 @@ import {
   avisosVacunacionRouter,
 } from "./modules/vacunacion/vacunacion.controller.ts";
 import { dashboardRouter } from "./modules/dashboard/dashboard.controller.ts";
+import {
+  especiesRouter,
+  razasRouter,
+  tiposVacunaRouter,
+} from "./modules/catalogos/catalogos.controller.ts";
 
 const app = new Hono().basePath("/api/v1");
 
@@ -74,6 +79,15 @@ app.route("/servicios", serviciosRouter);
 
 // ─── Configuración de la Clínica (Transversal — Etapa 4) ───────────────────────
 app.route("/configuracion", configuracionRouter);
+
+// ─── Catálogos clínicos del tenant (Core transversal) ──────────────────────────
+// Cada clínica administra los suyos. Rutas del tenant, NO bajo /admin: dejaron
+// de ser globales en 20260827000001_catalogos_por_tenant.sql. La LECTURA para
+// los combos sigue yendo por PostgREST directo (excepción del CLAUDE.md); acá
+// vive todo lo que ESCRIBE, que es auditable y pasa por Controller → Service.
+app.route("/especies", especiesRouter);
+app.route("/razas", razasRouter);
+app.route("/tipos-vacuna", tiposVacunaRouter);
 
 // ─── Doctores + Horarios de Atención (Transversal — Etapa 4) ───────────────────
 // Doctores: ABM (listar/editar) bajo manage_users.

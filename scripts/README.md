@@ -32,7 +32,8 @@ supabase start
 
 # 2. Aplicar migraciones + seed global de catálogos.
 #    `supabase db reset` reaplica TODAS las migraciones desde cero, incluido
-#    20260614000004_seed_global.sql (permisos, especies, razas, tipos_vacuna).
+#    20260614000004_seed_global.sql (permisos) + on_tenant_created, que siembra
+#    el catálogo clínico (especies, razas, tipos_vacuna) de cada tenant.
 #    Ese seed corre como migración: NO hay que invocarlo aparte.
 supabase db reset
 
@@ -77,7 +78,7 @@ Es **idempotente**: corrércelo dos veces no duplica ni rompe.
    correcto y la fila correspondiente en `usuarios` (y en `doctores` para el
    veterinario).
 3. **Datos demo**: 2 clientes con sus mascotas, usando los catálogos globales
-   (`especies`/`razas`) ya sembrados por la migración.
+   (`especies`/`razas`) que `on_tenant_created` ya sembró para ese tenant.
 
 ## Credenciales que deja el seed
 

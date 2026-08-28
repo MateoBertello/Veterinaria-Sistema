@@ -136,8 +136,9 @@ describe("RN-MA2: Coherencia raza/especie", () => {
   it("RN-MA2: razaId que no pertenece a la especie → VALIDATION_ERROR", async () => {
     const db = buildMockDb({
       singleResults: [
-        { data: { id: CLIENT_ID }, error: null }, // cliente del tenant existe
-        { data: null, error: null },              // raza no pertenece a la especie
+        { data: { id: CLIENT_ID }, error: null },  // cliente del tenant existe
+        { data: { id: ESPECIE_ID }, error: null }, // especie del catálogo del tenant
+        { data: null, error: null },               // raza no pertenece a la especie
       ],
     });
     mockGetServiceDb.mockReturnValue(db as never);
@@ -165,6 +166,7 @@ describe("RN-MA9: Alimento/dieta", () => {
     const db = buildMockDb({
       singleResults: [
         { data: { id: CLIENT_ID }, error: null },                       // cliente
+        { data: { id: ESPECIE_ID }, error: null },                      // especie del catálogo del tenant
         { data: { id: RAZA_ID }, error: null },                         // raza coherente
         { data: dbRow({ alimento_dieta: "Sin indicaciones de dieta" }), error: null }, // insert+select
       ],
@@ -186,6 +188,7 @@ describe("RN-MA10: Estado por ENUM", () => {
     const db = buildMockDb({
       singleResults: [
         { data: { id: CLIENT_ID }, error: null },
+        { data: { id: ESPECIE_ID }, error: null }, // especie del catálogo del tenant
         { data: { id: RAZA_ID }, error: null },
         { data: dbRow(), error: null },
       ],
@@ -213,6 +216,147 @@ describe("FK cross-tenant", () => {
       MascotasService.crear(dtoValido, ctx),
     ).rejects.toMatchObject({ code: ErrorCode.FORBIDDEN, statusCode: 403 });
     expect(db.builder["insert"]).not.toHaveBeenCalled();
+  });
+
+  // Los catálogos dejaron de ser globales (20260827000001_catalogos_por_tenant):
+  // un `especieId` del body puede ser de OTRA clínica. La FK compuesta
+  // `mascotas_especie_tenant_fkey` lo frena en la base —eso lo cubre
+  // `tests/integration/aislamiento-api.integration.test.ts`—, pero llegar hasta
+  // el INSERT convierte un dato inválido en un 500. Acá se verifica que el
+  // Service lo resuelve antes, contra el catálogo de SU tenant.
+  it("crear con una especie que no está en el catálogo del tenant → VALIDATION_ERROR (no inserta)", async () => {
+    const db = buildMockDb({
+      singleResults: [
+        { data: { id: CLIENT_ID }, error: null }, // cliente del tenant existe
+        { data: null, error: null },              // la especie no es de este tenant
+      ],
+    });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    await expect(
+      MascotasService.crear(dtoValido, ctx),
+    ).rejects.toMatchObject({ code: ErrorCode.VALIDATION_ERROR, statusCode: 422 });
+    expect(db.builder["insert"]).not.toHaveBeenCalled();
+  });
+
+  // RN-CAT9: la baja lógica del catálogo (etapa "Gestión de catálogos por
+  // clínica") solo sirve si el Service la hace valer. Si el filtro `active`
+  // viviera únicamente en el combo del frontend, mandar el id a mano alcanzaría
+  // para seguir usando una especie dada de baja.
+  it("RN-CAT9: crear con una especie dada de baja → VALIDATION_ERROR (no inserta)", async () => {
+    const db = buildMockDb({
+      singleResults: [
+        { data: { id: CLIENT_ID }, error: null }, // cliente del tenant
+        { data: null, error: null },              // la especie existe pero está inactiva
+      ],
+    });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    await expect(
+      MascotasService.crear(dtoValido, ctx),
+    ).rejects.toMatchObject({ code: ErrorCode.VALIDATION_ERROR, statusCode: 422 });
+    expect(db.builder["insert"]).not.toHaveBeenCalled();
+  });
+
+  // RN-MA11: la especie es inmutable, así que un intento de cambio ni siquiera
+  // llega a consultar el catálogo de especies (se rechaza antes, comparando
+  // contra la especie actual de la mascota).
+  it("RN-MA11: editar cambiando la especie (aunque sea de otro tenant) → SPECIES_IMMUTABLE (no actualiza)", async () => {
+    const db = buildMockDb({
+      singleResults: [
+        { data: dbRow(), error: null }, // la mascota actual, del tenant
+      ],
+    });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    await expect(
+      MascotasService.editar(PET_ID, { especieId: "77777777-7777-4777-8777-777777777777" }, ctx),
+    ).rejects.toMatchObject({ code: ErrorCode.SPECIES_IMMUTABLE, statusCode: 422 });
+    expect(db.builder["update"]).not.toHaveBeenCalled();
+  });
+});
+
+// ─── RN-MA11: especie inmutable ────────────────────────────────────────────────
+
+describe("RN-MA11: Especie inmutable", () => {
+  it("RN-MA11: editar con un especieId distinto al actual → SPECIES_IMMUTABLE, no actualiza", async () => {
+    const db = buildMockDb({
+      singleResults: [
+        { data: dbRow(), error: null }, // mascota actual, especie = ESPECIE_ID
+      ],
+    });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    await expect(
+      MascotasService.editar(PET_ID, { especieId: "99999999-9999-4999-8999-999999999999" }, ctx),
+    ).rejects.toMatchObject({ code: ErrorCode.SPECIES_IMMUTABLE, statusCode: 422 });
+    expect(db.builder["update"]).not.toHaveBeenCalled();
+  });
+
+  it("RN-MA11: editar reenviando el mismo especieId actual → no es error, no se incluye especie_id en el update", async () => {
+    const db = buildMockDb({
+      singleResults: [
+        { data: dbRow(), error: null },
+        { data: dbRow({ tamano: "Grande" }), error: null },
+      ],
+    });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    await MascotasService.editar(PET_ID, { especieId: ESPECIE_ID, tamano: "Grande" }, ctx);
+
+    const payload = (db.builder["update"] as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(payload).not.toHaveProperty("especie_id");
+    expect(payload).toMatchObject({ tamano: "Grande" });
+  });
+
+  it("RN-MA11: editar sin tocar especieId sigue funcionando (name, sin especie_id en el update)", async () => {
+    const db = buildMockDb({
+      singleResults: [
+        { data: dbRow(), error: null },
+        { data: dbRow({ name: "Firu" }), error: null },
+      ],
+    });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    const mascota = await MascotasService.editar(PET_ID, { name: "Firu" }, ctx);
+
+    const payload = (db.builder["update"] as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(payload).not.toHaveProperty("especie_id");
+    expect(mascota.name).toBe("Firu");
+  });
+
+  // RN-MA2 + RN-MA11: la raza sigue siendo editable, pero tiene que pertenecer
+  // a la especie actual de la mascota (que ya no puede cambiar).
+  it("RN-MA2/RN-MA11: editar razaId a una raza que no pertenece a la especie actual → VALIDATION_ERROR", async () => {
+    const db = buildMockDb({
+      singleResults: [
+        { data: dbRow(), error: null }, // mascota actual
+        { data: null, error: null },    // la raza nueva no pertenece a la especie actual
+      ],
+    });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    await expect(
+      MascotasService.editar(PET_ID, { razaId: "88888888-8888-4888-8888-888888888888" }, ctx),
+    ).rejects.toMatchObject({ code: ErrorCode.VALIDATION_ERROR, statusCode: 422 });
+    expect(db.builder["update"]).not.toHaveBeenCalled();
+  });
+
+  it("RN-MA2/RN-MA11: editar razaId a una raza válida de la especie actual → actualiza raza_id", async () => {
+    const nuevaRazaId = "88888888-8888-4888-8888-888888888888";
+    const db = buildMockDb({
+      singleResults: [
+        { data: dbRow(), error: null },                                  // mascota actual
+        { data: { id: nuevaRazaId }, error: null },                      // raza válida de la especie actual
+        { data: dbRow({ raza_id: nuevaRazaId }), error: null },          // update + select
+      ],
+    });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    await MascotasService.editar(PET_ID, { razaId: nuevaRazaId }, ctx);
+
+    const payload = (db.builder["update"] as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(payload).toMatchObject({ raza_id: nuevaRazaId });
   });
 });
 
@@ -318,6 +462,7 @@ describe("RN-MA7: Auditoría de alta y edición (módulo pets)", () => {
     const db = buildMockDb({
       singleResults: [
         { data: { id: CLIENT_ID }, error: null },
+        { data: { id: ESPECIE_ID }, error: null }, // especie del catálogo del tenant
         { data: { id: RAZA_ID }, error: null },
         { data: dbRow(), error: null },
       ],

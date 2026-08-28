@@ -34,6 +34,15 @@ export enum ErrorCode {
   MASCOTA_NOT_FOUND = "MASCOTA_NOT_FOUND",
   PET_DECEASED      = "PET_DECEASED",
   SAME_OWNER        = "SAME_OWNER",
+  /**
+   * RN-MA11: la especie de una mascota es inmutable una vez creada. De ella
+   * cuelgan `razaId` (una raza pertenece a UNA especie) y el catálogo de
+   * vacunas aplicables (`especie_tipo_vacuna`, RN-PV11); cambiarla dejaría esas
+   * relaciones — y el historial clínico ya registrado — interpretadas bajo una
+   * especie distinta de la que tenían. Se rechaza cualquier intento de cambio,
+   * en vez de ignorarlo en silencio.
+   */
+  SPECIES_IMMUTABLE = "SPECIES_IMMUTABLE",
 
   // ── Servicios ─────────────────────────────────────────────────────
   SERVICE_NOT_FOUND = "SERVICE_NOT_FOUND",
@@ -67,13 +76,35 @@ export enum ErrorCode {
   VACCINE_TYPE_NOT_FOUND       = "VACCINE_TYPE_NOT_FOUND",
   VACCINE_PLAN_NOT_FOUND       = "VACCINE_PLAN_NOT_FOUND",
   VACCINE_PLAN_ALREADY_APPLIED = "VACCINE_PLAN_ALREADY_APPLIED",
+  /**
+   * RN-PV11: el tipo de vacuna existe y está activo en el catálogo de la
+   * clínica, pero no está asociado a la especie de la mascota
+   * (`especie_tipo_vacuna`). Distinto de VACCINE_TYPE_NOT_FOUND, que es "no
+   * está en el catálogo": acá el problema es la combinación, no la vacuna.
+   */
+  VACCINE_NOT_APPLICABLE_TO_SPECIES = "VACCINE_NOT_APPLICABLE_TO_SPECIES",
 
   // ── Horarios ──────────────────────────────────────────────────────
   INVALID_RANGE    = "INVALID_RANGE",
   SCHEDULE_OVERLAP = "SCHEDULE_OVERLAP",
+  /** RN-HOR8: crear o reactivar una franja de un profesional dado de baja (`doctores.available=false`). */
+  DOCTOR_INACTIVE  = "DOCTOR_INACTIVE",
 
   // ── Notificaciones ────────────────────────────────────────────────
   NOTIFICATION_PROVIDER_NOT_CONFIGURED = "NOTIFICATION_PROVIDER_NOT_CONFIGURED",
+
+  // ── Catálogos clínicos (especies, razas, tipos de vacuna) ─────────
+  /** El ítem no existe en el catálogo DE ESTE tenant (RN-CAT1). */
+  CATALOG_NOT_FOUND = "CATALOG_NOT_FOUND",
+  /** Ya hay un ítem con ese nombre en el catálogo del tenant (RN-CAT2). */
+  CATALOG_DUPLICATE = "CATALOG_DUPLICATE",
+  /**
+   * El ítem está referenciado por datos de negocio del tenant y no se puede
+   * dar de baja (RN-CAT5). También cubre reactivar una raza cuya especie está
+   * inactiva (RN-CAT7): en los dos casos el estado pedido choca con una
+   * relación existente.
+   */
+  CATALOG_IN_USE = "CATALOG_IN_USE",
 }
 
 export class DomainError extends Error {

@@ -10,6 +10,7 @@ import {
 import { setUnauthorizedHandler } from "../api/client.ts";
 import { fetchMe, login as loginRequest, logoutRequest } from "../api/auth.ts";
 import { clearToken, getToken, setSession } from "../lib/session.ts";
+import { invalidarCacheCatalogos } from "../api/catalogos.ts";
 import type { AuthUser, LoginInput } from "../types/index.ts";
 
 type AuthStatus = "loading" | "authenticated" | "anonymous";
@@ -36,6 +37,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // desloguear al Super Admin de la consola.
   const goAnonymous = useCallback(() => {
     clearToken();
+    // El catálogo cacheado es el de ESTE tenant: si sobreviviera al cierre de
+    // sesión, la próxima clínica que entre en esta misma pestaña vería especies
+    // y razas de la anterior antes de que llegue su primera lectura.
+    invalidarCacheCatalogos();
     setUser(null);
     setStatus("anonymous");
   }, []);

@@ -71,6 +71,19 @@ describe("apiClient — respuestas fuera del contrato", () => {
     expect((error as ApiError).message).toMatch(/no reconoce este endpoint/i);
   });
 
+  it("200 con HTML (rewrite de SPA que se traga la API) → INVALID_RESPONSE, no un falso éxito", async () => {
+    // Síntoma real de un hosting estático sin VITE_API_URL: el catch-all de la
+    // SPA resuelve /api/v1/auth/login contra el propio index.html con HTTP 200.
+    fetchMock.mockResolvedValue(textoPlano(200, "<!doctype html><html>...</html>"));
+
+    const error = await apiClient("/auth/login", { method: "POST", body: "{}" }).catch(
+      (e: unknown) => e,
+    );
+
+    expect(error).toBeInstanceOf(ApiError);
+    expect(error).toMatchObject({ code: "INVALID_RESPONSE", statusCode: 200 });
+  });
+
   it("5xx del gateway sin envelope → mensaje con el status, no un SyntaxError", async () => {
     fetchMock.mockResolvedValue(textoPlano(502, "<html>Bad Gateway</html>"));
 

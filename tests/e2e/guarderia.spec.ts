@@ -6,10 +6,10 @@ async function registrarEstadia(
   opts: { cliente: string; mascota: string; checkIn: string; checkOut: string },
 ): Promise<void> {
   await page.goto("/guarderia/nuevo");
-  await page.getByRole("combobox", { name: "Dueño" }).click();
+  await page.getByRole("combobox", { name: "Tutor" }).click();
   await page.getByPlaceholder("Buscar por nombre o DNI...").fill(opts.cliente);
   await page.getByRole("option", { name: new RegExp(opts.cliente) }).click();
-  await page.getByLabel("Mascota").click();
+  await page.getByLabel("Huésped").click();
   await page.getByRole("option", { name: opts.mascota }).click();
   await page.getByLabel("Check-in *").fill(opts.checkIn);
   await page.getByLabel("Check-out *").fill(opts.checkOut);

@@ -19,6 +19,7 @@ import { MascotasPage } from "./pages/MascotasPage.tsx";
 import { HistorialClinicoIndexPage } from "./pages/HistorialClinicoIndexPage.tsx";
 import { HistorialClinicoPage } from "./pages/HistorialClinicoPage.tsx";
 import { ServiciosPage } from "./pages/ServiciosPage.tsx";
+import { CatalogosPage } from "./pages/CatalogosPage.tsx";
 import { ConfiguracionPage } from "./pages/ConfiguracionPage.tsx";
 import { DoctoresPage } from "./pages/DoctoresPage.tsx";
 import { HorariosPage } from "./pages/HorariosPage.tsx";
@@ -118,7 +119,9 @@ function Navigation() {
 
   return (
     <>
-      <aside className="hidden w-60 shrink-0 flex-col border-r bg-sidebar md:flex">
+      {/* Sticky con alto de viewport: el sidebar no se va con el scroll del
+          listado (el `<nav>` de SidebarNav tiene su propio overflow). */}
+      <aside className="sticky top-0 hidden h-screen w-60 shrink-0 flex-col self-start border-r bg-sidebar md:flex">
         <SidebarNav items={items} user={user} onLogout={onLogout} />
       </aside>
       <MobileNav items={items} user={user} onLogout={onLogout} />
@@ -186,17 +189,60 @@ export function App() {
         <Route path="/mascotas" element={<MascotasPage />} />
         <Route path="/historial" element={<HistorialClinicoIndexPage />} />
         <Route path="/historial/:mascotaId" element={<HistorialClinicoPage />} />
-        <Route path="/servicios" element={<ServiciosPage />} />
-        <Route path="/doctores" element={<DoctoresPage />} />
-        <Route path="/horarios" element={<HorariosPage />} />
+        <Route
+          path="/servicios"
+          element={
+            <RequirePermission permission="manage_services">
+              <ServiciosPage />
+            </RequirePermission>
+          }
+        />
+        <Route
+          path="/doctores"
+          element={
+            <RequirePermission permission="manage_users">
+              <DoctoresPage />
+            </RequirePermission>
+          }
+        />
+        <Route
+          path="/horarios"
+          element={
+            <RequirePermission permission="manage_schedules">
+              <HorariosPage />
+            </RequirePermission>
+          }
+        />
         <Route path="/turnos" element={<TurnosPage />} />
         <Route path="/turnos/nuevo" element={<AgendarTurnoPage />} />
         <Route path="/turnos/:id/editar" element={<AgendarTurnoPage />} />
         <Route path="/guarderia" element={<OcupacionGuarderiaPage />} />
         <Route path="/guarderia/nuevo" element={<RegistrarEstadiaPage />} />
         <Route path="/guarderia/:id/editar" element={<RegistrarEstadiaPage />} />
-        <Route path="/configuracion" element={<ConfiguracionPage />} />
-        <Route path="/usuarios" element={<UsuariosPage />} />
+        <Route
+          path="/catalogos"
+          element={
+            <RequirePermission permission="manage_catalogs">
+              <CatalogosPage />
+            </RequirePermission>
+          }
+        />
+        <Route
+          path="/configuracion"
+          element={
+            <RequirePermission permission="manage_tenant_settings">
+              <ConfiguracionPage />
+            </RequirePermission>
+          }
+        />
+        <Route
+          path="/usuarios"
+          element={
+            <RequirePermission permission="manage_users">
+              <UsuariosPage />
+            </RequirePermission>
+          }
+        />
         <Route
           path="/auditoria"
           element={

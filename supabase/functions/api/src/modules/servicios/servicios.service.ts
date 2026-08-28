@@ -253,11 +253,17 @@ export const ServicioService = {
     }
 
     // RN-SV3: guard de baja protegida (tabla turnos vacía hasta E6).
+    // El filtro por tenant_id es explícito y NO redundante: esta consulta corre
+    // con service role (RLS bypasseada), así que el aislamiento lo escribe la
+    // query o no lo escribe nadie. Sin él, un turno de otra clínica que apunte
+    // al mismo servicio_id bloquearía la baja acá — y de paso confirmaría su
+    // existencia.
     if (!activo) {
       const hoy = new Date().toISOString().slice(0, 10);
       const { data: turnosFuturos, count } = await db
         .from("turnos")
         .select("id", { count: "exact" })
+        .eq("tenant_id", ctx.tenantId)
         .eq("servicio_id", id)
         .gte("date", hoy)
         .range(0, 0);

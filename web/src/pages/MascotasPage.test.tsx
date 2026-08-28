@@ -156,7 +156,7 @@ describe("MascotasPage", () => {
     );
   });
 
-  it("solo muestra acciones de cambio de dueño y fallecimiento para mascotas activas", async () => {
+  it("solo muestra acciones de cambio de tutor y fallecimiento para mascotas activas", async () => {
     mockListar.mockResolvedValue({
       items: [
         makeMascota({ id: "m1", name: "Pelusa",   estado: "Activa" }),
@@ -168,7 +168,7 @@ describe("MascotasPage", () => {
     renderPage();
     await screen.findByText("Pelusa");
 
-    expect(screen.getByRole("button", { name: /Cambiar dueño de Pelusa/i })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /Cambiar dueño de Firulais/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Cambiar tutor de Pelusa/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Cambiar tutor de Firulais/i })).not.toBeInTheDocument();
   });
 });

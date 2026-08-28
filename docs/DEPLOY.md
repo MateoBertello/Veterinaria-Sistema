@@ -100,20 +100,32 @@ SELECT jobname, schedule FROM cron.job;
 
 | Variable | Uso |
 | :--- | :--- |
-| `VITE_API_URL` | Base de la API. Hosting estático: `https://<project-ref>.supabase.co/functions/v1/api/v1` (single `api`). Con reverse proxy puede omitirse (default: `/api/v1`, relativo). |
+| `VITE_API_URL` | Base de la API. Hosting estático: `https://<project-ref>.supabase.co/functions/v1/api/v1` (single `api`). Con reverse proxy puede omitirse (default: `/api/v1`, relativo) — pero entonces hay que setear `VITE_API_PROXY_ACK` (ver abajo). |
+| `VITE_API_PROXY_ACK` | Solo si se omite `VITE_API_URL`. Poner `1` para confirmar a propósito que el default relativo `/api/v1` es correcto porque hay un reverse proxy same-origin (Opción B) que lo resuelve. |
 | `VITE_SUPABASE_URL` | Solo hosting estático: `https://<project-ref>.supabase.co`. Junto con la anon key activa el **modo directo** de catálogos (`web/src/api/catalogos.ts`). |
 | `VITE_SUPABASE_ANON_KEY` | Solo hosting estático: anon key del proyecto. Es pública por diseño (identifica el proyecto; RLS + Bearer del usuario son la barrera — `anon` no tiene ni SELECT desde DT-5). |
 | `VITE_SENTRY_DSN` | DSN frontend. Sin ella, Sentry del front es no-op (el ErrorBoundary sigue funcionando). |
 | `VITE_SENTRY_ENVIRONMENT` | Opcional (default: modo de Vite). |
 
+> **`vite build` frena si no hay `VITE_API_URL` ni `VITE_API_PROXY_ACK=1`.**
+> Es a propósito (`web/vite.config.ts`): sin esa decisión explícita, el front
+> cae en el default relativo `/api/v1` y en un hosting estático con SPA
+> fallback (Vercel/Netlify) ese path puede resolver contra el propio
+> `index.html` — el login responde 200 con HTML en vez de con la API, y falla
+> en silencio. `vite dev` y `vite preview` no llevan este chequeo (no
+> generan el bundle que se despliega).
+
 ### Opción A — Hosting estático sin proxy (Vercel / Netlify)
 
-Setear las 3 primeras variables de la tabla en el build. El front llama a la
-Edge Function y a PostgREST **directo** (cross-origin), así que además hay que
-setear el secret `CORS_ALLOWED_ORIGINS` (§2) con el dominio del front. El SPA
-fallback ya está en el repo: `web/vercel.json` (Vercel) y `web/public/_redirects`
-(Netlify). Config del proyecto en el hosting: root `web/`, build `npm run build`,
-output `dist/`.
+Setear las 3 primeras variables de la tabla en el build (`VITE_API_URL` con la
+URL absoluta de la Edge Function). El front llama a la Edge Function y a
+PostgREST **directo** (cross-origin), así que además hay que setear el secret
+`CORS_ALLOWED_ORIGINS` (§2) con el dominio del front. El SPA fallback ya está
+en el repo: `web/vercel.json` (Vercel) excluye `/api/*` del rewrite a
+`index.html` (queda como 404 real si igual llega ahí sin `VITE_API_URL`) y
+`web/public/_redirects` (Netlify) proxea `/api/v1/*` antes del fallback.
+Config del proyecto en el hosting: root `web/`, build `npm run build`, output
+`dist/`.
 
 Cobertura de test del modo directo: `web/src/api/catalogos.test.ts` (URL
 absoluta + apikey; el modo proxy sigue siendo el default sin las variables).
@@ -121,7 +133,9 @@ absoluta + apikey; el modo proxy sigue siendo el default sin las variables).
 ### Opción B — Reverse proxy propio (nginx/Caddy en VPS)
 
 Mantiene la anon key fuera del bundle y todo same-origin (CORS no interviene).
-El proxy replica las rutas del dev (`web/vite.config.ts`):
+El proxy replica las rutas del dev (`web/vite.config.ts`). El build (`npm run
+build`) necesita `VITE_API_PROXY_ACK=1` — sin `VITE_API_URL`, es la única forma
+de confirmar que el default relativo `/api/v1` es intencional y no un olvido.
 
 1. `/api/v1/*` → `https://<project-ref>.supabase.co/functions/v1/api/v1/*` (la API Hono; single `api`, ver §3).
 2. `/rest/v1/*` → `https://<project-ref>.supabase.co/rest/v1/*` **inyectando el header `apikey: <anon-key>`** server-side (catálogos globales: `especies`, `razas`, `tipos_vacuna`; el usuario aporta su `Authorization: Bearer`).

@@ -169,7 +169,7 @@ async function elegirServicio(servicio: Servicio) {
 }
 
 async function elegirCliente(cliente: Cliente) {
-  await userEvent.click(screen.getByRole("combobox", { name: "Dueño" }));
+  await userEvent.click(screen.getByRole("combobox", { name: "Tutor" }));
   await userEvent.click(await screen.findByText(cliente.fullName));
 }
 

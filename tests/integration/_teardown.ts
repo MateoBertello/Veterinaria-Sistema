@@ -72,7 +72,86 @@ export const ORDEN_BORRADO_TABLAS_NEGOCIO = [
   "plan_vacunacion", "adjuntos_medicos", "historial_clinico", "turnos",
   "estadias", "cambios_propietario", "notificaciones", "registros_auditoria",
   "horarios_doctor", "doctores", "mascotas", "servicios", "clientes", "usuarios",
+  // Catálogos clínicos: por tenant desde 20260827000001_catalogos_por_tenant.sql,
+  // así que ahora los borra el teardown como cualquier otra tabla del tenant.
+  // Van AL FINAL y en este orden por las FKs compuestas: `mascotas` referencia
+  // especies y razas con ON DELETE RESTRICT, y `plan_vacunacion` referencia
+  // tipos_vacuna igual — las dos ya se fueron para cuando llega este tramo.
+  // `razas` antes que `especies` porque la CASCADE de especies→razas se
+  // dispararía igual, pero el orden explícito no depende de eso.
+  // `especie_tipo_vacuna` va ANTES que las dos tablas que referencia
+  // (20260828000001_vacunas_por_especie.sql). Sus FKs son ON DELETE CASCADE, así
+  // que borrarla explícitamente es redundante — se pone igual por lo mismo que
+  // el resto de esta lista: el orden no depende de una cascada que alguien puede
+  // cambiar sin darse cuenta de que este teardown la estaba usando.
+  "especie_tipo_vacuna", "razas", "especies", "tipos_vacuna",
 ] as const;
+
+/**
+ * Ids del catálogo clínico DE UN TENANT: especie, una raza de esa especie y un
+ * tipo de vacuna activo.
+ *
+ * Los catálogos dejaron de ser globales (20260827000001_catalogos_por_tenant.sql):
+ * cada clínica nace con SU copia, creada por `on_tenant_created`, y las FKs
+ * compuestas sobre (especie_id, tenant_id) / (raza_id, tenant_id) /
+ * (tipo_vacuna_id, tenant_id) rechazan en la base un catálogo de otra clínica.
+ *
+ * De ahí las dos condiciones que este helper impone y que antes no existían:
+ * hay que pedir el catálogo DE SU tenant (no "la primera fila que aparezca") y
+ * hay que pedirlo DESPUÉS de crear el tenant. Un fixture que tomara el catálogo
+ * global —como hacían todas estas suites— hoy elegiría el de una clínica
+ * cualquiera y el INSERT de la mascota moriría con un error de FK.
+ *
+ * Revienta si falta alguno, en vez de devolver "" y dejar que la suite falle
+ * más adelante por una razón que no es la que se está probando.
+ */
+export async function catalogoDelTenant(
+  serviceDb: SupabaseClient,
+  tenantId: string,
+): Promise<{ especieId: string; razaId: string; tipoVacunaId: string }> {
+  const { data: especie } = await serviceDb
+    .from("especies").select("id")
+    .eq("tenant_id", tenantId).eq("name", "Perro").maybeSingle();
+  const especieId = (especie as { id?: string } | null)?.id ?? "";
+
+  const { data: raza } = await serviceDb
+    .from("razas").select("id")
+    .eq("tenant_id", tenantId).eq("especie_id", especieId).limit(1).maybeSingle();
+  const razaId = (raza as { id?: string } | null)?.id ?? "";
+
+  // El tipo de vacuna tiene que ser APLICABLE A "Perro", que es la especie que
+  // este helper devuelve y con la que las suites crean sus mascotas.
+  //
+  // Antes acá se tomaba "el primer tipo de vacuna activo", cualquiera. Con
+  // RN-PV11 eso es una bomba de tiempo: si la fila que devolviera el `.limit(1)`
+  // fuese "Triple Felina", toda suite que programe una dosis para su perro
+  // fallaría con VACCINE_NOT_APPLICABLE_TO_SPECIES — y el rojo aparecería en el
+  // test de otra regla, no en el de ésta. Se pide por la relación, que es la
+  // misma fuente de verdad que consulta el Service.
+  const { data: tipo } = await serviceDb
+    .from("especie_tipo_vacuna")
+    .select("tipo_vacuna_id, tipo:tipos_vacuna!especie_tipo_vacuna_tipo_fkey(id, active)")
+    .eq("tenant_id", tenantId)
+    .eq("especie_id", especieId)
+    .eq("tipo.active", true)
+    .limit(1)
+    .maybeSingle();
+  const tipoVacunaId = (tipo as { tipo_vacuna_id?: string } | null)?.tipo_vacuna_id ?? "";
+
+  const faltantes = Object.entries({ especieId, razaId, tipoVacunaId })
+    .filter(([, v]) => !v)
+    .map(([k]) => k);
+  if (faltantes.length > 0) {
+    throw new Error(
+      `El tenant ${tenantId} no tiene catálogo clínico (falta: ${faltantes.join(", ")}). ` +
+      "Lo siembra on_tenant_created; si falta `tipoVacunaId`, puede ser que la especie no tenga " +
+      "ninguna vacuna asociada — eso lo siembra 20260828000001_vacunas_por_especie.sql. " +
+      "Si falta todo, no está aplicada 20260827000001_catalogos_por_tenant.sql en este Supabase.",
+    );
+  }
+
+  return { especieId, razaId, tipoVacunaId };
+}
 
 /** Borra un tenant de prueba entero: tablas de negocio en orden, el tenant y sus cuentas de Auth. */
 export async function limpiarTenant(serviceDb: SupabaseClient, tenantId: string | undefined | null): Promise<void> {

@@ -122,6 +122,38 @@ describe("LoginPage", () => {
     expect(await screen.findByText(/existe en más de una clínica/i)).toBeInTheDocument();
   });
 
+  it("muestra un mensaje accionable ante INVALID_RESPONSE (200 con HTML, no envelope)", async () => {
+    // Un hosting mal configurado (sin VITE_API_URL) le devuelve el propio
+    // index.html al login: client.ts lo traduce a INVALID_RESPONSE con un
+    // mensaje diagnóstico. La pantalla no debe pisarlo con "error inesperado".
+    mockAuth.login.mockRejectedValue(
+      new ApiError("INVALID_RESPONSE", 200, "Respuesta inesperada del servidor (HTTP 200)."),
+    );
+    renderPage();
+
+    await userEvent.type(screen.getByLabelText("Usuario o email"), "admin_demo");
+    await userEvent.type(screen.getByLabelText("Contraseña"), "Demo1234!");
+    await userEvent.click(screen.getByRole("button", { name: /Iniciar sesión/i }));
+
+    expect(await screen.findByText(/Respuesta inesperada del servidor/i)).toBeInTheDocument();
+    expect(screen.queryByText("Ocurrió un error inesperado. Intentá de nuevo.")).not.toBeInTheDocument();
+  });
+
+  it("muestra un mensaje accionable si el storage del navegador lanza (defensa de segunda línea)", async () => {
+    // session.ts ya blinda sus propios accesos a localStorage; este es el
+    // resguardo por si algún otro código de la app deja pasar una excepción
+    // de storage sin capturar.
+    mockAuth.login.mockRejectedValue(new DOMException("Storage blocked", "SecurityError"));
+    renderPage();
+
+    await userEvent.type(screen.getByLabelText("Usuario o email"), "admin_demo");
+    await userEvent.type(screen.getByLabelText("Contraseña"), "Demo1234!");
+    await userEvent.click(screen.getByRole("button", { name: /Iniciar sesión/i }));
+
+    expect(await screen.findByText(/bloqueó el almacenamiento local/i)).toBeInTheDocument();
+    expect(screen.queryByText("Ocurrió un error inesperado. Intentá de nuevo.")).not.toBeInTheDocument();
+  });
+
   it("el campo de usuario no autocapitaliza ni autocorrige", async () => {
     // En mobile la autocapitalización convierte `juanpa` en `Juanpa`; el backend
     // ya normaliza, pero el campo no debe pelear con lo que el usuario tipea.

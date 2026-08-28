@@ -319,10 +319,15 @@ export const UsuariosService = {
 
     // 3. Protección LAST_ADMIN (RN-SEC6): no desactivar si es el único admin activo
     if (data.active === false) {
+      // `roles` es una tabla POR TENANT (UNIQUE (tenant_id, name)) y esta
+      // consulta corre con service role: sin el filtro, el nombre del rol se
+      // lee de cualquier clínica. Acá decide si aplica LAST_ADMIN, así que un
+      // rol homónimo ajeno podía habilitar o bloquear la baja del último admin.
       const { data: rolActual } = await db
         .from("roles")
         .select("id, name")
         .eq("id", (usuarioActual as { rol_id: string }).rol_id)
+        .eq("tenant_id", ctx.tenantId)
         .single();
 
       if (rolActual && (rolActual as { name: string }).name === "admin") {
@@ -335,6 +340,31 @@ export const UsuariosService = {
           );
         }
       }
+    }
+
+    // 3b. El rol destino tiene que ser de ESTE tenant — mismo control que
+    //     crear(). Faltaba acá: `roleId` viene del body, la FK de
+    //     `usuarios.rol_id` apunta a `roles(id)` a secas y la consulta corre con
+    //     service role, así que un id de rol de otra clínica se escribía sin
+    //     chistar. Se valida ANTES de tocar Auth para no tener que revertir el
+    //     cambio de email después.
+    let rolDestino: { id: string; name: string } | null = null;
+    if (data.roleId !== undefined) {
+      const { data: rol } = await db
+        .from("roles")
+        .select("id, name")
+        .eq("id", data.roleId)
+        .eq("tenant_id", ctx.tenantId)
+        .maybeSingle();
+
+      if (!rol) {
+        throw new DomainError(
+          ErrorCode.VALIDATION_ERROR,
+          422,
+          "El rol indicado no existe en esta clínica",
+        );
+      }
+      rolDestino = rol as { id: string; name: string };
     }
 
     // 4. Actualizar
@@ -404,27 +434,22 @@ export const UsuariosService = {
       await sincronizarEstadoEnAuth(db, id, data.active);
     }
 
-    // 5. Si cambió a rol veterinario → upsert Doctor (RN-SEC5)
-    if (data.roleId) {
-      const { data: nuevoRol } = await db
-        .from("roles")
-        .select("name")
-        .eq("id", data.roleId)
-        .single();
-      if (nuevoRol && (nuevoRol as { name: string }).name === "veterinario") {
-        // Mismo UPSERT DO NOTHING que en crear(): re-asignar el rol veterinario
-        // a un usuario que ya tiene perfil NO duplica la fila ni la modifica.
-        await db.from("doctores").upsert(
-          {
-            tenant_id: ctx.tenantId,
-            user_id:   id,
-            name:      data.fullName ?? (usuarioActual as { full_name: string }).full_name,
-            specialty: SPECIALTY_POR_DEFECTO,
-            available: true,
-          },
-          { onConflict: "tenant_id,user_id", ignoreDuplicates: true },
-        );
-      }
+    // 5. Si cambió a rol veterinario → upsert Doctor (RN-SEC5).
+    //    Reutiliza el rol ya resuelto y validado en 3b: una consulta menos y,
+    //    sobre todo, la única que había acá no filtraba por tenant.
+    if (rolDestino?.name === "veterinario") {
+      // Mismo UPSERT DO NOTHING que en crear(): re-asignar el rol veterinario
+      // a un usuario que ya tiene perfil NO duplica la fila ni la modifica.
+      await db.from("doctores").upsert(
+        {
+          tenant_id: ctx.tenantId,
+          user_id:   id,
+          name:      data.fullName ?? (usuarioActual as { full_name: string }).full_name,
+          specialty: SPECIALTY_POR_DEFECTO,
+          available: true,
+        },
+        { onConflict: "tenant_id,user_id", ignoreDuplicates: true },
+      );
     }
 
     // 6. Auditoría UPDATE (RN-SEC7 / RN-S3)

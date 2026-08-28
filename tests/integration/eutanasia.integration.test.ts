@@ -37,7 +37,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import app from "../../supabase/functions/api/src/main.ts";
 import { SUPABASE_URL, SUPABASE_ANON_KEY, SERVICE_ROLE_KEY, describeIntegration } from "./_env.ts";
-import { crearUsuarioAuth, limpiarTenant } from "./_teardown.ts";
+import { crearUsuarioAuth, limpiarTenant, catalogoDelTenant } from "./_teardown.ts";
 
 function skipIfNoCredentials(): boolean {
   if (!SUPABASE_URL || !SERVICE_ROLE_KEY || !SUPABASE_ANON_KEY) {
@@ -112,13 +112,13 @@ beforeAll(async () => {
 
   serviceDb = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, { auth: { persistSession: false } });
 
-  const { data: especie } = await serviceDb.from("especies").select("id").limit(1).single();
-  especieId = especie?.id ?? "";
-  const { data: tv } = await serviceDb.from("tipos_vacuna").select("id").limit(1).single();
-  tipoVacunaId = tv?.id ?? "";
-
   tenantA = await provisionTenant(serviceDb, "EA");
   tenantB = await provisionTenant(serviceDb, "EB");
+
+  // El catálogo es del tenant desde 20260827000001_catalogos_por_tenant.sql, así
+  // que se pide DESPUÉS de crear el tenant y para el tenant correcto: todos los
+  // helpers de esta suite siembran sobre A.
+  ({ especieId, tipoVacunaId } = await catalogoDelTenant(serviceDb, tenantA.tenantId));
 }, 60_000);
 
 afterAll(async () => {

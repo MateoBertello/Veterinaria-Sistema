@@ -33,7 +33,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import app from "../../supabase/functions/api/src/main.ts";
 import { SUPABASE_URL, SUPABASE_ANON_KEY, SERVICE_ROLE_KEY, describeIntegration } from "./_env.ts";
-import { crearUsuarioAuth, limpiarTenant } from "./_teardown.ts";
+import { crearUsuarioAuth, limpiarTenant, catalogoDelTenant } from "./_teardown.ts";
 
 function skipIfNoCredentials(): boolean {
   if (!SUPABASE_URL || !SERVICE_ROLE_KEY || !SUPABASE_ANON_KEY) {
@@ -100,15 +100,11 @@ async function provisionTenant(serviceDb: SupabaseClient, sufijo: string) {
 let serviceDb: SupabaseClient;
 let tenantA = { tenantId: "", jwt: "", userId: "", clienteId: "" };
 let tenantB = { tenantId: "", jwt: "", userId: "", clienteId: "" };
-let especieId = "";
 
 beforeAll(async () => {
   if (skipIfNoCredentials()) return;
 
   serviceDb = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, { auth: { persistSession: false } });
-
-  const { data: especie } = await serviceDb.from("especies").select("id").limit(1).single();
-  especieId = especie?.id ?? "";
 
   tenantA = await provisionTenant(serviceDb, "GA");
   tenantB = await provisionTenant(serviceDb, "GB");
@@ -123,6 +119,9 @@ afterAll(async () => {
 
 /** Crea una mascota Activa (tamaño Mediano) de un tenant vía API y devuelve su id. */
 async function crearMascota(t: typeof tenantA, name: string): Promise<string> {
+  // Catálogo por tenant (20260827000001_catalogos_por_tenant.sql): cada clínica
+  // tiene su propia especie "Perro", y la de la otra la rechaza la FK compuesta.
+  const { especieId } = await catalogoDelTenant(serviceDb, t.tenantId);
   const res = await callApp("/mascotas", {
     method: "POST", jwt: t.jwt,
     body: { name, clientId: t.clienteId, especieId, sex: "Macho", tamano: "Mediano" },

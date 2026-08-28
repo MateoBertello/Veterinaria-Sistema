@@ -31,7 +31,9 @@ export function AdminShell() {
         Saltar al contenido
       </a>
 
-      <aside className="hidden w-60 shrink-0 flex-col border-r border-slate-800 bg-slate-900 text-slate-100 md:flex">
+      {/* Sticky con alto de viewport, igual que el shell del tenant: la lista
+          de tenants es larga y la navegación no puede irse con el scroll. */}
+      <aside className="sticky top-0 hidden h-screen w-60 shrink-0 flex-col self-start border-r border-slate-800 bg-slate-900 text-slate-100 md:flex">
         <div className="flex items-center gap-3 px-6 py-5">
           <div className="rounded-xl bg-gradient-to-br from-orange-500 to-orange-600 p-2 shadow-md">
             <ShieldCheck className="size-6 text-white" aria-hidden />
@@ -42,7 +44,7 @@ export function AdminShell() {
           </div>
         </div>
 
-        <nav className="flex flex-1 flex-col gap-1 px-3" aria-label="Navegación de plataforma">
+        <nav className="flex flex-1 flex-col gap-1 overflow-y-auto px-3" aria-label="Navegación de plataforma">
           <NavLink
             to="/admin/tenants"
             className={({ isActive }) =>

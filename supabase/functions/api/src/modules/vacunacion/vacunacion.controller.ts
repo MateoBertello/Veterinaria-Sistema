@@ -58,7 +58,29 @@ planVacunacionMascotaRouter.get("/:petId/plan-vacunacion", async (c) => {
   return c.json(ok(items, { page, limit, total }), 200);
 });
 
-// POST /mascotas/:petId/plan-vacunacion — Programar dosis (RN-PV2, PV3, PV4, PV8, PV9)
+/**
+ * GET /mascotas/:petId/tipos-vacuna-aplicables — las vacunas que corresponden a
+ * ESA mascota (RN-PV11).
+ *
+ * Va acá y no en el módulo de catálogos porque la respuesta no es el catálogo:
+ * es el resultado de aplicarle una regla clínica a una mascota concreta. Cuelga
+ * del router que ya exige módulo `historial_clinico` + `view_medical_history`,
+ * que es el mismo gate del resto del plan de vacunación.
+ *
+ * No pagina: es la lista de un combo, acotada por especie.
+ */
+planVacunacionMascotaRouter.get("/:petId/tipos-vacuna-aplicables", async (c) => {
+  const petParsed = z.string().uuid().safeParse(c.req.param("petId"));
+  if (!petParsed.success) {
+    throw new DomainError(ErrorCode.VALIDATION_ERROR, 422, "ID de mascota inválido");
+  }
+
+  const { tenantId } = getTenantContext(c);
+  const items = await VacunacionService.tiposVacunaAplicables(petParsed.data, tenantId);
+  return c.json(ok(items), 200);
+});
+
+// POST /mascotas/:petId/plan-vacunacion — Programar dosis (RN-PV2, PV3, PV4, PV8, PV9, PV11)
 planVacunacionMascotaRouter.post("/:petId/plan-vacunacion", manageMedicalHistory, async (c) => {
   const petId = c.req.param("petId");
   const petParsed = z.string().uuid().safeParse(petId);

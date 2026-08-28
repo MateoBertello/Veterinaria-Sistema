@@ -31,6 +31,19 @@ export interface CancelarDosisResponse {
   estado: "Cancelada";
 }
 
+/**
+ * Un tipo de vacuna que SÍ corresponde a una mascota concreta (RN-PV11).
+ *
+ * Es lo que consume el combo de "Programar dosis". Qué vacuna aplica es una
+ * regla de negocio —sale de `especie_tipo_vacuna`—, no una decisión de
+ * presentación: por eso la resuelve el backend y el frontend solo la pinta.
+ */
+export interface TipoVacunaAplicable {
+  id:                    string;
+  nombre:                string;
+  mesesRefuerzoSugerido: number | null;
+}
+
 // ─── Helpers privados ─────────────────────────────────────────────────────────
 
 function today(): string {
@@ -61,6 +74,71 @@ function mapAplicarRpcError(error: { message?: string }): DomainError {
   if (msg.includes("MASCOTA_NOT_FOUND"))
     return new DomainError(ErrorCode.MASCOTA_NOT_FOUND, 404, "Mascota no encontrada en este tenant");
   return new DomainError(ErrorCode.INTERNAL_ERROR, 500, `No se pudo marcar la dosis como aplicada: ${msg}`);
+}
+
+/**
+ * Mascota + su especie + las vacunas asociadas a esa especie, en UN solo
+ * `select`. Es la consulta que responde las dos preguntas del módulo:
+ * "¿qué vacunas le puedo poner a este animal?" (el endpoint de aplicables) y
+ * "¿esta vacuna le corresponde?" (la guarda RN-PV11 de programarDosis).
+ *
+ * LAS PISTAS DE EMBED NOMBRAN LA CONSTRAINT, NUNCA LA COLUMNA. Las FKs de
+ * `mascotas → especies` y de `especie_tipo_vacuna` hacia sus dos padres son
+ * COMPUESTAS sobre (fk_id, tenant_id). Una pista que nombra una columna
+ * —`especies!especie_id(...)`— deja de resolver en cuanto la FK es compuesta:
+ * PostgREST devuelve PGRST200 y el endpoint responde 500. Ya rompió ocho
+ * consultas de este módulo y del historial, y no lo vio ninguna suite unit,
+ * porque el mock de supabase-js acepta cualquier string. Se verifica corriendo
+ * integración contra una base migrada.
+ *
+ * PUNTO DE EXTENSIÓN (ver el encabezado de 20260828000001_vacunas_por_especie):
+ * hoy la aplicabilidad es sólo por especie. Si algún día aparece una vacuna que
+ * depende de la RAZA, se suma una tabla aditiva `raza_tipo_vacuna` y su embed
+ * cuelga acá, de `mascotas.raza_id`; la unión de los dos conjuntos se resuelve
+ * en `aplicablesDeLaFila()`, unas líneas más abajo. Nada más se toca.
+ */
+const MASCOTA_CON_VACUNAS_APLICABLES =
+  "id, estado, especie_id, " +
+  "especie:especies!mascotas_especie_tenant_fkey(" +
+    "id, name, " +
+    "aplicables:especie_tipo_vacuna!especie_tipo_vacuna_especie_fkey(" +
+      "tipo:tipos_vacuna!especie_tipo_vacuna_tipo_fkey(id, nombre, meses_refuerzo_sugerido, active)" +
+    ")" +
+  ")";
+
+/** El embed a-uno llega como objeto o como arreglo según la versión de supabase-js. */
+// deno-lint-ignore no-explicit-any
+function unwrapEmbed(valor: any): any {
+  if (!valor) return undefined;
+  return Array.isArray(valor) ? valor[0] : valor;
+}
+
+/**
+ * Aplana la fila de `MASCOTA_CON_VACUNAS_APLICABLES` a la lista de vacunas que
+ * le corresponden a esa mascota, ya ordenada por nombre.
+ *
+ * El `active` se filtra acá y no en la consulta a propósito: sobre un embed no
+ * inner, un filtro por una columna del nivel más profundo anula el objeto en vez
+ * de descartar la fila, y quedarían huecos `null` en la lista. La lista es un
+ * catálogo por especie —un puñado de filas—, así que filtrar en memoria no
+ * cambia nada de costo y sí quita una fuente de sorpresas.
+ */
+// deno-lint-ignore no-explicit-any
+function aplicablesDeLaFila(fila: any): TipoVacunaAplicable[] {
+  const especie = unwrapEmbed(fila?.especie);
+  const rel: unknown[] = Array.isArray(especie?.aplicables) ? especie.aplicables : [];
+
+  return rel
+    // deno-lint-ignore no-explicit-any
+    .map((r: any) => unwrapEmbed(r?.tipo))
+    .filter((t) => t && t.active === true)
+    // deno-lint-ignore no-explicit-any
+    .map((t: any): TipoVacunaAplicable => ({
+      id:                    t.id,
+      nombre:                t.nombre,
+      mesesRefuerzoSugerido: t.meses_refuerzo_sugerido ?? null,
+    }))
+    .sort((a, b) => a.nombre.localeCompare(b.nombre, "es"));
 }
 
 // deno-lint-ignore no-explicit-any
@@ -110,7 +188,7 @@ export class VacunacionService {
 
     const { data, error, count } = await db
       .from("plan_vacunacion")
-      .select("*, tipo:tipos_vacuna!tipo_vacuna_id(nombre)", { count: "exact" })
+      .select("*, tipo:tipos_vacuna!plan_vacunacion_tipo_vacuna_tenant_fkey(nombre)", { count: "exact" })
       .eq("pet_id", petId)
       .eq("tenant_id", tenantId)
       .order("fecha_estimada", { ascending: true })
@@ -125,8 +203,42 @@ export class VacunacionService {
   }
 
   /**
-   * Programar una nueva dosis (RN-PV2, RN-PV3, RN-PV4, RN-PV9).
-   * Orden de guardas: MASCOTA_NOT_FOUND → PET_DECEASED → PAST_DATE → VACCINE_TYPE_NOT_FOUND.
+   * Las vacunas que le corresponden a UNA mascota (RN-PV11).
+   *
+   * Qué vacuna aplica sale de `especie_tipo_vacuna` y es regla de negocio, no
+   * presentación: si el frontend armara la unión, cada pantalla podría armarla
+   * distinto y la del combo terminaría discrepando con la que valida el POST.
+   * Por eso hay endpoint, y por eso `programarDosis` valida contra lo mismo.
+   *
+   * Una sola consulta: mascota → especie → vacunas asociadas.
+   */
+  static async tiposVacunaAplicables(
+    petId:    string,
+    tenantId: string,
+  ): Promise<TipoVacunaAplicable[]> {
+    const db = getServiceDb();
+
+    const { data: mascota, error } = await db
+      .from("mascotas")
+      .select(MASCOTA_CON_VACUNAS_APLICABLES)
+      .eq("id", petId)
+      .eq("tenant_id", tenantId)
+      .maybeSingle();
+
+    if (error) {
+      throw new DomainError(ErrorCode.INTERNAL_ERROR, 500, "Error al consultar las vacunas aplicables");
+    }
+    if (!mascota) {
+      throw new DomainError(ErrorCode.MASCOTA_NOT_FOUND, 404, "Mascota no encontrada");
+    }
+
+    return aplicablesDeLaFila(mascota);
+  }
+
+  /**
+   * Programar una nueva dosis (RN-PV2, RN-PV3, RN-PV4, RN-PV9, RN-PV11).
+   * Orden de guardas: MASCOTA_NOT_FOUND → PET_DECEASED → PAST_DATE →
+   * VACCINE_TYPE_NOT_FOUND → VACCINE_NOT_APPLICABLE_TO_SPECIES.
    */
   static async programarDosis(
     petId: string,
@@ -135,9 +247,13 @@ export class VacunacionService {
   ): Promise<DosisPublica> {
     const db = getServiceDb();
 
+    // UNA consulta para todo lo que hay que saber de la mascota: que exista en
+    // esta clínica, que no esté fallecida, y qué vacunas le corresponden. Antes
+    // eran dos viajes secuenciales (mascota, después catálogo) y validaban
+    // menos.
     const { data: mascota } = await db
       .from("mascotas")
-      .select("id, estado")
+      .select(MASCOTA_CON_VACUNAS_APLICABLES)
       .eq("id", petId)
       .eq("tenant_id", ctx.tenantId)
       .maybeSingle();
@@ -156,16 +272,13 @@ export class VacunacionService {
       throw new DomainError(ErrorCode.PAST_DATE, 422, "La fecha estimada no puede ser anterior a hoy");
     }
 
-    // RN-PV3: tipo de vacuna debe existir en el catálogo global (y estar activo).
-    const { data: tipoVacuna } = await db
-      .from("tipos_vacuna")
-      .select("id")
-      .eq("id", dto.tipoVacunaId)
-      .eq("active", true)
-      .maybeSingle();
-
-    if (!tipoVacuna) {
-      throw new DomainError(ErrorCode.VACCINE_TYPE_NOT_FOUND, 422, "Tipo de vacuna no encontrado en el catálogo");
+    // RN-PV3 + RN-PV11 de una sola vez: la lista ya viene filtrada por tenant
+    // (la mascota lo está), por especie (viene por la relación) y por `active`.
+    // Que el tipo pedido esté ahí es exactamente la condición que hay que
+    // cumplir para programar.
+    const aplicables = aplicablesDeLaFila(mascota);
+    if (!aplicables.some((t) => t.id === dto.tipoVacunaId)) {
+      throw await this._porQueNoAplica(db, dto.tipoVacunaId, ctx.tenantId, mascota);
     }
 
     const payload = {
@@ -182,7 +295,7 @@ export class VacunacionService {
     const { data: row, error } = await db
       .from("plan_vacunacion")
       .insert(payload)
-      .select("*, tipo:tipos_vacuna!tipo_vacuna_id(nombre)")
+      .select("*, tipo:tipos_vacuna!plan_vacunacion_tipo_vacuna_tenant_fkey(nombre)")
       .single();
 
     if (error || !row) {
@@ -204,6 +317,45 @@ export class VacunacionService {
     });
 
     return dosis;
+  }
+
+  /**
+   * Elige entre los dos rechazos posibles cuando la vacuna pedida no está en la
+   * lista de aplicables: o no existe en el catálogo de la clínica (RN-PV3), o
+   * existe pero no corresponde a la especie de la mascota (RN-PV11).
+   *
+   * Es UNA consulta EXTRA, y sólo la paga el camino que ya está rechazando el
+   * pedido: al happy path no le agrega ningún viaje. Distinguir importa porque
+   * los dos errores se arreglan distinto — uno cargando la vacuna en el
+   * catálogo, el otro asociándola a la especie— y un mensaje único mandaría a
+   * la mitad de la gente a buscar donde no es.
+   */
+  private static async _porQueNoAplica(
+    db:           ReturnType<typeof getServiceDb>,
+    tipoVacunaId: string,
+    tenantId:     string,
+    // deno-lint-ignore no-explicit-any
+    mascota:      any,
+  ): Promise<DomainError> {
+    const { data: tipo } = await db
+      .from("tipos_vacuna")
+      .select("nombre")
+      .eq("id", tipoVacunaId)
+      .eq("tenant_id", tenantId)
+      .eq("active", true)
+      .maybeSingle();
+
+    if (!tipo) {
+      return new DomainError(ErrorCode.VACCINE_TYPE_NOT_FOUND, 422, "Tipo de vacuna no encontrado en el catálogo");
+    }
+
+    const especie = unwrapEmbed(mascota?.especie)?.name ?? "esta especie";
+    return new DomainError(
+      ErrorCode.VACCINE_NOT_APPLICABLE_TO_SPECIES,
+      422,
+      // deno-lint-ignore no-explicit-any
+      `La vacuna "${(tipo as any).nombre}" no está asociada a ${especie}. Asociala desde el catálogo de tipos de vacuna si corresponde aplicarla.`,
+    );
   }
 
   /**
@@ -252,7 +404,7 @@ export class VacunacionService {
       .update(updates)
       .eq("id", id)
       .eq("tenant_id", ctx.tenantId)
-      .select("*, tipo:tipos_vacuna!tipo_vacuna_id(nombre)")
+      .select("*, tipo:tipos_vacuna!plan_vacunacion_tipo_vacuna_tenant_fkey(nombre)")
       .single();
 
     if (error || !row) {
@@ -375,7 +527,7 @@ export class VacunacionService {
     // de la vacuna embebido y estadoVisual derivado.
     const { data: row, error: readErr } = await db
       .from("plan_vacunacion")
-      .select("*, tipo:tipos_vacuna!tipo_vacuna_id(nombre)")
+      .select("*, tipo:tipos_vacuna!plan_vacunacion_tipo_vacuna_tenant_fkey(nombre)")
       .eq("id", id)
       .eq("tenant_id", ctx.tenantId)
       .single();

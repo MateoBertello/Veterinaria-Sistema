@@ -73,9 +73,15 @@ export const ErrorCode = {
   INVALID_FILE_TYPE:                "INVALID_FILE_TYPE",
   FILE_TOO_LARGE:                   "FILE_TOO_LARGE",
   VACCINE_TYPE_NOT_FOUND:           "VACCINE_TYPE_NOT_FOUND",
+  /** RN-PV11: la vacuna existe pero no aplica a la especie de la mascota. */
+  VACCINE_NOT_APPLICABLE_TO_SPECIES: "VACCINE_NOT_APPLICABLE_TO_SPECIES",
   VACCINE_PLAN_ALREADY_APPLIED:     "VACCINE_PLAN_ALREADY_APPLIED",
   DUPLICATE_USER:                   "DUPLICATE_USER",
   LAST_ADMIN:                       "LAST_ADMIN",
+  // Catálogos clínicos por clínica (especies, razas, tipos de vacuna).
+  CATALOG_NOT_FOUND:                "CATALOG_NOT_FOUND",
+  CATALOG_DUPLICATE:                "CATALOG_DUPLICATE",
+  CATALOG_IN_USE:                   "CATALOG_IN_USE",
   TENANT_DUPLICATE_TAXID:           "TENANT_DUPLICATE_TAXID",
   MODULE_UNKNOWN:                   "MODULE_UNKNOWN",
 } as const;
@@ -635,7 +641,7 @@ export interface MarcarAplicadaInput {
   notes?:         string;
 }
 
-// ─── Catálogos globales ─────────────────────────────────────────────────────
+// ─── Catálogos clínicos (por tenant) ────────────────────────────────────────
 
 export interface Especie {
   id:   string;
@@ -646,6 +652,85 @@ export interface Raza {
   id:         string;
   name:       string;
   especie_id: string;
+}
+
+// ─── Gestión del catálogo (envelope de /api/v1, camelCase) ──────────────────
+//
+// Los tipos de arriba son la forma CRUDA de PostgREST, que es como el frontend
+// LEE el catálogo para poblar los combos. Los de abajo son los del envelope de
+// la API, que es por donde pasa toda ESCRITURA: traen `active` porque la
+// pantalla de gestión necesita ver y alternar el estado (RN-CAT4, RN-CAT9).
+
+export interface EspecieCatalogo {
+  id:          string;
+  name:        string;
+  description: string | null;
+  active:      boolean;
+}
+
+export interface RazaCatalogo {
+  id:          string;
+  especieId:   string;
+  /** Nombre de la especie, embebido por el backend en la misma consulta. */
+  especieName: string | null;
+  name:        string;
+  description: string | null;
+  active:      boolean;
+}
+
+/** Especie tal como la muestra el catálogo de vacunas: id + nombre. */
+export interface EspecieAsociada {
+  id:   string;
+  name: string;
+}
+
+export interface TipoVacunaCatalogo {
+  id:                    string;
+  nombre:                string;
+  /**
+   * Especies a las que aplica (RN-CAT10). Reemplaza al `especieAplicable` de
+   * texto libre: la relación es N:M contra el catálogo de especies y la resuelve
+   * el backend embebida en el mismo listado.
+   */
+  especies:              EspecieAsociada[];
+  mesesRefuerzoSugerido: number | null;
+  active:                boolean;
+}
+
+/**
+ * Un tipo de vacuna que le corresponde a UNA mascota
+ * (`GET /mascotas/:petId/tipos-vacuna-aplicables`, RN-PV11).
+ *
+ * Distinto de `TipoVacunaCatalogo`: acá no hay `active` ni especies porque la
+ * lista ya viene filtrada por el backend. Qué vacuna aplica es regla de negocio,
+ * no algo que el frontend deba recalcular.
+ */
+export interface TipoVacunaAplicable {
+  id:                    string;
+  nombre:                string;
+  mesesRefuerzoSugerido: number | null;
+}
+
+export interface EspecieInput {
+  name:         string;
+  description?: string | null;
+}
+
+export interface RazaInput {
+  especieId:    string;
+  name:         string;
+  description?: string | null;
+}
+
+export interface TipoVacunaInput {
+  nombre:                 string;
+  /**
+   * Conjunto COMPLETO de especies a las que aplica (RN-CAT10): lo que no está
+   * acá deja de estar asociado. Obligatorio al crear; opcional al editar, donde
+   * omitirlo significa "no toques las especies".
+   */
+  especieIds?:            string[];
+  mesesRefuerzoSugerido?: number | null;
 }
 
 // ─── Autenticación / sesión ────────────────────────────────────────────────

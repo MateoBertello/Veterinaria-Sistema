@@ -427,6 +427,46 @@ describe("RN-REC2: la respuesta es genérica, no revela si el email existe", () 
   });
 });
 
+// ─── A3: recuperación de usuario con email repetido entre tenants ────────────
+
+describe("A3: `usuarios` NO garantiza email único global — la recuperación lo contempla", () => {
+  it("dos tenants con el mismo email resuelven sin error (no 500, no descarte silencioso)", async () => {
+    // La unicidad del esquema es UNIQUE (tenant_id, email): dos clínicas pueden
+    // tener filas con el mismo email. Lo que hoy lo evita es GoTrue, no la
+    // tabla. Con `.single()` PostgREST devolvía error ante dos filas y el
+    // pedido se descartaba en silencio — misma forma que el bug DT-19 del login.
+    const serviceDb = buildChain({
+      filas: [
+        { id: "u-a", tenant_id: "tenant-a", username: "admin_a", email: "compartido@test.com" },
+        { id: "u-b", tenant_id: "tenant-b", username: "admin_b", email: "compartido@test.com" },
+      ],
+    });
+    mockGetServiceDb.mockReturnValue(serviceDb as never);
+
+    await expect(
+      AuthService.recuperarUsuario({ email: "compartido@test.com" }),
+    ).resolves.toBeUndefined();
+
+    // La consulta resuelve las coincidencias con `limit()`, NO con `single()`.
+    expect(serviceDb.limit).toHaveBeenCalled();
+    expect(serviceDb.single).not.toHaveBeenCalled();
+  });
+
+  it("la búsqueda por email es cross-tenant a propósito: el endpoint es público, no hay tenant en contexto", async () => {
+    const serviceDb = buildChain({ filas: [] });
+    mockGetServiceDb.mockReturnValue(serviceDb as never);
+
+    await AuthService.recuperarUsuario({ email: "Alguien@Test.com " });
+
+    // Normaliza contra email_ci y filtra por active — nunca por tenant_id.
+    const columnasFiltradas = serviceDb.eq.mock.calls.map((c) => c[0]);
+    expect(columnasFiltradas).toContain("email_ci");
+    expect(columnasFiltradas).toContain("active");
+    expect(columnasFiltradas).not.toContain("tenant_id");
+    expect(serviceDb.eq).toHaveBeenCalledWith("email_ci", "alguien@test.com");
+  });
+});
+
 // ─── RN-REC3: token de restablecimiento, nunca password en claro ─────────────
 
 describe("RN-REC3: el reset usa accessToken (no una password vieja) y nunca expone la password", () => {

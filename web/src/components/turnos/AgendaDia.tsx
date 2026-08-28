@@ -4,6 +4,7 @@ import { ChevronLeft, ChevronRight, PencilLine } from "lucide-react";
 import { toast } from "sonner";
 import {
   Table,
+  TableScrollContainer,
   TableBody,
   TableCell,
   TableHead,
@@ -169,9 +170,9 @@ export function AgendaDia({ fecha, onFecha }: Props) {
         </p>
       ) : null}
 
-      <div className="rounded-lg border">
-        <Table>
-          <TableHeader>
+      <TableScrollContainer aria-label="Turnos del día">
+        <Table containerClassName="overflow-visible">
+          <TableHeader className="sticky top-0 z-10">
             <TableRow className="bg-orange-50 hover:bg-orange-50">
               <TableHead>Hora</TableHead>
               <TableHead>Servicio</TableHead>
@@ -220,7 +221,7 @@ export function AgendaDia({ fecha, onFecha }: Props) {
                     <TableCell className="font-medium">
                       {t.startTime} – {t.endTime}
                     </TableCell>
-                    <TableCell>
+                    <TableCell className="whitespace-normal">
                       <div className="flex flex-col">
                         <span>{t.servicio?.nombre ?? "—"}</span>
                         {t.servicio ? (
@@ -230,10 +231,10 @@ export function AgendaDia({ fecha, onFecha }: Props) {
                         ) : null}
                       </div>
                     </TableCell>
-                    <TableCell className="hidden md:table-cell">
+                    <TableCell className="hidden whitespace-normal md:table-cell">
                       {t.doctor?.name ?? "—"}
                     </TableCell>
-                    <TableCell>
+                    <TableCell className="whitespace-normal">
                       <div className="flex flex-col">
                         <span className="font-medium">{t.mascota?.name ?? "—"}</span>
                         <span className="text-xs text-muted-foreground">
@@ -279,7 +280,7 @@ export function AgendaDia({ fecha, onFecha }: Props) {
             )}
           </TableBody>
         </Table>
-      </div>
+      </TableScrollContainer>
 
       <TurnoDetalleDialog
         turnoId={detalleId}

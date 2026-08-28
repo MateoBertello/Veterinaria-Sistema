@@ -78,7 +78,7 @@ export const HorarioService = {
   ): Promise<Record<string, unknown>> {
     const { data } = await db
       .from("doctores")
-      .select("id, tenant_id, user_id")
+      .select("id, tenant_id, user_id, available")
       .eq("id", doctorId)
       .eq("tenant_id", tenantId)
       .single();
@@ -103,6 +103,23 @@ export const HorarioService = {
         ErrorCode.FORBIDDEN,
         403,
         "Solo podés gestionar tu propio horario",
+      );
+    }
+  },
+
+  /**
+   * RN-HOR8 (baja lógica del profesional): un doctor con `available=false` no
+   * puede recibir franjas nuevas ni reactivar las que tenía — no tiene sentido
+   * ofrecerlo para turnos nuevos. La baja no es destructiva: conserva sus
+   * franjas y se pueden listar, desactivar o eliminar sin restricción, así que
+   * este chequeo solo se invoca desde crear y desde reactivar.
+   */
+  _assertDisponible(doctor: Record<string, unknown>): void {
+    if (!(doctor["available"] as boolean)) {
+      throw new DomainError(
+        ErrorCode.DOCTOR_INACTIVE,
+        422,
+        "El profesional está dado de baja: no se le pueden asignar franjas nuevas",
       );
     }
   },
@@ -163,6 +180,7 @@ export const HorarioService = {
     const db = getServiceDb();
     const doctor = await this._doctorDelTenant(db, doctorId, ctx.tenantId); // RN-HOR4
     this._assertPuedeGestionar(doctor, ctx);                                // RN-HOR7
+    this._assertDisponible(doctor);                                        // RN-HOR8
 
     const inicio = toMinutes(data.startTime);
     const fin    = toMinutes(data.endTime);
@@ -242,23 +260,30 @@ export const HorarioService = {
     }
 
     const actualRow = actual as unknown as Record<string, unknown>;
+    const doctorId  = actualRow["doctor_id"] as string;
 
-    // RN-HOR7: la franja tiene que ser del propio profesional (salvo admin).
-    await this._assertPuedeGestionarFranja(db, actualRow["doctor_id"] as string, ctx);
-
-    // RN-HOR2: al activar, revalidar solapamiento (excluyéndose a sí misma).
     if (active) {
+      // Reactivar exige conocer al doctor sí o sí (pertenencia RN-HOR7 y
+      // disponibilidad RN-HOR8), así que se carga una única vez.
+      const doctor = await this._doctorDelTenant(db, doctorId, ctx.tenantId);
+      this._assertPuedeGestionar(doctor, ctx); // RN-HOR7
+      this._assertDisponible(doctor);          // RN-HOR8
+
+      // RN-HOR2: al activar, revalidar solapamiento (excluyéndose a sí misma).
       const inicio = toMinutes(actualRow["start_time"] as string);
       const fin    = toMinutes(actualRow["end_time"]   as string);
       await this._assertSinSolapamiento(
         db,
         ctx.tenantId,
-        actualRow["doctor_id"]   as string,
+        doctorId,
         actualRow["day_of_week"] as number,
         inicio,
         fin,
         horarioId,
       );
+    } else {
+      // Desactivar no exige disponibilidad (RN-HOR8): la baja no es destructiva.
+      await this._assertPuedeGestionarFranja(db, doctorId, ctx); // RN-HOR7
     }
 
     const { data: row, error } = await db

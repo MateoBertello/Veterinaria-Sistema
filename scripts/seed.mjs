@@ -7,7 +7,7 @@
  *   2. Un usuario por cada rol (admin/veterinario/recepcionista) con credenciales
  *      conocidas, creados vía Auth admin API con `app_metadata.tenant_id` correcto.
  *   3. Datos demo por tenant (clientes con mascotas) usando los catálogos globales
- *      (`especies`/`razas`) que ya siembra `seed_global.sql` como migración.
+ *      (`especies`/`razas`) que ya siembra `on_tenant_created` al crear el tenant.
  *
  * IDEMPOTENTE: correrlo dos veces no duplica ni rompe.
  *
@@ -301,28 +301,41 @@ async function ensureUser(tenantId, spec) {
   }
 }
 
-/** Cachea ids de especie/raza por nombre. */
+/**
+ * Cachea ids de especie/raza por (tenant, nombre).
+ *
+ * El catálogo clínico es POR TENANT desde
+ * 20260827000001_catalogos_por_tenant.sql. Dos consecuencias para este script:
+ * la búsqueda lleva `.eq("tenant_id", ...)` —sin él, `.single()` sobre un nombre
+ * que se repite en varias clínicas devuelve error, no una fila— y la clave del
+ * cache incluye el tenant.
+ */
 const especieCache = new Map();
 const razaCache = new Map();
 
-async function especieIdPorNombre(nombre) {
-  if (especieCache.has(nombre)) return especieCache.get(nombre);
-  const { data, error } = await db.from("especies").select("id").eq("name", nombre).single();
-  if (error || !data) die(`Especie "${nombre}" no está en el catálogo global (¿corriste las migraciones?)`, error);
-  especieCache.set(nombre, data.id);
+async function especieIdPorNombre(tenantId, nombre) {
+  const key = `${tenantId}::${nombre}`;
+  if (especieCache.has(key)) return especieCache.get(key);
+  const { data, error } = await db
+    .from("especies").select("id")
+    .eq("tenant_id", tenantId).eq("name", nombre)
+    .single();
+  if (error || !data) die(`Especie "${nombre}" no está en el catálogo de este tenant (¿corriste las migraciones?)`, error);
+  especieCache.set(key, data.id);
   return data.id;
 }
 
-async function razaIdPorNombre(especieId, nombre) {
-  const key = `${especieId}::${nombre}`;
+async function razaIdPorNombre(tenantId, especieId, nombre) {
+  const key = `${tenantId}::${especieId}::${nombre}`;
   if (razaCache.has(key)) return razaCache.get(key);
   const { data, error } = await db
     .from("razas")
     .select("id")
+    .eq("tenant_id", tenantId)
     .eq("especie_id", especieId)
     .eq("name", nombre)
     .single();
-  if (error || !data) die(`Raza "${nombre}" no está en el catálogo global`, error);
+  if (error || !data) die(`Raza "${nombre}" no está en el catálogo de este tenant`, error);
   razaCache.set(key, data.id);
   return data.id;
 }
@@ -376,8 +389,8 @@ async function ensureDemoData(tenantId) {
         continue;
       }
 
-      const especieId = await especieIdPorNombre(m.especie);
-      const razaId = await razaIdPorNombre(especieId, m.raza);
+      const especieId = await especieIdPorNombre(tenantId, m.especie);
+      const razaId = await razaIdPorNombre(tenantId, especieId, m.raza);
       const { error: masInsErr } = await db.from("mascotas").insert({
         tenant_id: tenantId,
         name: m.name,
@@ -534,9 +547,12 @@ const DEMO_DOSIS_NOTAS = [
   "Refuerzo anual antirrábico canino",
 ];
 
-async function tipoVacunaIdPorNombre(nombre) {
-  const { data, error } = await db.from("tipos_vacuna").select("id").eq("nombre", nombre).single();
-  if (error || !data) die(`Tipo de vacuna "${nombre}" no está en el catálogo global`, error);
+async function tipoVacunaIdPorNombre(tenantId, nombre) {
+  const { data, error } = await db
+    .from("tipos_vacuna").select("id")
+    .eq("tenant_id", tenantId).eq("nombre", nombre)
+    .single();
+  if (error || !data) die(`Tipo de vacuna "${nombre}" no está en el catálogo de este tenant`, error);
   return data.id;
 }
 
@@ -645,8 +661,8 @@ async function ensureDemoOperativa(tenantId) {
   console.log(`✓ Historial demo: ${eventos.length} eventos (Firulais ×2, Michi ×1)`);
 
   // — Plan de vacunación —
-  const tripleFelina = await tipoVacunaIdPorNombre("Triple Felina");
-  const antirrabica  = await tipoVacunaIdPorNombre("Antirrábica");
+  const tripleFelina = await tipoVacunaIdPorNombre(tenantId, "Triple Felina");
+  const antirrabica  = await tipoVacunaIdPorNombre(tenantId, "Antirrábica");
   const dosis = [
     // Aplicada: linkea el evento 'Vacunación' de Michi (CHECK de la tabla).
     {
@@ -745,8 +761,8 @@ async function ensureLunaEutanasia(tenantId) {
     return;
   }
 
-  const especieId = await especieIdPorNombre("Perro");
-  const razaId = await razaIdPorNombre(especieId, "Mestizo");
+  const especieId = await especieIdPorNombre(tenantId, "Perro");
+  const razaId = await razaIdPorNombre(tenantId, especieId, "Mestizo");
   const { data: luna, error: insErr } = await db.from("mascotas").insert({
     tenant_id: tenantId, name: "Luna", client_id: ctx.carlos.id,
     especie_id: especieId, raza_id: razaId,
@@ -765,7 +781,7 @@ async function ensureLunaEutanasia(tenantId) {
   });
   if (evErr) die("No pude insertar la consulta previa de Luna", evErr);
 
-  const quintuple = await tipoVacunaIdPorNombre("Quíntuple Canina");
+  const quintuple = await tipoVacunaIdPorNombre(tenantId, "Quíntuple Canina");
   const { error: dosisErr } = await db.from("plan_vacunacion").insert({
     tenant_id: tenantId, pet_id: luna.id, tipo_vacuna_id: quintuple,
     fecha_estimada: fechaRel(30), estado: "Pendiente", created_by: ctx.vetId,

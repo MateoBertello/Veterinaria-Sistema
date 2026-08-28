@@ -26,7 +26,9 @@ export function DoctorCombobox({ value, onChange }: Props) {
   const [doctores, setDoctores] = useState<Doctor[]>([]);
 
   useEffect(() => {
-    listarDoctores({ search: query || undefined, limit: 15 })
+    // RN-HOR8: un doctor dado de baja no se ofrece para asignaciones nuevas
+    // (franjas de horario, turnos) — el selector solo trae disponibles.
+    listarDoctores({ search: query || undefined, limit: 15, available: true })
       .then(({ items }) => setDoctores(items))
       .catch(() => setDoctores([]));
   }, [query]);

@@ -1,5 +1,11 @@
 import { apiClient, apiClientList } from "./client.ts";
-import type { ApiMeta, DosisVacunacion, MarcarAplicadaInput, ProgramarDosisInput } from "../types/index.ts";
+import type {
+  ApiMeta,
+  DosisVacunacion,
+  MarcarAplicadaInput,
+  ProgramarDosisInput,
+  TipoVacunaAplicable,
+} from "../types/index.ts";
 
 export interface ListarPlanVacunacionParams {
   page?:  number;
@@ -19,7 +25,20 @@ export function listarPlanVacunacion(
   return apiClientList<DosisVacunacion>(`/mascotas/${petId}/plan-vacunacion${suffix}`);
 }
 
-/** POST /mascotas/{petId}/plan-vacunacion — programar dosis (RN-PV2, PV3, PV4). */
+/**
+ * GET /mascotas/{petId}/tipos-vacuna-aplicables — las vacunas que corresponden a
+ * ESA mascota (RN-PV11).
+ *
+ * Reemplaza al viejo `listarTiposVacuna()`, que traía el catálogo entero: al
+ * programar una dosis para un perro, el combo ofrecía también las de gato. Qué
+ * vacuna aplica sale de la relación especie↔vacuna y la resuelve el backend; el
+ * frontend no arma esa unión ni filtra por nombre de especie.
+ */
+export function listarTiposVacunaAplicables(petId: string): Promise<TipoVacunaAplicable[]> {
+  return apiClient<TipoVacunaAplicable[]>(`/mascotas/${petId}/tipos-vacuna-aplicables`);
+}
+
+/** POST /mascotas/{petId}/plan-vacunacion — programar dosis (RN-PV2, PV3, PV4, PV11). */
 export function programarDosis(petId: string, input: ProgramarDosisInput): Promise<DosisVacunacion> {
   return apiClient<DosisVacunacion>(`/mascotas/${petId}/plan-vacunacion`, {
     method: "POST",

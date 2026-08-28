@@ -10,7 +10,7 @@ async function completarFormularioTurno(
   await page.getByPlaceholder("Buscar por nombre...").fill(SEED.servicio);
   await page.getByRole("option", { name: new RegExp(SEED.servicio) }).click();
 
-  await page.getByRole("combobox", { name: "Dueño" }).click();
+  await page.getByRole("combobox", { name: "Tutor" }).click();
   await page.getByPlaceholder("Buscar por nombre o DNI...").fill(opts.cliente);
   await page.getByRole("option", { name: new RegExp(opts.cliente) }).click();
 

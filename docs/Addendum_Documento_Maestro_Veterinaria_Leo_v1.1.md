@@ -431,7 +431,7 @@ const configuracionSchema = z.object({
 
 - Dar de alta una mascota con: nombre, cliente asociado, especie, raza (opcional), sexo, **tamaño** (obligatorio: `Pequeño` | `Mediano` | `Grande`), fecha de nacimiento, color/observaciones y **alimento/dieta** (texto libre: dieta o alimento especial).
 - Calcular y mostrar la **edad** automáticamente a partir de la fecha de nacimiento.
-- Editar la mascota; listar y buscar por nombre, especie, raza o dueño. Filtros avanzados por especie, estado (activa/fallecida), tamaño y rango etario.
+- Editar la mascota; listar y buscar por nombre, especie, raza o tutor. Filtros avanzados por especie, estado (activa/fallecida), tamaño y rango etario.
 - Mostrar `tamano` y `alimentoDieta` en la **ficha de la mascota** y exponerlos al **módulo Guardería** al registrar una estadía (para que el personal sepa qué darle de comer).
 - Exportar a Excel y PDF.
 - **Nivel de seeder (catálogos):** Especies y Razas provienen del catálogo **global (Nivel 1)**, compartido por todos los tenants (sin `tenant_id`).
@@ -555,7 +555,7 @@ const mascotaSchema = z.object({
 - **RN-EC2 (peso en historial):** el peso se registra aquí (RN-MA3).
 - **RN-EC3 (mascota viva):** no se permiten registros en mascotas fallecidas → `422 PET_DECEASED`. La propia eutanasia es el último registro admisible.
 - **RN-EC4 (adjuntos):** JPG/PNG/GIF/PDF; máx. 10 MB por archivo.
-- **RN-EC5 (dueño vigente):** se persiste `clientIdAtTime`/`clientNameAtTime`.
+- **RN-EC5 (tutor vigente):** se persiste `clientIdAtTime`/`clientNameAtTime`.
 - **RN-EC6 (rangos clínicos):** peso 0–200 kg, temperatura 30–45 °C (validación suave).
 - **RN-EC7 (permiso):** requiere `manage_medical_history`.
 - **RN-EC8 (auditoría):** `CREATE` en `medical_records`; el envío por email registra `EXPORT`.

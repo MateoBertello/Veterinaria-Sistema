@@ -14,10 +14,17 @@ import { PlanVacunacionTimeline } from "../components/vacunacion/PlanVacunacionT
 import { ProgramarDosisDialog } from "../components/vacunacion/ProgramarDosisDialog.tsx";
 import { MarcarAplicadaDialog } from "../components/vacunacion/MarcarAplicadaDialog.tsx";
 import { exportarHistorial, listarHistorial, resumenClinico, type FormatoExport } from "../api/historial-clinico.ts";
-import { listarPlanVacunacion } from "../api/vacunacion.ts";
-import { listarTiposVacuna, type TipoVacuna } from "../api/catalogos.ts";
+import { listarPlanVacunacion, listarTiposVacunaAplicables } from "../api/vacunacion.ts";
 import { calcularRefuerzoSugerido, type RefuerzoSugerido } from "../lib/vacunacion.ts";
-import { ApiError, ErrorCode, type HistorialItem, type ResumenClinico, type ApiMeta, type DosisVacunacion } from "../types/index.ts";
+import {
+  ApiError,
+  ErrorCode,
+  type ApiMeta,
+  type DosisVacunacion,
+  type HistorialItem,
+  type ResumenClinico,
+  type TipoVacunaAplicable,
+} from "../types/index.ts";
 
 const PAGE_SIZE = 20;
 
@@ -63,7 +70,7 @@ export function HistorialClinicoPage() {
   const [dosisPage, setDosisPage] = useState(1);
   const [programarOpen, setProgramarOpen] = useState(false);
   const [dosisParaAplicar, setDosisParaAplicar] = useState<DosisVacunacion | null>(null);
-  const [tiposVacuna, setTiposVacuna] = useState<TipoVacuna[]>([]);
+  const [tiposVacuna, setTiposVacuna] = useState<TipoVacunaAplicable[]>([]);
   const [refuerzo, setRefuerzo] = useState<RefuerzoSugerido | null>(null);
 
   const cargarResumen = useCallback(async () => {
@@ -114,15 +121,19 @@ export function HistorialClinicoPage() {
     void cargarPlanVacunacion();
   }, [activeTab, cargarPlanVacunacion]);
 
-  // Catálogo global de tipos de vacuna: una sola carga al entrar a la pestaña, y
-  // queda en memoria. Lo consumen el diálogo de programar y el refuerzo sugerido
-  // (RN-PV10), que así no dispara un fetch por dosis aplicada.
+  // Vacunas aplicables A ESTA MASCOTA (RN-PV11): una sola carga al entrar a la
+  // pestaña, y queda en memoria. Las consumen el diálogo de programar y el
+  // refuerzo sugerido (RN-PV10), que así no dispara un fetch por dosis aplicada.
+  //
+  // Antes esto pedía el catálogo entero y por eso el combo ofrecía vacunas de
+  // otra especie. Ahora la especie la resuelve el backend, así que la lista
+  // depende de `mascotaId`: si cambia, se vuelve a pedir.
   useEffect(() => {
-    if (activeTab !== "vacunacion" || tiposVacuna.length > 0) return;
-    listarTiposVacuna()
+    if (activeTab !== "vacunacion" || !mascotaId) return;
+    listarTiposVacunaAplicables(mascotaId)
       .then(setTiposVacuna)
       .catch(() => setTiposVacuna([]));
-  }, [activeTab, tiposVacuna.length]);
+  }, [activeTab, mascotaId]);
 
   /**
    * RN-PV10: al aplicar una dosis se propone el refuerzo siguiente, nunca se crea
@@ -181,7 +192,7 @@ export function HistorialClinicoPage() {
             <div className="space-y-1">
               <p className="text-lg font-medium">{resumen.name}</p>
               <p className="text-sm text-muted-foreground">
-                {resumen.especieName ?? "—"}{resumen.razaName ? ` · ${resumen.razaName}` : ""} · Dueño: {resumen.ownerName ?? "—"}
+                {resumen.especieName ?? "—"}{resumen.razaName ? ` · ${resumen.razaName}` : ""} · Tutor: {resumen.ownerName ?? "—"}
               </p>
             </div>
             <div className="ml-auto flex items-center gap-2">

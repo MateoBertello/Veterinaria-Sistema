@@ -121,12 +121,12 @@ function renderEditPage(estadia?: Estadia) {
 }
 
 async function elegirCliente(cliente: Cliente) {
-  await userEvent.click(screen.getByRole("combobox", { name: "Dueño" }));
+  await userEvent.click(screen.getByRole("combobox", { name: "Tutor" }));
   await userEvent.click(await screen.findByText(cliente.fullName));
 }
 
 async function elegirMascota(mascota: Mascota) {
-  await userEvent.click(await screen.findByRole("combobox", { name: "Mascota" }));
+  await userEvent.click(await screen.findByRole("combobox", { name: "Huésped" }));
   await userEvent.click(await screen.findByRole("option", { name: mascota.name }));
 }
 
@@ -165,7 +165,7 @@ describe("RegistrarEstadiaPage", () => {
     renderPage();
     await elegirCliente(cliente);
 
-    expect(await screen.findByText("Este cliente no tiene mascotas activas.")).toBeInTheDocument();
+    expect(await screen.findByText("Este cliente no tiene huéspedes activos.")).toBeInTheDocument();
   });
 
   it("al elegir mascota muestra la tarjeta con tamaño y dieta", async () => {
@@ -345,8 +345,8 @@ describe("RegistrarEstadiaPage", () => {
       expect(screen.getByLabelText("Motivo *")).toHaveValue("Vacaciones");
       expect(screen.getByLabelText("Notas")).toHaveValue("Traer su manta");
       // No se puede cambiar cliente/mascota: no hay combobox/select para eso.
-      expect(screen.queryByRole("combobox", { name: "Dueño" })).not.toBeInTheDocument();
-      expect(screen.queryByRole("combobox", { name: "Mascota" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("combobox", { name: "Tutor" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("combobox", { name: "Huésped" })).not.toBeInTheDocument();
     });
 
     it("envía el PUT con el payload esperado y navega a Ocupación", async () => {

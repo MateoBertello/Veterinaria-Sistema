@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import {
   Table,
+  TableScrollContainer,
   TableBody,
   TableCell,
   TableHead,
@@ -132,7 +133,7 @@ export function MascotasPage() {
             Mascotas
           </h1>
           <p className="text-sm text-muted-foreground">
-            Registro de mascotas. Alta, edición, cambio de dueño y fallecimiento.
+            Registro de mascotas. Alta, edición, cambio de tutor y fallecimiento.
           </p>
         </div>
         <Button onClick={abrirNueva}>
@@ -150,7 +151,7 @@ export function MascotasPage() {
           />
           <Input
             type="search"
-            placeholder="Buscar por nombre o dueño"
+            placeholder="Buscar por nombre o tutor"
             aria-label="Buscar mascotas"
             className="pl-9"
             value={searchInput}
@@ -211,12 +212,12 @@ export function MascotasPage() {
       </div>
 
       {/* Tabla */}
-      <div className="rounded-lg border">
-        <Table>
-          <TableHeader>
+      <TableScrollContainer aria-label="Listado de mascotas">
+        <Table containerClassName="overflow-visible">
+          <TableHeader className="sticky top-0 z-10">
             <TableRow className="bg-orange-50 hover:bg-orange-50">
               <TableHead>Nombre</TableHead>
-              <TableHead>Dueño</TableHead>
+              <TableHead>Tutor</TableHead>
               <TableHead>Especie</TableHead>
               <TableHead className="hidden md:table-cell">Raza</TableHead>
               <TableHead className="hidden lg:table-cell">Tamaño</TableHead>
@@ -247,8 +248,8 @@ export function MascotasPage() {
             ) : (
               mascotas.map((m) => (
                 <TableRow key={m.id}>
-                  <TableCell className="font-medium">{m.name}</TableCell>
-                  <TableCell>{m.ownerName ?? "—"}</TableCell>
+                  <TableCell className="whitespace-normal font-medium">{m.name}</TableCell>
+                  <TableCell className="whitespace-normal">{m.ownerName ?? "—"}</TableCell>
                   <TableCell>{m.especieName ?? "—"}</TableCell>
                   <TableCell className="hidden md:table-cell">{m.razaName ?? "—"}</TableCell>
                   <TableCell className="hidden lg:table-cell">{m.tamano}</TableCell>
@@ -292,13 +293,13 @@ export function MascotasPage() {
                               <Button
                                 variant="ghost"
                                 size="icon"
-                                aria-label={`Cambiar dueño de ${m.name}`}
+                                aria-label={`Cambiar tutor de ${m.name}`}
                                 onClick={() => setToChangeDueno(m)}
                               >
                                 <ArrowLeftRight className="size-4" aria-hidden />
                               </Button>
                             </TooltipTrigger>
-                            <TooltipContent>Cambiar dueño</TooltipContent>
+                            <TooltipContent>Cambiar tutor</TooltipContent>
                           </Tooltip>
 
                           <Tooltip>
@@ -324,7 +325,7 @@ export function MascotasPage() {
             )}
           </TableBody>
         </Table>
-      </div>
+      </TableScrollContainer>
 
       {/* Paginación */}
       {!loading && !error && mascotas.length > 0 ? (

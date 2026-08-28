@@ -121,7 +121,7 @@ export function RegistrarEstadiaPage() {
     listarMascotas({ clientId: cliente.id, estado: "Activa", limit: 100 })
       .then(({ items }) => setMascotas(items))
       .catch((err) => {
-        setErrorMascotas(err instanceof ApiError ? err.message : "No se pudieron cargar las mascotas");
+        setErrorMascotas(err instanceof ApiError ? err.message : "No se pudieron cargar los huéspedes");
       })
       .finally(() => setLoadingMascotas(false));
   }, [cliente, modoEdicion]);
@@ -231,7 +231,7 @@ export function RegistrarEstadiaPage() {
         </h1>
         <p className="text-sm text-muted-foreground">
           {modoEdicion
-            ? "Cliente y mascota no se pueden cambiar. Los campos marcados con * son obligatorios."
+            ? "Cliente y huésped no se pueden cambiar. Los campos marcados con * son obligatorios."
             : "Los campos marcados con * son obligatorios."}
         </p>
       </header>
@@ -281,7 +281,7 @@ export function RegistrarEstadiaPage() {
                   </div>
 
                   <div className="space-y-1.5">
-                    <Label>Mascota *</Label>
+                    <Label>Huésped *</Label>
                     {!cliente ? (
                       <p className="text-sm text-muted-foreground">Elegí primero un cliente.</p>
                     ) : loadingMascotas ? (
@@ -289,12 +289,12 @@ export function RegistrarEstadiaPage() {
                     ) : errorMascotas ? (
                       <p className="text-sm text-destructive">{errorMascotas}</p>
                     ) : mascotas.length === 0 ? (
-                      <p className="text-sm text-muted-foreground">Este cliente no tiene mascotas activas.</p>
+                      <p className="text-sm text-muted-foreground">Este cliente no tiene huéspedes activos.</p>
                     ) : (
                       <Controller
                         control={control}
                         name="petId"
-                        rules={{ required: "Elegí una mascota" }}
+                        rules={{ required: "Elegí un huésped" }}
                         render={({ field }) => (
                           <Select
                             value={field.value || undefined}
@@ -303,8 +303,8 @@ export function RegistrarEstadiaPage() {
                               setMascotaSeleccionada(mascotas.find((m) => m.id === value) ?? null);
                             }}
                           >
-                            <SelectTrigger aria-label="Mascota">
-                              <SelectValue placeholder="Seleccionar mascota..." />
+                            <SelectTrigger aria-label="Huésped">
+                              <SelectValue placeholder="Seleccionar huésped..." />
                             </SelectTrigger>
                             <SelectContent>
                               {mascotas.map((m) => (

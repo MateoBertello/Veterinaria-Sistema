@@ -65,14 +65,14 @@ test("cambio de dueño de una mascota nueva (no toca los fixtures fijos del seed
   await expect(page.getByText("Mascota registrada")).toBeVisible();
 
   const fila = page.getByRole("row", { name: new RegExp(nombreMascota) });
-  await fila.getByRole("button", { name: `Cambiar dueño de ${nombreMascota}` }).click();
+  await fila.getByRole("button", { name: `Cambiar tutor de ${nombreMascota}` }).click();
 
   await page.getByRole("combobox").filter({ hasText: "Buscar nuevo dueño..." }).click();
   await page.getByPlaceholder("Buscar por nombre o DNI...").fill(SEED.clientes.carlos.nombre);
   await page.getByRole("option", { name: new RegExp(SEED.clientes.carlos.nombre) }).click();
   await page.getByRole("button", { name: "Confirmar cambio" }).click();
 
-  await expect(page.getByText("Dueño cambiado correctamente")).toBeVisible();
+  await expect(page.getByText("Tutor cambiado correctamente")).toBeVisible();
   await expect(page.getByRole("row", { name: new RegExp(nombreMascota) })).toContainText(SEED.clientes.carlos.nombre);
 });
 

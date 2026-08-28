@@ -50,21 +50,21 @@ export function HistorialClinicoIndexPage() {
           Historial Clínico
         </h1>
         <p className="text-sm text-muted-foreground">
-          Elegí un dueño y una mascota para consultar su historial clínico.
+          Elegí un tutor y una mascota para consultar su historial clínico.
         </p>
       </header>
 
       <Card>
         <CardContent className="space-y-4 pt-6">
           <div className="space-y-1.5">
-            <p className="text-sm font-medium">Dueño</p>
+            <p className="text-sm font-medium">Tutor</p>
             <ClienteCombobox value={cliente} onChange={setCliente} />
           </div>
 
           <div className="space-y-1.5">
             <p className="text-sm font-medium">Mascota</p>
             {!cliente ? (
-              <p className="text-sm text-muted-foreground">Elegí primero un dueño.</p>
+              <p className="text-sm text-muted-foreground">Elegí primero un tutor.</p>
             ) : loading ? (
               <Skeleton className="h-9 w-full max-w-sm" />
             ) : error ? (

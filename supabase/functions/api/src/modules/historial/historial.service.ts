@@ -466,8 +466,8 @@ export class HistorialService {
       .select(
         `id, name, estado,
          cliente:clientes!client_id(full_name),
-         especie:especies!especie_id(name),
-         raza:razas!raza_id(name)`,
+         especie:especies!mascotas_especie_tenant_fkey(name),
+         raza:razas!mascotas_raza_tenant_fkey(name)`,
       )
       .eq("id", petId)
       .eq("tenant_id", tenantId)
@@ -1021,7 +1021,7 @@ export class HistorialService {
     const { data: mascota } = await db
       .from("mascotas")
       .select(
-        "id, name, especie:especies!especie_id(name), raza:razas!raza_id(name), cliente:clientes!client_id(full_name)",
+        "id, name, especie:especies!mascotas_especie_tenant_fkey(name), raza:razas!mascotas_raza_tenant_fkey(name), cliente:clientes!client_id(full_name)",
       )
       .eq("id", petId)
       .eq("tenant_id", ctx.tenantId)

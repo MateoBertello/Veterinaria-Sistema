@@ -41,9 +41,14 @@ export function fechaEnDias(n: number): string {
  * que dejó una corrida anterior en el mismo día calendario (la stack local no
  * se resetea entre corridas — RN-TU4/DUPLICATE_APPOINTMENT no distingue turnos
  * ya Completados de uno nuevo en el mismo horario para la misma mascota).
+ * Suma además un jitter aleatorio: desde que el proyecto `mobile-chromium`
+ * corre el mismo spec en paralelo al de desktop (Etapa cobertura mobile), dos
+ * llamadas en la MISMA corrida pueden pedir la fecha con milisegundos muy
+ * cercanos y caer en el mismo resto módulo 500 por coincidencia — el jitter
+ * hace esa colisión entre proyectos concurrentes improbable.
  */
 export function fechaUnica(offsetBase: number): string {
-  return fechaEnDias(offsetBase + (Date.now() % 500));
+  return fechaEnDias(offsetBase + (Date.now() % 500) + Math.floor(Math.random() * 500));
 }
 
 /** Suma N días a una fecha YYYY-MM-DD y devuelve YYYY-MM-DD. */

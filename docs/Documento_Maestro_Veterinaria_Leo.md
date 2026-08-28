@@ -9,7 +9,7 @@
 ## Índice
 
 0. **Preámbulo arquitectónico** — modelo de negocio SaaS, arquitectura REST+MVC, convenciones, reglas transversales.  
-1. **Módulo Core Cliente-Mascota** — Registrar/Editar Cliente · Eliminar Cliente · Registrar/Editar Mascota · Cambiar Dueño · Marcar Fallecida.  
+1. **Módulo Core Cliente-Mascota** — Registrar/Editar Cliente · Eliminar Cliente · Registrar/Editar Mascota · Cambiar Tutor · Marcar Fallecida.  
 2. **Módulos Transversales**  
    - 2.1 Seguridad — Registrar/Editar Usuario · Autenticación · Recuperar Usuario/Contraseña.  
    - 2.2 Horarios de Atención — Gestionar Horarios de Profesional.  
@@ -231,7 +231,7 @@ Cliente (React)  ──HTTP──▶  Controller  ──▶  Service  ──▶ 
 
 - Dar de alta una mascota con: nombre, cliente asociado, especie, raza (opcional), sexo, fecha de nacimiento y color/observaciones.  
 - Calcular y mostrar la **edad** automáticamente a partir de la fecha de nacimiento.  
-- Editar la mascota; listar y buscar por nombre, especie, raza o dueño.  
+- Editar la mascota; listar y buscar por nombre, especie, raza o tutor.  
 - Filtros avanzados por especie, estado (activa/fallecida) y rango etario.  
 - Exportar a Excel y PDF.
 
@@ -291,7 +291,7 @@ Cliente (React)  ──HTTP──▶  Controller  ──▶  Service  ──▶ 
 
 ---
 
-## Caso de Uso: Cambiar Dueño de Mascota
+## Caso de Uso: Cambiar Tutor de Mascota
 
 ### A. Requisitos Funcionales y No Funcionales
 
@@ -302,29 +302,29 @@ Cliente (React)  ──HTTP──▶  Controller  ──▶  Service  ──▶ 
 
 **No Funcionales**
 
-- **RN-CD1 (cliente distinto):** el nuevo dueño debe ser diferente del actual; en caso contrario `422 SAME_OWNER`.  
-- **RN-CD2 (trazabilidad):** cada cambio crea un registro `CambioPropietario` con dueño anterior, dueño nuevo, fecha, motivo, notas y usuario responsable.  
-- **RN-CD3 (preservación clínica):** los registros del Historial Clínico ya creados conservan el "dueño vigente al momento" (`clientNameAtTime`); el cambio de dueño **no reescribe** la propiedad histórica.  
+- **RN-CD1 (cliente distinto):** el nuevo tutor debe ser diferente del actual; en caso contrario `422 SAME_OWNER`.  
+- **RN-CD2 (trazabilidad):** cada cambio crea un registro `CambioPropietario` con tutor anterior, tutor nuevo, fecha, motivo, notas y usuario responsable.  
+- **RN-CD3 (preservación clínica):** los registros del Historial Clínico ya creados conservan el "tutor vigente al momento" (`clientNameAtTime`); el cambio de tutor **no reescribe** la propiedad histórica.  
 - **RN-CD4 (mascota activa):** sólo se puede transferir una mascota no fallecida y no eliminada.  
 - **RN-CD5 (auditoría):** registra `UPDATE` en módulo `pets` con detalle del cambio.
 
 ### B. Ficha de Caso de Uso
 
 - **Actor principal:** Recepcionista / Administrador (permiso `manage_pets`).  
-- **Disparador:** el actor pulsa el ícono *Cambiar dueño* en una fila de mascota.  
+- **Disparador:** el actor pulsa el ícono *Cambiar tutor* en una fila de mascota.  
 - **Precondiciones:** mascota activa; existe al menos otro cliente.
 
 **Flujo normal**
 
-1. El actor abre el diálogo "Cambiar Dueño"; el sistema muestra el dueño actual.  
-2. Selecciona el nuevo dueño y, opcionalmente, motivo/notas.  
+1. El actor abre el diálogo "Cambiar Tutor"; el sistema muestra el tutor actual.  
+2. Selecciona el nuevo tutor y, opcionalmente, motivo/notas.  
 3. Confirma.  
 4. El backend valida que sea distinto (RN-CD1), actualiza `clientId`, anexa el `CambioPropietario` y audita.  
-5. *Toast* de éxito; la tabla refleja el nuevo dueño y un ícono de historial.
+5. *Toast* de éxito; la tabla refleja el nuevo tutor y un ícono de historial.
 
 **Flujos alternativos y excepciones**
 
-- **2a.** Selecciona el mismo dueño → `422 SAME_OWNER`.  
+- **2a.** Selecciona el mismo tutor → `422 SAME_OWNER`.  
 - **Consulta de historial:** el actor pulsa el ícono de historial y ve la línea de tiempo de transferencias.
 
 ### C. Métodos y Gestores Propuestos
@@ -343,7 +343,7 @@ Cliente (React)  ──HTTP──▶  Controller  ──▶  Service  ──▶ 
 
 **Vista / DTO — respuesta**
 
-{ "success": true, "data": { "petId": "uuid", "previousClientName": "Carlos Fernández", "newClientName": "Ana Martínez", "changeDate": "2026-06-04T12:00:00Z" }, "message": "Dueño actualizado" }
+{ "success": true, "data": { "petId": "uuid", "previousClientName": "Carlos Fernández", "newClientName": "Ana Martínez", "changeDate": "2026-06-04T12:00:00Z" }, "message": "Tutor actualizado" }
 
 ---
 
@@ -726,13 +726,13 @@ Conjunto de módulos incluidos en toda suscripción que dan soporte a los módul
 - Seleccionar paciente mediante selects encadenados Cliente → Mascota.  
 - Mostrar un resumen del paciente (especie, raza, sexo, último peso y estado).  
 - Listar los registros clínicos ordenados del más reciente al más antiguo.  
-- Ver el detalle completo de un registro (signos vitales, diagnóstico, tratamiento, medicación, adjuntos, dueño vigente al momento).
+- Ver el detalle completo de un registro (signos vitales, diagnóstico, tratamiento, medicación, adjuntos, tutor vigente al momento).
 
 **No Funcionales**
 
 - **RN-HC1 (orden cronológico):** los registros se devuelven ordenados por fecha descendente.  
 - **RN-HC2 (último peso derivado):** el resumen calcula el último peso a partir del registro clínico más reciente que lo contenga.  
-- **RN-HC3 (dueño histórico):** cada registro muestra `clientNameAtTime` (dueño vigente al momento del registro); si difiere del dueño actual, se marca como "previo" (vínculo con RN-CD3).  
+- **RN-HC3 (tutor histórico):** cada registro muestra `clientNameAtTime` (tutor vigente al momento del registro); si difiere del tutor actual, se marca como "previo" (vínculo con RN-CD3).  
 - **RN-HC4 (permiso de lectura):** requiere `view_medical_history`.  
 - **RN-HC5 (rendimiento):** historial paginado por mascota con índice sobre `(pet_id, date)`.  
 - **UX:** vista de tabla con badges de color por tipo de evento; acceso al detalle en un clic (ícono ojo) que abre modal.
@@ -788,7 +788,7 @@ Conjunto de módulos incluidos en toda suscripción que dan soporte a los módul
 - **RN-EC2 (peso en historial):** el peso se registra aquí (RN-MA3) y alimenta el seguimiento evolutivo y el "último peso".  
 - **RN-EC3 (mascota viva):** no se permiten registros en mascotas fallecidas → `422 PET_DECEASED` (vínculo RN-MF2).  
 - **RN-EC4 (adjuntos):** tipos permitidos JPG/PNG/GIF/PDF; tamaño máximo 10 MB por archivo; se rechazan otros tipos.  
-- **RN-EC5 (dueño vigente):** al crear, se persiste `clientIdAtTime`/`clientNameAtTime` con el dueño actual (RN-HC3/RN-CD3).  
+- **RN-EC5 (tutor vigente):** al crear, se persiste `clientIdAtTime`/`clientNameAtTime` con el tutor actual (RN-HC3/RN-CD3).  
 - **RN-EC6 (rangos clínicos):** temperatura y peso aceptan rangos plausibles (p. ej. peso 0–200 kg, temperatura 30–45 °C) con validación suave.  
 - **RN-EC7 (permiso de gestión):** requiere `manage_medical_history`.  
 - **RN-EC8 (auditoría):** `CREATE` en módulo `medical_records`; el envío por email registra `EXPORT`.  

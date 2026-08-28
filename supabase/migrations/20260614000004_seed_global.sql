@@ -2,6 +2,15 @@
 -- MIGRACIÓN 004: Seed Global (Nivel 1) — Idempotente
 -- Se puede ejecutar múltiples veces sin duplicar datos.
 -- =====================================================================
+-- Acá solo queda lo REALMENTE global: `permisos`, que define el sistema y
+-- referencia `rol_permiso`.
+--
+-- El catálogo clínico (especies, razas, tipos de vacuna) vivía acá y se movió a
+-- `seed_catalogos_tenant()`, que corre por clínica desde `on_tenant_created`
+-- (ver 20260827000001_catalogos_por_tenant.sql): esas tres tablas dejaron de ser
+-- globales y hoy llevan `tenant_id NOT NULL`, así que un INSERT sin tenant acá
+-- ni siquiera compilaría.
+-- =====================================================================
 
 -- =====================================================================
 -- PERMISOS DEL SISTEMA
@@ -19,54 +28,3 @@ INSERT INTO permisos (name, display_name, module) VALUES
   ('manage_services',         'Gestionar servicios',       'services'),
   ('manage_tenant_settings',  'Configurar la clínica',     'system')
 ON CONFLICT (name) DO NOTHING;
-
--- =====================================================================
--- CATÁLOGO DE ESPECIES
--- =====================================================================
-INSERT INTO especies (name, description) VALUES
-  ('Perro',   'Canino doméstico'),
-  ('Gato',    'Felino doméstico'),
-  ('Ave',     'Aves de compañía'),
-  ('Conejo',  'Lagomorfo doméstico'),
-  ('Roedor',  'Hámster, cobayo, etc.'),
-  ('Reptil',  'Tortugas, iguanas, etc.'),
-  ('Otro',    'Otras especies')
-ON CONFLICT (name) DO NOTHING;
-
--- =====================================================================
--- CATÁLOGO DE RAZAS
--- =====================================================================
-INSERT INTO razas (especie_id, name)
-SELECT e.id, r.name
-FROM especies e
-JOIN (VALUES
-  ('Perro',  'Mestizo'),
-  ('Perro',  'Labrador Retriever'),
-  ('Perro',  'Caniche'),
-  ('Perro',  'Bulldog Francés'),
-  ('Perro',  'Ovejero Alemán'),
-  ('Perro',  'Golden Retriever'),
-  ('Gato',   'Mestizo'),
-  ('Gato',   'Siamés'),
-  ('Gato',   'Persa'),
-  ('Gato',   'Maine Coon'),
-  ('Ave',    'Canario'),
-  ('Ave',    'Loro'),
-  ('Conejo', 'Enano Holandés'),
-  ('Roedor', 'Hámster Sirio')
-) AS r(especie, name) ON r.especie = e.name
-ON CONFLICT (especie_id, name) DO NOTHING;
-
--- =====================================================================
--- CATÁLOGO DE TIPOS DE VACUNA
--- =====================================================================
-INSERT INTO tipos_vacuna (nombre, especie_aplicable, meses_refuerzo_sugerido) VALUES
-  ('Antirrábica',                        NULL,     12),
-  ('Quíntuple Canina',                   'Perro',  12),
-  ('Séxtuple Canina',                    'Perro',  12),
-  ('Bordetella (Tos de las perreras)',   'Perro',  12),
-  ('Giardia',                            'Perro',  12),
-  ('Triple Felina',                      'Gato',   12),
-  ('Leucemia Felina',                    'Gato',   12),
-  ('Mixomatosis',                        'Conejo',  6)
-ON CONFLICT (nombre) DO NOTHING;

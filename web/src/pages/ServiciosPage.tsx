@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Check, Minus as MinusIcon, Pencil, Plus, Power, Search, Wrench } from "lucide-react";
 import {
   Table,
+  TableScrollContainer,
   TableBody,
   TableCell,
   TableHead,
@@ -187,9 +188,9 @@ export function ServiciosPage() {
       </div>
 
       {/* Tabla */}
-      <div className="rounded-lg border">
-        <Table>
-          <TableHeader>
+      <TableScrollContainer aria-label="Listado de servicios">
+        <Table containerClassName="overflow-visible">
+          <TableHeader className="sticky top-0 z-10">
             <TableRow className="bg-orange-50 hover:bg-orange-50">
               <TableHead>Nombre</TableHead>
               <TableHead>Tipo</TableHead>
@@ -222,7 +223,7 @@ export function ServiciosPage() {
             ) : (
               servicios.map((s) => (
                 <TableRow key={s.id}>
-                  <TableCell className="font-medium">{s.nombre}</TableCell>
+                  <TableCell className="whitespace-normal font-medium">{s.nombre}</TableCell>
                   <TableCell>
                     <Badge className={TIPO_BADGE_CLASS[s.tipo]}>{TIPO_LABEL[s.tipo]}</Badge>
                   </TableCell>
@@ -275,7 +276,7 @@ export function ServiciosPage() {
             )}
           </TableBody>
         </Table>
-      </div>
+      </TableScrollContainer>
 
       {/* Paginación */}
       {!loading && !error && servicios.length > 0 ? (

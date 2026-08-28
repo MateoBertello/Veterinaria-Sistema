@@ -42,9 +42,39 @@ function ymd(offsetDays: number): string {
   return d.toISOString().slice(0, 10);
 }
 
-const mascotaActiva   = { id: PET_ID, estado: "Activa" };
-const mascotaFallecida = { id: PET_ID, estado: "Fallecida" };
-const tipoVacunaRow   = { id: TIPO_VAC_ID, nombre: "Antirrábica" };
+const ESPECIE_ID  = "88888888-8888-4888-8888-888888888888";
+const OTRO_TIPO_ID = "99999999-9999-4999-8999-999999999999";
+
+/**
+ * Fila de mascota tal como la devuelve `MASCOTA_CON_VACUNAS_APLICABLES`: la
+ * especie embebida, y colgando de ella las vacunas asociadas a esa especie
+ * (RN-PV11). Es la forma que consume `programarDosis`, así que los fixtures la
+ * replican en vez de simplificarla — si el Service dejara de leer el embed, los
+ * tests tienen que notarlo.
+ */
+function tipoAplicable(over: Record<string, unknown> = {}) {
+  return { id: TIPO_VAC_ID, nombre: "Antirrábica", meses_refuerzo_sugerido: 12, active: true, ...over };
+}
+
+function mascotaRow(
+  estado = "Activa",
+  tipos: Array<Record<string, unknown>> = [tipoAplicable()],
+) {
+  return {
+    id:         PET_ID,
+    estado,
+    especie_id: ESPECIE_ID,
+    especie: {
+      id:   ESPECIE_ID,
+      name: "Perro",
+      aplicables: tipos.map((t) => ({ tipo: t })),
+    },
+  };
+}
+
+const mascotaActiva    = mascotaRow("Activa");
+const mascotaFallecida = mascotaRow("Fallecida");
+const tipoVacunaRow    = { id: TIPO_VAC_ID, nombre: "Antirrábica" };
 
 function dosisRow(over: Record<string, unknown> = {}) {
   return {
@@ -214,10 +244,12 @@ describe("VacunacionService.programarDosis", () => {
   });
 
   it("RN-PV3: tipoVacunaId inexistente → VACCINE_TYPE_NOT_FOUND (422)", async () => {
+    // La mascota no tiene ninguna vacuna aplicable y el id pedido tampoco está
+    // en `tipos_vacuna`: el rechazo es "no está en el catálogo", no "no aplica".
     const db = buildMockDb({
       singleResults: [
-        { data: mascotaActiva, error: null },
-        { data: null, error: null },           // tipos_vacuna no encontrado
+        { data: mascotaRow("Activa", []), error: null },
+        { data: null, error: null },           // tipos_vacuna: no existe
       ],
     });
     mockGetServiceDb.mockReturnValue(db as never);
@@ -227,12 +259,84 @@ describe("VacunacionService.programarDosis", () => {
     ).rejects.toMatchObject({ code: ErrorCode.VACCINE_TYPE_NOT_FOUND, statusCode: 422 });
   });
 
-  it("RN-PV9: éxito → recordAudit llamado con action=CREATE, module=medical_records", async () => {
-    const inserted = dosisRow({ fecha_estimada: ymd(10) });
+  it("RN-PV11: vacuna que existe pero no aplica a la especie → VACCINE_NOT_APPLICABLE_TO_SPECIES (422)", async () => {
+    // El perro solo tiene asociada OTRA vacuna; la pedida existe y está activa
+    // en el catálogo de la clínica, pero es de otra especie.
+    const db = buildMockDb({
+      singleResults: [
+        { data: mascotaRow("Activa", [tipoAplicable({ id: OTRO_TIPO_ID, nombre: "Quíntuple Canina" })]), error: null },
+        { data: { nombre: "Triple Felina" }, error: null },  // tipos_vacuna: sí existe
+      ],
+    });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    await expect(
+      VacunacionService.programarDosis(PET_ID, dtoValido, ctx),
+    ).rejects.toMatchObject({
+      code:       ErrorCode.VACCINE_NOT_APPLICABLE_TO_SPECIES,
+      statusCode: 422,
+    });
+  });
+
+  it("RN-PV11: el mensaje nombra la vacuna y la especie, para que se sepa qué asociar", async () => {
+    const db = buildMockDb({
+      singleResults: [
+        { data: mascotaRow("Activa", []), error: null },
+        { data: { nombre: "Triple Felina" }, error: null },
+      ],
+    });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    await expect(
+      VacunacionService.programarDosis(PET_ID, dtoValido, ctx),
+    ).rejects.toMatchObject({ message: expect.stringContaining("Triple Felina") });
+  });
+
+  it("RN-PV11: una vacuna asociada pero DADA DE BAJA no se puede programar", async () => {
+    // `active: false` la saca de las aplicables (RN-CAT9: sigue visible donde ya
+    // está referenciada, pero no se elige en altas nuevas). Como sí está en el
+    // catálogo, el rechazo lo da la desambiguación con el filtro `active=true`,
+    // que tampoco la encuentra → VACCINE_TYPE_NOT_FOUND.
+    const db = buildMockDb({
+      singleResults: [
+        { data: mascotaRow("Activa", [tipoAplicable({ active: false })]), error: null },
+        { data: null, error: null },
+      ],
+    });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    await expect(
+      VacunacionService.programarDosis(PET_ID, dtoValido, ctx),
+    ).rejects.toMatchObject({ code: ErrorCode.VACCINE_TYPE_NOT_FOUND, statusCode: 422 });
+  });
+
+  it("RN-PV11: el happy path resuelve la aplicabilidad SIN una segunda consulta", async () => {
+    // El costo de la regla nueva es cero viajes extra: la lista de aplicables ya
+    // vino con la mascota. Si alguien volviera a leer `tipos_vacuna` acá, la
+    // cola de mocks se desalinearía y el INSERT recibiría el resultado
+    // equivocado — por eso se cuenta `from("tipos_vacuna")` explícitamente.
     const db = buildMockDb({
       singleResults: [
         { data: mascotaActiva, error: null },
-        { data: tipoVacunaRow, error: null },
+        { data: dosisRow({ fecha_estimada: ymd(10) }), error: null },
+      ],
+    });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    await VacunacionService.programarDosis(PET_ID, dtoValido, ctx);
+
+    const tablas = db.from.mock.calls.map((c: unknown[]) => c[0]);
+    expect(tablas).not.toContain("tipos_vacuna");
+    expect(tablas).toContain("mascotas");
+  });
+
+  it("RN-PV9: éxito → recordAudit llamado con action=CREATE, module=medical_records", async () => {
+    const inserted = dosisRow({ fecha_estimada: ymd(10) });
+    // Dos pasos, no tres: la mascota y su catálogo aplicable vienen en la MISMA
+    // consulta, así que después del INSERT no hay lectura de `tipos_vacuna`.
+    const db = buildMockDb({
+      singleResults: [
+        { data: mascotaActiva, error: null },
         { data: inserted, error: null },
       ],
     });
@@ -252,7 +356,6 @@ describe("VacunacionService.programarDosis", () => {
     const db = buildMockDb({
       singleResults: [
         { data: mascotaActiva, error: null },
-        { data: tipoVacunaRow, error: null },
         { data: inserted, error: null },
       ],
     });
@@ -263,6 +366,100 @@ describe("VacunacionService.programarDosis", () => {
     expect(dosis.estadoVisual).toBe("Proxima");
     expect(dosis.tipoVacunaNombre).toBe("Antirrábica");
     expect(dosis.estado).toBe("Pendiente");
+  });
+});
+
+// ─── tiposVacunaAplicables ────────────────────────────────────────────────────
+
+describe("VacunacionService.tiposVacunaAplicables (RN-PV11)", () => {
+  it("devuelve solo las vacunas asociadas a la especie de la mascota", async () => {
+    const db = buildMockDb({
+      singleResults: [{
+        data: mascotaRow("Activa", [
+          tipoAplicable({ id: TIPO_VAC_ID,  nombre: "Antirrábica" }),
+          tipoAplicable({ id: OTRO_TIPO_ID, nombre: "Quíntuple Canina", meses_refuerzo_sugerido: null }),
+        ]),
+        error: null,
+      }],
+    });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    const items = await VacunacionService.tiposVacunaAplicables(PET_ID, TENANT_ID);
+
+    expect(items).toEqual([
+      { id: TIPO_VAC_ID,  nombre: "Antirrábica",      mesesRefuerzoSugerido: 12 },
+      { id: OTRO_TIPO_ID, nombre: "Quíntuple Canina", mesesRefuerzoSugerido: null },
+    ]);
+  });
+
+  it("RN-CAT9: una vacuna dada de baja no se ofrece aunque esté asociada", async () => {
+    const db = buildMockDb({
+      singleResults: [{
+        data: mascotaRow("Activa", [
+          tipoAplicable({ id: TIPO_VAC_ID,  nombre: "Antirrábica" }),
+          tipoAplicable({ id: OTRO_TIPO_ID, nombre: "Vieja", active: false }),
+        ]),
+        error: null,
+      }],
+    });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    const items = await VacunacionService.tiposVacunaAplicables(PET_ID, TENANT_ID);
+    expect(items.map((t) => t.id)).toEqual([TIPO_VAC_ID]);
+  });
+
+  it("ordena por nombre: el combo no baila entre recargas", async () => {
+    const db = buildMockDb({
+      singleResults: [{
+        data: mascotaRow("Activa", [
+          tipoAplicable({ id: OTRO_TIPO_ID, nombre: "Zoonosis" }),
+          tipoAplicable({ id: TIPO_VAC_ID,  nombre: "Antirrábica" }),
+        ]),
+        error: null,
+      }],
+    });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    const items = await VacunacionService.tiposVacunaAplicables(PET_ID, TENANT_ID);
+    expect(items.map((t) => t.nombre)).toEqual(["Antirrábica", "Zoonosis"]);
+  });
+
+  it("una especie sin vacunas asociadas devuelve lista vacía, no error", async () => {
+    const db = buildMockDb({
+      singleResults: [{ data: mascotaRow("Activa", []), error: null }],
+    });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    await expect(VacunacionService.tiposVacunaAplicables(PET_ID, TENANT_ID)).resolves.toEqual([]);
+  });
+
+  it("mascota de otro tenant (o inexistente) → MASCOTA_NOT_FOUND (404)", async () => {
+    const db = buildMockDb({ singleResults: [{ data: null, error: null }] });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    await expect(
+      VacunacionService.tiposVacunaAplicables(PET_ID, TENANT_ID),
+    ).rejects.toMatchObject({ code: ErrorCode.MASCOTA_NOT_FOUND, statusCode: 404 });
+  });
+
+  it("resuelve todo en UNA consulta a mascotas", async () => {
+    const db = buildMockDb({ singleResults: [{ data: mascotaActiva, error: null }] });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    await VacunacionService.tiposVacunaAplicables(PET_ID, TENANT_ID);
+
+    expect(db.from).toHaveBeenCalledTimes(1);
+    expect(db.from).toHaveBeenCalledWith("mascotas");
+  });
+
+  it("RN-CAT1: filtra por el tenant del JWT, no por el de la mascota pedida", async () => {
+    const db = buildMockDb({ singleResults: [{ data: mascotaActiva, error: null }] });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    await VacunacionService.tiposVacunaAplicables(PET_ID, TENANT_ID);
+
+    // Corre con service role: sin este .eq() no habría aislamiento ninguno.
+    expect(db.builder["eq"]).toHaveBeenCalledWith("tenant_id", TENANT_ID);
   });
 });
 

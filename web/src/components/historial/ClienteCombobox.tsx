@@ -44,10 +44,10 @@ export function ClienteCombobox({ value, onChange }: Props) {
           variant="outline"
           role="combobox"
           aria-expanded={open}
-          aria-label="Dueño"
+          aria-label="Tutor"
           className={cn("w-full max-w-sm justify-between font-normal", !value && "text-muted-foreground")}
         >
-          {value?.fullName ?? "Buscar dueño..."}
+          {value?.fullName ?? "Buscar tutor..."}
           <ChevronsUpDown className="ml-2 size-4 shrink-0 opacity-50" aria-hidden />
         </Button>
       </PopoverTrigger>

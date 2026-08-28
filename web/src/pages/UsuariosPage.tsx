@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Pencil, Plus, Power, Users } from "lucide-react";
 import {
   Table,
+  TableScrollContainer,
   TableBody,
   TableCell,
   TableHead,
@@ -100,9 +101,9 @@ export function UsuariosPage() {
       </header>
 
       {/* Tabla */}
-      <div className="rounded-lg border">
-        <Table>
-          <TableHeader>
+      <TableScrollContainer aria-label="Listado de usuarios">
+        <Table containerClassName="overflow-visible">
+          <TableHeader className="sticky top-0 z-10">
             <TableRow className="bg-orange-50 hover:bg-orange-50">
               <TableHead>Usuario</TableHead>
               <TableHead>Nombre completo</TableHead>
@@ -133,9 +134,9 @@ export function UsuariosPage() {
             ) : (
               usuarios.map((u) => (
                 <TableRow key={u.id} className={u.active ? undefined : "opacity-70"}>
-                  <TableCell className="font-medium">{u.username}</TableCell>
-                  <TableCell>{u.fullName}</TableCell>
-                  <TableCell className="hidden md:table-cell text-muted-foreground">{u.email}</TableCell>
+                  <TableCell className="whitespace-normal font-medium">{u.username}</TableCell>
+                  <TableCell className="whitespace-normal">{u.fullName}</TableCell>
+                  <TableCell className="hidden whitespace-normal md:table-cell text-muted-foreground">{u.email}</TableCell>
                   <TableCell>
                     <RolBadge usuario={u} rol={rolesById.get(u.rolId)} />
                   </TableCell>
@@ -178,7 +179,7 @@ export function UsuariosPage() {
             )}
           </TableBody>
         </Table>
-      </div>
+      </TableScrollContainer>
 
       {/* Paginación */}
       {!loading && !error && usuarios.length > 0 ? (

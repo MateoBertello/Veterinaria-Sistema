@@ -30,7 +30,7 @@ import {
   SERVICE_ROLE_KEY,
   describeIntegration,
 } from "./_env.ts";
-import { crearUsuarioAuth, limpiarTenant } from "./_teardown.ts";
+import { crearUsuarioAuth, limpiarTenant, catalogoDelTenant } from "./_teardown.ts";
 
 // deno-lint-ignore no-explicit-any
 globalThis.WebSocket = class FakeWebSocket {} as any;
@@ -133,9 +133,10 @@ beforeAll(async () => {
     id: userBId, tenant_id: tenantBId, username: "hc-userb", email: "hc-userb@test.com", full_name: "Usuario B", rol_id: rolB?.id,
   });
 
-  // Especie global (catálogo seeded)
-  const { data: especie } = await serviceDb.from("especies").select("id").limit(1).single();
-  const especieId = especie?.id;
+  // Catálogo del tenant A (por tenant desde
+  // 20260827000001_catalogos_por_tenant.sql; las mascotas de esta suite son
+  // todas de A, así que alcanza con el suyo).
+  const { especieId } = await catalogoDelTenant(serviceDb, tenantAId);
 
   // Cliente + mascotas de A
   const { data: cli } = await serviceDb.from("clientes")

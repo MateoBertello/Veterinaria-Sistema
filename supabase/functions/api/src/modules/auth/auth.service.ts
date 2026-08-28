@@ -16,6 +16,14 @@ import type {
   ResetPasswordDto,
 } from "./auth.schemas.ts";
 
+/**
+ * Tope de filas que trae la recuperación de usuario por email. No es una regla
+ * de negocio: es el corte para no traer una lista arbitraria si alguna vez el
+ * mismo email aparece en muchas clínicas. Con el esquema actual (UNIQUE
+ * (tenant_id, email)) el caso normal es 1.
+ */
+const MAX_COINCIDENCIAS_RECUPERACION = 10;
+
 // ─── Rol y permisos del usuario ───────────────────────────────────────────────
 
 interface RolResuelto {
@@ -372,20 +380,43 @@ export const AuthService = {
     // Buscar usuario por email — respuesta siempre genérica (RN-REC2).
     // Se compara contra `email_ci`: el usuario escribe su mail como se le
     // ocurre y GoTrue ya lo guarda normalizado.
-    const { data: usuario } = await serviceDb
+    //
+    // La búsqueda es deliberadamente CROSS-TENANT: quien pide recuperar su
+    // usuario no sabe (ni tiene por qué saber) a qué clínica pertenece, y el
+    // email es justamente el dato que no depende del tenant. Por eso acá no va
+    // un `.eq("tenant_id", ...)`: no hay tenant en el contexto, el endpoint es
+    // público.
+    //
+    // Lo que SÍ cambia es `.single()` → `.limit()`. La unicidad que da el
+    // esquema es UNIQUE (tenant_id, email): dos clínicas pueden tener filas con
+    // el mismo email en `usuarios`. Que hoy no pase lo sostiene GoTrue (email
+    // único global en auth.users), no la tabla — la misma confusión que produjo
+    // DT-19 en el login. Con `.single()`, dos filas devolvían error de
+    // PostgREST y el pedido se descartaba en silencio: el usuario legítimo se
+    // quedaba sin recuperar su cuenta y nadie se enteraba. Se resuelven todas
+    // las coincidencias en una sola consulta (sin N+1).
+    const { data: coincidencias } = await serviceDb
       .from("usuarios")
-      .select("id, username, email")
+      .select("id, tenant_id, username, email")
       .eq("email_ci", dto.email.trim().toLowerCase())
       .eq("active", true)
-      .single();
+      .limit(MAX_COINCIDENCIAS_RECUPERACION);
 
-    if (usuario) {
-      // PENDIENTE (requiere proveedor SMTP configurado): enviar el username al
-      // email. Hasta entonces NO se loguea ni el username ni el email — los
-      // logs de la Edge Function no son un canal de entrega y volcar ahí datos
-      // personales los expone a cualquiera con acceso al panel de Supabase.
-      // Se deja constancia solo del hecho, sin identificar a nadie.
-      console.info("[recuperarUsuario] Solicitud con email registrado; envío pendiente de proveedor SMTP");
+    const usuarios = (coincidencias ?? []) as Array<Record<string, unknown>>;
+
+    if (usuarios.length > 0) {
+      // PENDIENTE (requiere proveedor SMTP configurado): enviar el/los username
+      // al email. Si hay más de una coincidencia van todas en el MISMO mensaje
+      // al mismo destinatario: es el dueño de esa casilla en las dos clínicas,
+      // así que no hay filtración cruzada. Hasta entonces NO se loguea ni el
+      // username ni el email — los logs de la Edge Function no son un canal de
+      // entrega y volcar ahí datos personales los expone a cualquiera con
+      // acceso al panel de Supabase. Se deja constancia solo del hecho y de
+      // cuántas coincidencias hubo, sin identificar a nadie.
+      console.info(
+        `[recuperarUsuario] Solicitud con email registrado (${usuarios.length} coincidencia/s); ` +
+        "envío pendiente de proveedor SMTP",
+      );
     }
 
     // Auditoría (RN-REC4)

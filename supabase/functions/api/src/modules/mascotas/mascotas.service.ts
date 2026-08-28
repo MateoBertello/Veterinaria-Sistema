@@ -161,24 +161,66 @@ async function assertClienteDelTenant(
   }
 }
 
-/** RN-MA2: la raza debe pertenecer a la especie seleccionada (catálogo global). */
-async function assertRazaDeEspecie(
+/**
+ * La especie debe existir en el catálogo DE ESTA CLÍNICA.
+ *
+ * Los catálogos dejaron de ser globales: cada tenant tiene el suyo, así que un
+ * `especieId` que llega en el body no está validado por venir de una FK. La base
+ * lo frena igual —`mascotas_especie_tenant_fkey` es compuesta sobre
+ * (especie_id, tenant_id)—, pero eso sale como error de FK y termina en un 500
+ * genérico; resolverlo acá da el 422 que corresponde.
+ */
+async function assertEspecieDelTenant(
   db: SupabaseClient,
-  razaId: string,
   especieId: string,
+  tenantId: string,
 ): Promise<void> {
   const { data } = await db
-    .from("razas")
+    .from("especies")
     .select("id")
-    .eq("id", razaId)
-    .eq("especie_id", especieId)
+    .eq("id", especieId)
+    .eq("tenant_id", tenantId)
+    // RN-CAT9: una especie dada de baja sigue mostrándose en las fichas que ya
+    // la usan, pero no se puede ELEGIR en un alta nueva. Sin este filtro la baja
+    // lógica sería puramente cosmética: bastaba mandar el id a mano.
+    .eq("active", true)
     .maybeSingle();
 
   if (!data) {
     throw new DomainError(
       ErrorCode.VALIDATION_ERROR,
       422,
-      "La raza no pertenece a la especie seleccionada",
+      "La especie no existe en el catálogo de la clínica o está dada de baja",
+    );
+  }
+}
+
+/**
+ * RN-MA2: la raza debe pertenecer a la especie seleccionada, y ambas al
+ * catálogo ACTIVO de esta clínica (RN-CAT9). El filtro por `tenant_id` no es redundante con el de
+ * `especie_id`: esta consulta corre con `getServiceDb()` (service role), donde
+ * RLS no aplica y el aislamiento lo impone únicamente el `.eq("tenant_id", ...)`.
+ */
+async function assertRazaDeEspecie(
+  db: SupabaseClient,
+  razaId: string,
+  especieId: string,
+  tenantId: string,
+): Promise<void> {
+  const { data } = await db
+    .from("razas")
+    .select("id")
+    .eq("id", razaId)
+    .eq("especie_id", especieId)
+    .eq("tenant_id", tenantId)
+    .eq("active", true) // RN-CAT9: una raza dada de baja no se elige en altas nuevas
+    .maybeSingle();
+
+  if (!data) {
+    throw new DomainError(
+      ErrorCode.VALIDATION_ERROR,
+      422,
+      "La raza no pertenece a la especie seleccionada o está dada de baja",
     );
   }
 }
@@ -196,9 +238,12 @@ export const MascotasService = {
     // FK + aislamiento: el dueño debe ser un cliente vivo del mismo tenant.
     await assertClienteDelTenant(db, data.clientId, ctx.tenantId);
 
+    // Catálogo por tenant: la especie tiene que ser del catálogo de esta clínica.
+    await assertEspecieDelTenant(db, data.especieId, ctx.tenantId);
+
     // RN-MA2: coherencia raza/especie (solo si se informó raza).
     if (data.razaId) {
-      await assertRazaDeEspecie(db, data.razaId, data.especieId);
+      await assertRazaDeEspecie(db, data.razaId, data.especieId, ctx.tenantId);
     }
 
     const insertPayload = {
@@ -241,7 +286,7 @@ export const MascotasService = {
     return toPublic(row as unknown as Record<string, unknown>);
   },
 
-  /** Editar Mascota (RN-MA4 birthDate inmutable; cambio de dueño fuera de alcance; RN-MA7). */
+  /** Editar Mascota (RN-MA4 birthDate inmutable; RN-MA11 especie inmutable; cambio de dueño fuera de alcance; RN-MA7). */
   async editar(id: string, dto: EditarMascotaDto, ctx: CallerContext): Promise<MascotaPublica> {
     const parsed = EditarMascotaSchema.safeParse(dto);
     if (!parsed.success) validationError(parsed);
@@ -261,15 +306,27 @@ export const MascotasService = {
       throw new DomainError(ErrorCode.MASCOTA_NOT_FOUND, 404, "Mascota no encontrada en este tenant");
     }
 
-    // RN-MA2: si cambia la raza, revalidar contra la especie efectiva.
+    const especieActual = (actual as Record<string, unknown>)["especie_id"] as string;
+
+    // RN-MA11: la especie es inmutable una vez creada. Un valor distinto al
+    // actual se rechaza explícitamente (no se ignora en silencio): de la
+    // especie cuelgan razaId y el catálogo de vacunas aplicables (RN-PV11).
+    if (data.especieId !== undefined && data.especieId !== especieActual) {
+      throw new DomainError(
+        ErrorCode.SPECIES_IMMUTABLE,
+        422,
+        "La especie de la mascota no se puede modificar una vez creada",
+      );
+    }
+
+    // RN-MA2: si cambia la raza, revalidar contra la especie de la mascota
+    // (RN-MA11 la mantiene fija, así que siempre es la especie actual).
     if (data.razaId) {
-      const especieId = data.especieId ?? (actual as Record<string, unknown>)["especie_id"] as string;
-      await assertRazaDeEspecie(db, data.razaId, especieId);
+      await assertRazaDeEspecie(db, data.razaId, especieActual, ctx.tenantId);
     }
 
     const updatePayload: Record<string, unknown> = {};
     if (data.name         !== undefined) updatePayload["name"]           = data.name;
-    if (data.especieId    !== undefined) updatePayload["especie_id"]     = data.especieId;
     if (data.razaId       !== undefined) updatePayload["raza_id"]        = data.razaId;
     if (data.sex          !== undefined) updatePayload["sex"]            = data.sex;
     if (data.tamano       !== undefined) updatePayload["tamano"]         = data.tamano;
