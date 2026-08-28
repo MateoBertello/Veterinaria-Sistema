@@ -27,10 +27,15 @@ const PROF_ID    = "66666666-6666-4666-8666-666666666666";
 // ─── Mock builder ─────────────────────────────────────────────────────────────
 
 type MockOpts = {
-  singleResults?:   Array<{ data: unknown; error: unknown }>;
-  rangeResult?:     { data: unknown[]; error: unknown; count: number };
-  uploadResult?:    { data: unknown; error: unknown };
-  signedUrlResult?: { data: unknown; error: unknown };
+  singleResults?:    Array<{ data: unknown; error: unknown }>;
+  rangeResult?:      { data: unknown[]; error: unknown; count: number };
+  uploadResult?:     { data: unknown; error: unknown };
+  signedUrlResult?:  { data: unknown; error: unknown };
+  // Resultado de una query awaited directamente (sin .single()/.maybeSingle()/
+  // .range()), p. ej. `await db.from(...).select(...).eq(...)`. La query es
+  // "thenable"; el runtime resuelve vía builder.then.
+  listResult?:       { data: unknown[]; error: unknown };
+  signedUrlsResult?: { data: unknown; error: unknown };
 };
 
 function buildMockDb(opts: MockOpts = {}) {
@@ -51,17 +56,25 @@ function buildMockDb(opts: MockOpts = {}) {
   builder["range"]       = vi.fn().mockResolvedValue(
     opts.rangeResult ?? { data: [], error: null, count: 0 },
   );
+  builder["then"] = (
+    resolve: (v: unknown) => unknown,
+    reject?: (e: unknown) => unknown,
+  ) => Promise.resolve(opts.listResult ?? { data: [], error: null }).then(resolve, reject);
 
   // Supabase Storage stub
   const storageUpload        = vi.fn().mockResolvedValue(opts.uploadResult ?? { data: { path: "x" }, error: null });
   const storageCreateSigned  = vi.fn().mockResolvedValue(
     opts.signedUrlResult ?? { data: { signedUrl: "https://signed.example/x" }, error: null },
   );
+  const storageCreateSignedUrls = vi.fn().mockResolvedValue(
+    opts.signedUrlsResult ?? { data: [], error: null },
+  );
   const storageRemove        = vi.fn().mockResolvedValue({ data: [], error: null });
   const storageFrom          = vi.fn(() => ({
-    upload:        storageUpload,
-    createSignedUrl: storageCreateSigned,
-    remove:        storageRemove,
+    upload:            storageUpload,
+    createSignedUrl:   storageCreateSigned,
+    createSignedUrls:  storageCreateSignedUrls,
+    remove:            storageRemove,
   }));
 
   const db = {
@@ -71,6 +84,7 @@ function buildMockDb(opts: MockOpts = {}) {
     builder,
     storageUpload,
     storageCreateSigned,
+    storageCreateSignedUrls,
     storageRemove,
     storageFrom,
   };
@@ -593,6 +607,84 @@ describe("generarSignedUrlAdjunto", () => {
     expect(db.storageFrom).toHaveBeenCalledWith("adjuntos-clinicos");
     expect(firmado.url).toBe("https://signed.example/abc.pdf");
     expect(firmado.fileName).toBe("rx.pdf");
+  });
+});
+
+// ─── generarSignedUrlsAdjuntosEvento (vista previa inline, un lote por evento) ──
+
+describe("generarSignedUrlsAdjuntosEvento", () => {
+  it("evento sin adjuntos → arreglo vacío, sin llamar a Storage", async () => {
+    const db = buildMockDb({ listResult: { data: [], error: null } });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    const firmados = await HistorialService.generarSignedUrlsAdjuntosEvento(EVENT_ID, CTX);
+
+    expect(firmados).toEqual([]);
+    expect(db.storageCreateSignedUrls).not.toHaveBeenCalled();
+  });
+
+  it("un evento con 2 adjuntos firma las 2 rutas en UNA sola llamada por lote a Storage", async () => {
+    const db = buildMockDb({
+      listResult: {
+        data: [
+          { id: "adj-1", storage_path: `${TENANT_ID}/${EVENT_ID}/a.jpg`, file_name: "a.jpg", file_type: "image/jpeg", file_size: 10 },
+          { id: "adj-2", storage_path: `${TENANT_ID}/${EVENT_ID}/b.png`, file_name: "b.png", file_type: "image/png", file_size: 20 },
+        ],
+        error: null,
+      },
+      signedUrlsResult: {
+        data: [
+          { path: `${TENANT_ID}/${EVENT_ID}/a.jpg`, signedUrl: "https://signed.example/a.jpg", error: null },
+          { path: `${TENANT_ID}/${EVENT_ID}/b.png`, signedUrl: "https://signed.example/b.png", error: null },
+        ],
+        error: null,
+      },
+    });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    const firmados = await HistorialService.generarSignedUrlsAdjuntosEvento(EVENT_ID, CTX);
+
+    expect(db.storageCreateSignedUrls).toHaveBeenCalledTimes(1);
+    expect(firmados).toEqual([
+      { id: "adj-1", url: "https://signed.example/a.jpg", fileName: "a.jpg", fileType: "image/jpeg", fileSize: 10 },
+      { id: "adj-2", url: "https://signed.example/b.png", fileName: "b.png", fileType: "image/png", fileSize: 20 },
+    ]);
+  });
+
+  it("si un adjunto puntual falla al firmar, se omite del lote sin romper los demás (best-effort)", async () => {
+    const db = buildMockDb({
+      listResult: {
+        data: [
+          { id: "adj-1", storage_path: `${TENANT_ID}/${EVENT_ID}/a.jpg`, file_name: "a.jpg", file_type: "image/jpeg", file_size: 10 },
+          { id: "adj-2", storage_path: `${TENANT_ID}/${EVENT_ID}/b.png`, file_name: "b.png", file_type: "image/png", file_size: 20 },
+        ],
+        error: null,
+      },
+      signedUrlsResult: {
+        data: [
+          { path: `${TENANT_ID}/${EVENT_ID}/a.jpg`, signedUrl: null, error: "Object not found" },
+          { path: `${TENANT_ID}/${EVENT_ID}/b.png`, signedUrl: "https://signed.example/b.png", error: null },
+        ],
+        error: null,
+      },
+    });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    const firmados = await HistorialService.generarSignedUrlsAdjuntosEvento(EVENT_ID, CTX);
+
+    expect(firmados).toEqual([
+      { id: "adj-2", url: "https://signed.example/b.png", fileName: "b.png", fileType: "image/png", fileSize: 20 },
+    ]);
+  });
+
+  it("filtra por tenant_id: la lista de adjuntos de otro tenant no se firma (aislamiento explícito)", async () => {
+    const db = buildMockDb({ listResult: { data: [], error: null } });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    await HistorialService.generarSignedUrlsAdjuntosEvento(EVENT_ID, CTX);
+
+    expect(db.builder.eq).toHaveBeenCalledWith("tenant_id", TENANT_ID);
+    expect(db.builder.eq).toHaveBeenCalledWith("deleted", false);
   });
 });
 

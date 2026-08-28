@@ -101,6 +101,11 @@ export interface AdjuntoFirmado {
   fileSize: number;
 }
 
+/** Signed URL de un adjunto identificado (para el lote de un evento; ver `generarSignedUrlsAdjuntosEvento`). */
+export interface AdjuntoFirmadoLote extends AdjuntoFirmado {
+  id: string;
+}
+
 export interface HistorialExport {
   buffer:      Uint8Array;
   contentType: string;
@@ -899,6 +904,65 @@ export class HistorialService {
       fileType: a.file_type,
       fileSize: a.file_size,
     };
+  }
+
+  /**
+   * Genera signed URLs para TODOS los adjuntos de un evento en una sola petición
+   * (vista previa inline de imágenes en la línea de tiempo). Evita el request
+   * waterfall de pedir una signed URL por adjunto: una consulta a la tabla +
+   * una llamada por lote a Storage (`createSignedUrls`).
+   * Aislamiento: filtra por tenant_id (regla de aislamiento explícito, no hay RLS
+   * en este camino porque usa getServiceDb()). Si el evento no tiene adjuntos o
+   * pertenece a otro tenant, devuelve un arreglo vacío (no hay nada que filtrar
+   * de más: la lista de adjuntos del evento ya la validó `obtenerEventoPorId`).
+   */
+  static async generarSignedUrlsAdjuntosEvento(
+    eventoId: string,
+    ctx:      CallerContext,
+  ): Promise<AdjuntoFirmadoLote[]> {
+    const db = getServiceDb();
+
+    const { data: adjuntos, error } = await db
+      .from("adjuntos_medicos")
+      .select("id, storage_path, file_name, file_type, file_size")
+      .eq("medical_record_id", eventoId)
+      .eq("tenant_id", ctx.tenantId)
+      .eq("deleted", false);
+
+    if (error) {
+      throw new DomainError(ErrorCode.INTERNAL_ERROR, 500, "Error al consultar los adjuntos");
+    }
+
+    // deno-lint-ignore no-explicit-any
+    const rows = (adjuntos ?? []) as any[];
+    if (rows.length === 0) return [];
+
+    const { data: signed, error: signError } = await db.storage
+      .from(BUCKET_ADJUNTOS)
+      .createSignedUrls(rows.map((r) => r.storage_path), SIGNED_URL_TTL);
+
+    if (signError || !signed) {
+      throw new DomainError(
+        ErrorCode.INTERNAL_ERROR, 500,
+        `No se pudieron generar las URLs de los adjuntos: ${signError?.message ?? ""}`,
+      );
+    }
+
+    // Best-effort por adjunto: si una URL puntual falla firmar, se omite en vez
+    // de tirar abajo el lote completo (las demás igual se muestran).
+    const resultado: AdjuntoFirmadoLote[] = [];
+    for (let i = 0; i < rows.length; i++) {
+      const s = signed[i];
+      if (!s || s.error || !s.signedUrl) continue;
+      resultado.push({
+        id:       rows[i].id,
+        url:      s.signedUrl,
+        fileName: rows[i].file_name,
+        fileType: rows[i].file_type,
+        fileSize: rows[i].file_size,
+      });
+    }
+    return resultado;
   }
 
   /**

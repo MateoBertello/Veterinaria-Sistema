@@ -48,6 +48,18 @@ historialRouter.get("/:id", async (c) => {
   return c.json(ok(evento), 200);
 });
 
+// GET /historial/:id/adjuntos-firmados — signed URLs de todos los adjuntos del
+// evento en una sola petición (vista previa inline; evita 1 request por adjunto).
+historialRouter.get("/:id/adjuntos-firmados", async (c) => {
+  const idParsed = z.string().uuid().safeParse(c.req.param("id"));
+  if (!idParsed.success) {
+    throw new DomainError(ErrorCode.VALIDATION_ERROR, 422, "ID de evento clínico inválido");
+  }
+
+  const firmados = await HistorialService.generarSignedUrlsAdjuntosEvento(idParsed.data, callerCtx(c));
+  return c.json(ok(firmados), 200);
+});
+
 // POST /historial/:id/adjuntos  (multipart/form-data, campo "file") — RN-EC4
 historialRouter.post("/:id/adjuntos", manageMedicalHistory, async (c) => {
   const recordId = c.req.param("id")!;

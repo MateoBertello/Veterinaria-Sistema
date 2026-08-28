@@ -1,6 +1,7 @@
 import { apiClient, apiClientBlob, apiClientList } from "./client.ts";
 import type {
   AdjuntoFirmado,
+  AdjuntoFirmadoLote,
   AdjuntoMeta,
   ApiMeta,
   CrearEventoClinicoInput,
@@ -64,6 +65,14 @@ export function subirAdjunto(eventoId: string, file: File): Promise<AdjuntoMeta>
 /** GET /adjuntos/{adjuntoId} — signed URL de descarga, válida 5 minutos. */
 export function obtenerAdjuntoFirmado(adjuntoId: string): Promise<AdjuntoFirmado> {
   return apiClient<AdjuntoFirmado>(`/adjuntos/${adjuntoId}`);
+}
+
+/**
+ * GET /historial/{id}/adjuntos-firmados — signed URLs de todos los adjuntos
+ * del evento en una sola petición (vista previa inline), válidas 5 minutos.
+ */
+export function obtenerAdjuntosFirmadosEvento(eventoId: string): Promise<AdjuntoFirmadoLote[]> {
+  return apiClient<AdjuntoFirmadoLote[]>(`/historial/${eventoId}/adjuntos-firmados`);
 }
 
 /**

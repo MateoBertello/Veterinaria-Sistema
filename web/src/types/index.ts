@@ -511,6 +511,14 @@ export interface AdjuntoFirmado {
   fileSize: number;
 }
 
+/**
+ * Signed URL de un adjunto identificado (`GET /historial/:id/adjuntos-firmados`),
+ * TTL 5 min. Se pide una sola vez por evento abierto (no una por adjunto).
+ */
+export interface AdjuntoFirmadoLote extends AdjuntoFirmado {
+  id: string;
+}
+
 /** Cabecera de ficha clínica (`GET /mascotas/:petId/resumen-clinico`). */
 export interface ResumenClinico {
   id:          string;
