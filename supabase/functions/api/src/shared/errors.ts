@@ -25,6 +25,15 @@ export enum ErrorCode {
   // ── Usuarios ──────────────────────────────────────────────────────
   DUPLICATE_USER = "DUPLICATE_USER",
   LAST_ADMIN     = "LAST_ADMIN",
+  /**
+   * RN-SEC8: un usuario intentó cambiar sus PROPIOS campos de privilegio —el
+   * rol o el estado activo—. Es distinto de LAST_ADMIN, que protege al tenant
+   * de quedarse sin ningún administrador: acá el tenant puede tener diez
+   * admins y la operación sigue siendo irreversible *desde la posición de
+   * quien la ejecuta*. Un admin que se quita `manage_users` no puede
+   * devolvérselo: necesita que otro admin lo rescate.
+   */
+  SELF_PRIVILEGE_CHANGE = "SELF_PRIVILEGE_CHANGE",
 
   // ── Clientes ──────────────────────────────────────────────────────
   DUPLICATE_DNI  = "DUPLICATE_DNI",

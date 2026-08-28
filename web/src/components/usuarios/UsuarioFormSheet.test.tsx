@@ -193,3 +193,42 @@ describe("UsuarioFormSheet — edición", () => {
     expect(onSaved).toHaveBeenCalled();
   });
 });
+
+// ─── RN-SEC8: auto-edición ────────────────────────────────────────────────────
+
+describe("UsuarioFormSheet — RN-SEC8 (editarse a uno mismo)", () => {
+  it("RN-SEC8: el selector de rol queda deshabilitado con la explicación visible", async () => {
+    setup({ usuario: makeUsuario(), esUnoMismo: true });
+
+    expect(screen.getByLabelText("Rol *")).toBeDisabled();
+    expect(
+      screen.getByText("No podés cambiar tu propio rol: pedíselo a otro administrador."),
+    ).toBeInTheDocument();
+  });
+
+  it("RN-SEC8: el resto del propio perfil (nombre, teléfono) sigue editable y se guarda", async () => {
+    const { editar } = setup({ usuario: makeUsuario(), esUnoMismo: true });
+    editar.mockResolvedValue(makeUsuario({ fullName: "Ana Pérez Editada" }));
+
+    const nombre = screen.getByLabelText(/Nombre completo/);
+    await userEvent.clear(nombre);
+    await userEvent.type(nombre, "Ana Pérez Editada");
+    await userEvent.click(screen.getByRole("button", { name: /Guardar cambios/i }));
+
+    await waitFor(() =>
+      expect(editar).toHaveBeenCalledWith(
+        "u1",
+        expect.objectContaining({ fullName: "Ana Pérez Editada", roleId: "r-admin" }),
+      ),
+    );
+  });
+
+  it("RN-SEC8: editando a OTRO usuario el selector de rol sigue habilitado", () => {
+    setup({ usuario: makeUsuario(), esUnoMismo: false });
+
+    expect(screen.getByLabelText("Rol *")).toBeEnabled();
+    expect(
+      screen.getByText("El rol determina los permisos de acceso al sistema."),
+    ).toBeInTheDocument();
+  });
+});

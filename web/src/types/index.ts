@@ -80,6 +80,8 @@ export const ErrorCode = {
   VACCINE_PLAN_ALREADY_APPLIED:     "VACCINE_PLAN_ALREADY_APPLIED",
   DUPLICATE_USER:                   "DUPLICATE_USER",
   LAST_ADMIN:                       "LAST_ADMIN",
+  /** RN-SEC8: un usuario intentó cambiar su propio rol o su propio estado. */
+  SELF_PRIVILEGE_CHANGE:            "SELF_PRIVILEGE_CHANGE",
   // Catálogos clínicos por clínica (especies, razas, tipos de vacuna).
   CATALOG_NOT_FOUND:                "CATALOG_NOT_FOUND",
   CATALOG_DUPLICATE:                "CATALOG_DUPLICATE",

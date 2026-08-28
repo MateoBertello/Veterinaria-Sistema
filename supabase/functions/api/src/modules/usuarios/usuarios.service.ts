@@ -317,7 +317,40 @@ export const UsuariosService = {
       throw new DomainError(ErrorCode.FORBIDDEN, 403, "Usuario no encontrado en este tenant");
     }
 
-    // 3. Protección LAST_ADMIN (RN-SEC6): no desactivar si es el único admin activo
+    // 3. RN-SEC8: nadie cambia sus PROPIOS campos de privilegio.
+    //
+    //    Es otra regla que LAST_ADMIN (paso 3a), y no se solapan: LAST_ADMIN
+    //    protege al TENANT de quedarse sin administradores; RN-SEC8 protege a
+    //    QUIEN EJECUTA de una operación que no puede deshacer. Un admin que se
+    //    degrada teniendo colegas no dispara LAST_ADMIN, pero igual pierde
+    //    `manage_users` y ya no puede devolvérselo: depende de que otro admin
+    //    lo rescate.
+    //
+    //    Se bloquean los CAMPOS, no la fila: editarse el nombre, el teléfono,
+    //    el email o el usuario sigue funcionando (RN-SEC1..SEC4 no cambian).
+    //    Y se compara contra el valor actual, no contra `!== undefined`,
+    //    porque el formulario de edición reenvía `roleId` sin cambios: reenviar
+    //    el mismo rol no es un cambio de privilegio y no se rechaza.
+    if (id === ctx.callerUserId) {
+      const actual = usuarioActual as { rol_id: string; active: boolean };
+
+      if (data.roleId !== undefined && data.roleId !== actual.rol_id) {
+        throw new DomainError(
+          ErrorCode.SELF_PRIVILEGE_CHANGE,
+          409,
+          "No podés cambiar tu propio rol: pedíselo a otro administrador",
+        );
+      }
+      if (data.active !== undefined && data.active !== actual.active) {
+        throw new DomainError(
+          ErrorCode.SELF_PRIVILEGE_CHANGE,
+          409,
+          "No podés cambiar tu propio estado de acceso: pedíselo a otro administrador",
+        );
+      }
+    }
+
+    // 3a. Protección LAST_ADMIN (RN-SEC6): no desactivar si es el único admin activo
     if (data.active === false) {
       // `roles` es una tabla POR TENANT (UNIQUE (tenant_id, name)) y esta
       // consulta corre con service role: sin el filtro, el nombre del rol se
