@@ -41,6 +41,7 @@ function makeTurno(over: Partial<Turno> = {}): Turno {
     mascota: { id: "p1", name: "Max" },
     cliente: { id: "c1", fullName: "María García" },
     accionesDisponibles: [],
+    vencido: false,
     ...over,
   };
 }
@@ -69,6 +70,19 @@ describe("AgendaDia", () => {
     expect(await screen.findByText("Max")).toBeInTheDocument();
     expect(screen.getByText("Consulta general")).toBeInTheDocument();
     expect(mockListar).toHaveBeenCalledWith({ date: HOY, status: undefined });
+  });
+
+  it("marca visualmente un turno vencido sin cerrar con el badge 'Vencido'", async () => {
+    mockListar.mockResolvedValue([makeTurno({ vencido: true })]);
+    renderDia();
+    expect(await screen.findByText("Vencido")).toBeInTheDocument();
+  });
+
+  it("no muestra el badge 'Vencido' en un turno al día", async () => {
+    mockListar.mockResolvedValue([makeTurno({ vencido: false })]);
+    renderDia();
+    await screen.findByText("Max");
+    expect(screen.queryByText("Vencido")).not.toBeInTheDocument();
   });
 
   it("el resumen desglosa programados vs confirmados en Activos", async () => {

@@ -207,8 +207,8 @@ export function AgendaDia({ fecha, onFecha }: Props) {
                   <TableRow
                     key={t.id}
                     tabIndex={0}
-                    aria-label={`Turno de ${t.mascota?.name ?? "sin mascota"} a las ${t.startTime}, estado ${t.status}`}
-                    className={`cursor-pointer border-l-4 ${ESTADO_ROW_ACCENT[t.status]} focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-orange-500`}
+                    aria-label={`Turno de ${t.mascota?.name ?? "sin mascota"} a las ${t.startTime}, estado ${t.status}${t.vencido ? ", vencido sin cerrar" : ""}`}
+                    className={`cursor-pointer border-l-4 ${t.vencido ? "border-l-red-500" : ESTADO_ROW_ACCENT[t.status]} focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-orange-500`}
                     onClick={() => setDetalleId(t.id)}
                     onKeyDown={(e) => {
                       if (e.key === "Enter" || e.key === " ") {
@@ -242,7 +242,12 @@ export function AgendaDia({ fecha, onFecha }: Props) {
                       </div>
                     </TableCell>
                     <TableCell>
-                      <Badge className={ESTADO_BADGE_CLASS[t.status]}>{t.status}</Badge>
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <Badge className={ESTADO_BADGE_CLASS[t.status]}>{t.status}</Badge>
+                        {t.vencido ? (
+                          <Badge className="bg-red-100 text-red-800 hover:bg-red-100">Vencido</Badge>
+                        ) : null}
+                      </div>
                     </TableCell>
                     <TableCell onClick={(e) => e.stopPropagation()}>
                       <div className="flex items-center justify-end gap-2">

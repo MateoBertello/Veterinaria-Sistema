@@ -33,6 +33,12 @@ export interface TurnoPublico {
   mascota:             { id: string; name: string } | null;
   cliente:             { id: string; fullName: string } | null;
   accionesDisponibles: string[];
+  /**
+   * Turno vencido sin cerrar: su fecha/hora ya pasó y sigue en un estado no
+   * terminal (nadie lo completó ni lo canceló). Condición derivada — no se
+   * persiste ni se recalcula por un job; se recalcula en cada lectura.
+   */
+  vencido:             boolean;
 }
 
 /** Estados terminales del ciclo de vida (RN-ES3). */
@@ -116,6 +122,17 @@ function assertFechaHoraFutura(date: string, startTime: string, mensaje: string)
   }
 }
 
+/**
+ * Turno vencido sin cerrar: no está en un estado terminal y su bloque
+ * [date, endTime) ya terminó. Condición derivada del mismo "ahora" UTC que
+ * RN-TU1 — no es una columna de estado que haya que mantener sincronizada.
+ */
+function calcularVencido(date: string, endTime: string, status: string): boolean {
+  if (ESTADOS_TERMINALES.has(status)) return false;
+  const { fecha: hoy, horaMin: ahoraMin } = ahoraUTC();
+  return date < hoy || (date === hoy && toMinutes(endTime) <= ahoraMin);
+}
+
 function unwrapEmbed<T>(v: unknown): T | null {
   // PostgREST devuelve el embed como objeto o como array de un elemento según la relación.
   if (Array.isArray(v)) return (v[0] as T) ?? null;
@@ -150,6 +167,11 @@ function toPublic(row: Record<string, unknown>, accionesDisponibles: string[] = 
     mascota:             pet ? { id: pet["id"] as string, name: pet["name"] as string } : null,
     cliente:             cli ? { id: cli["id"] as string, fullName: cli["full_name"] as string } : null,
     accionesDisponibles,
+    vencido: calcularVencido(
+      row["date"] as string,
+      row["end_time"] as string,
+      row["status"] as string,
+    ),
   };
 }
 

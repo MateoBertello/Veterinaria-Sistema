@@ -361,6 +361,74 @@ describe("TurnoService.obtenerTurno", () => {
     const result = await TurnoService.obtenerTurno(TURNO_ID, ctx);
     expect(result.accionesDisponibles).toEqual(["eliminar"]);
   });
+
+  // ── vencido (turno vencido sin cerrar) ───────────────────────────────────────
+  // Condición derivada: fecha/hora ya pasada (mismo "ahora" UTC que RN-TU1) +
+  // estado todavía no terminal. No es una columna que un job tenga que actualizar.
+
+  describe("vencido: condición derivada de fecha/hora + estado", () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2026-06-15T14:30:00.000Z"));
+    });
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    async function obtener(over: Record<string, unknown>) {
+      const db = makeDb([
+        { data: turnoExistente("Confirmado", over) },
+        { data: { roles: { name: "veterinario" } } },
+      ]);
+      mockGetServiceDb.mockReturnValue(db as never);
+      return TurnoService.obtenerTurno(TURNO_ID, ctx);
+    }
+
+    it("fecha pasada + Confirmado → vencido: true", async () => {
+      const result = await obtener({ date: "2026-06-14", start_time: "10:00", end_time: "10:30" });
+      expect(result.vencido).toBe(true);
+    });
+
+    it("hoy con end_time ya pasado + Confirmado → vencido: true", async () => {
+      const result = await obtener({ date: "2026-06-15", start_time: "13:30", end_time: "14:00" });
+      expect(result.vencido).toBe(true);
+    });
+
+    it("borde exacto: end_time == hora actual → vencido: true", async () => {
+      const result = await obtener({ date: "2026-06-15", start_time: "14:00", end_time: "14:30" });
+      expect(result.vencido).toBe(true);
+    });
+
+    it("hoy con end_time todavía futuro → vencido: false", async () => {
+      const result = await obtener({ date: "2026-06-15", start_time: "14:31", end_time: "15:00" });
+      expect(result.vencido).toBe(false);
+    });
+
+    it("fecha futura → vencido: false", async () => {
+      const result = await obtener({ date: "2026-06-16", start_time: "09:00", end_time: "09:30" });
+      expect(result.vencido).toBe(false);
+    });
+
+    it("fecha/hora pasada pero Completado (terminal) → vencido: false", async () => {
+      const db = makeDb([
+        { data: turnoExistente("Completado", { date: "2026-06-14", start_time: "10:00", end_time: "10:30" }) },
+        { data: { roles: { name: "veterinario" } } },
+      ]);
+      mockGetServiceDb.mockReturnValue(db as never);
+      const result = await TurnoService.obtenerTurno(TURNO_ID, ctx);
+      expect(result.vencido).toBe(false);
+    });
+
+    it("fecha/hora pasada pero Cancelado (terminal) → vencido: false", async () => {
+      const db = makeDb([
+        { data: turnoExistente("Cancelado", { date: "2026-06-14", start_time: "10:00", end_time: "10:30" }) },
+        { data: { roles: { name: "veterinario" } } },
+      ]);
+      mockGetServiceDb.mockReturnValue(db as never);
+      const result = await TurnoService.obtenerTurno(TURNO_ID, ctx);
+      expect(result.vencido).toBe(false);
+    });
+  });
 });
 
 describe("TurnoService.modificarTurno", () => {

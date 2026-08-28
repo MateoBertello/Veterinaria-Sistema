@@ -29,6 +29,7 @@ function makeTurno(over: Partial<Turno> = {}): Turno {
     mascota: { id: "m1", name: "Firulais" },
     cliente: { id: "c1", fullName: "Juan Pérez" },
     accionesDisponibles: ["modificar", "cancelar", "eliminar"],
+    vencido: false,
     ...over,
   };
 }

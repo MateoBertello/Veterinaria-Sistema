@@ -31,6 +31,7 @@ function makeTurno(over: Partial<Turno> = {}): Turno {
     mascota: { id: "p1", name: "Max" },
     cliente: { id: "c1", fullName: "Ana" },
     accionesDisponibles: [],
+    vencido: false,
     ...over,
   };
 }

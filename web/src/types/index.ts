@@ -237,6 +237,8 @@ export interface Turno {
   mascota:             TurnoMascota | null;
   cliente:             TurnoCliente | null;
   accionesDisponibles: string[];
+  /** Turno vencido sin cerrar: fecha/hora ya pasada y estado todavía no terminal. */
+  vencido:             boolean;
 }
 
 export interface SlotDisponible {
