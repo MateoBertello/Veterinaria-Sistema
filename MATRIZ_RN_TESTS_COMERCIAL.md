@@ -44,8 +44,8 @@ no arranque, esas cinco RN efectivamente no están en el alcance de ninguna tand
 
 | Estado al corte de la planificación | Cantidad |
 |---|:-:|
-| ✅ con test que pasa | 32 |
-| `PENDIENTE` | 53 |
+| ✅ con test que pasa | 39 |
+| `PENDIENTE` | 46 |
 | `N/A` — se activan en C7·T1 | 5 |
 
 ---
@@ -84,10 +84,10 @@ no arranque, esas cinco RN efectivamente no están en el alcance de ninguna tand
 | RN-MV3 | C2·T1 | ✅ | `tests/integration/stock.integration.test.ts` | Insertar cantidad 0 o negativa viola el CHECK. |
 | RN-MV4 | C2·T1 | ✅ | `tests/integration/stock.integration.test.ts` | `entrada_compra` da signo `+`, `salida_venta` da `−`; la columna generada no se puede escribir. |
 | RN-MV5 | C2·T1 | ✅ | `tests/integration/stock.integration.test.ts` | Forzar existencia negativa por PostgREST viola el CHECK de `existencias_lote`. La validación bajo bloqueo se cierra en C4·T2. |
-| RN-MV6 | C2·T4 | PENDIENTE | `tests/unit/stock.service.test.ts` | Cambiar `costo_reposicion` no altera `movimientos_stock.costo_unitario` ya registrado. |
+| RN-MV6 | C2·T4 | ✅ | `tests/unit/stock.service.test.ts` | Cambiar `costo_reposicion` no altera `movimientos_stock.costo_unitario` ya registrado. |
 | RN-MV7 | C2·T3 | ✅ | `tests/integration/compras.integration.test.ts` | Fallo a mitad de `confirmar_compra`: no queda ni el lote ni el movimiento. Se reverifica en C6·T1. |
 | RN-MV8 | C2·T1 | ✅ | `tests/integration/stock.integration.test.ts` | `salida_venta` sin `venta_item_id` falla; `entrada_compra` con `venta_item_id` falla. |
-| RN-MV9 | C2·T4 | PENDIENTE | `tests/integration/compras.integration.test.ts` | La anulación genera movimientos nuevos y no borra los originales. |
+| RN-MV9 | C2·T4 | ✅ | `tests/integration/compras.integration.test.ts` | La anulación genera movimientos nuevos y no borra los originales. |
 | RN-MV10 | C2·T5 | PENDIENTE | `tests/unit/stock-ledger-guardrail.test.ts` | Guardrail estático: ninguna ruta de aplicación escribe `existencias_lote`. |
 | RN-MV11 | C2·T2 | ✅ | `tests/integration/stock.integration.test.ts` | Adulterar la caché con `service_role`, `verificar_existencias` lo reporta, `recalcular_existencias` la reconstruye. **Es el test que justifica la caché (D-02).** |
 | RN-MV12 | C2·T2 | ✅ | `tests/integration/stock.integration.test.ts` | 200 movimientos variados, recalcular, comparar fila por fila: sin diferencias. |
@@ -99,10 +99,10 @@ no arranque, esas cinco RN efectivamente no están en el alcance de ninguna tand
 | RN-LO1 | C2·T3 | ✅ | `tests/integration/compras.integration.test.ts` | Dos compras del lote "L-993" a $100 y $130 producen dos filas con sus costos. |
 | RN-LO2 | C2·T3 | ✅ | `tests/integration/compras.integration.test.ts` | Confirmar compra sin fecha de vencimiento, con `controla_vencimiento`, falla. |
 | RN-LO3 | C2·T3 | ✅ | `tests/integration/compras.integration.test.ts` | Comprar y vender sin control de lote funciona sin pedir lote y genera `lote_id` no nulo. |
-| RN-LO4 | C2·T4 | PENDIENTE | `tests/unit/stock.service.test.ts` | Lote vencido rechazado **para los tres roles, incluido admin**. Se reverifica en C4·T2 y C6·T1. |
-| RN-LO5 | C2·T4 | PENDIENTE | `tests/unit/stock.service.test.ts` | 2026-01, 2026-03 y `NULL` → sugiere enero; dos de igual vencimiento dan orden estable. |
+| RN-LO4 | C2·T4 | ✅ | `tests/unit/stock.service.test.ts` | Lote vencido rechazado **para los tres roles, incluido admin**. Se reverifica en C4·T2 and C6·T1. |
+| RN-LO5 | C2·T4 | ✅ | `tests/unit/stock.service.test.ts` | 2026-01, 2026-03 y `NULL` → sugiere enero; dos de igual vencimiento dan orden estable. |
 | RN-LO6 | C4·T2 | PENDIENTE | `tests/integration/ventas.integration.test.ts` | Sin motivo falla; con motivo, el movimiento queda con `fefo_respetado=false` y el texto. |
-| RN-LO7 | C2·T4 | PENDIENTE | `tests/unit/stock.service.test.ts` | Bloquear un lote y vender falla. El bloqueo/desbloqueo se implementa en C5·T2. |
+| RN-LO7 | C2·T4 | ✅ | `tests/unit/stock.service.test.ts` | Bloquear un lote y vender falla. El bloqueo/desbloqueo se implementa en C5·T2. |
 | RN-LO8 | C2·T5 | PENDIENTE | `tests/integration/stock.integration.test.ts` | Lote a 30 días con umbral 60 genera notificación y **permite** la venta. |
 
 ## RN-CM — Compras (C2)
@@ -110,8 +110,8 @@ no arranque, esas cinco RN efectivamente no están en el alcance de ninguna tand
 | RN | Tanda | Estado | Archivo previsto | Caso |
 |---|---|---|---|---|
 | RN-CM1 | C2·T3 | ✅ | `tests/integration/compras.integration.test.ts` | Con la compra en borrador la existencia no cambió; al confirmar, sí. |
-| RN-CM2 | C2·T4 | PENDIENTE | `tests/unit/compras.service.test.ts` | Editar ítems de una compra confirmada falla. |
-| RN-CM3 | C2·T4 | PENDIENTE | `tests/integration/compras.integration.test.ts` | Anular sin salidas genera contra-asientos; con una venta de por medio, falla. |
+| RN-CM2 | C2·T4 | ✅ | `tests/unit/compras.service.test.ts` | Editar ítems de una compra confirmada falla. |
+| RN-CM3 | C2·T4 | ✅ | `tests/integration/compras.integration.test.ts` | Anular sin salidas genera contra-asientos; con una venta de por medio, falla. |
 | RN-CM4 | C2·T3 | ✅ | `tests/integration/compras.integration.test.ts` | Segunda carga del mismo número de comprobante falla; número nulo no colisiona. |
 | RN-CM5 | C2·T3 | ✅ | `tests/integration/compras.integration.test.ts` | Dos compras a distinto costo dejan el `costo_reposicion` de la segunda y los movimientos de la primera intactos. |
 

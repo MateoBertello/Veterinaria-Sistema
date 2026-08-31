@@ -462,7 +462,7 @@ describe("BLOQUEANTE: el guardrail efectivamente ve los services del módulo com
   // Cada tanda que agrega un módulo nuevo agrega su nombre acá. Es la ÚNICA lista
   // escrita a mano de este archivo, y existe porque su ausencia es indetectable:
   // un guardrail que no escanea nada pasa en verde para siempre.
-  const MODULOS_COMERCIALES = ["productos", "proveedores"];
+  const MODULOS_COMERCIALES = ["productos", "proveedores", "stock", "compras"];
 
   const escaneados = listServiceFiles().map((f) => f.relPath);
 

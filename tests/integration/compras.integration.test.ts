@@ -584,4 +584,205 @@ describeIntegration("C2·T3 — Compras y confirmar_compra RPC", () => {
     expect(errDel).not.toBeNull();
     expect(errDel?.code).toBe("23503");
   });
+
+  it("RN-CM3: anular sin salidas genera contra-asientos", async () => {
+    // 1. Crear y confirmar compra de 2 ítems
+    const { data: c } = await serviceDb
+      .from("compras")
+      .insert({ tenant_id: tenantAId, proveedor_id: proveedorAId, fecha: "2026-09-08", usuario_id: usuarioAId })
+      .select("id").single();
+
+    const { data: items } = await serviceDb.from("compras_items").insert([
+      {
+        tenant_id: tenantAId, compra_id: c!.id, producto_id: productoAId, cantidad: 10,
+        costo_unitario_neto: 100, alicuota_iva: 21, codigo_lote: `L-ANUL-1-${Date.now()}`, fecha_vencimiento: "2027-12-31",
+        importe_neto: 1000, importe_iva: 210, importe_total: 1210,
+      },
+      {
+        tenant_id: tenantAId, compra_id: c!.id, producto_id: productoAId, cantidad: 20,
+        costo_unitario_neto: 100, alicuota_iva: 21, codigo_lote: `L-ANUL-2-${Date.now()}`, fecha_vencimiento: "2027-12-31",
+        importe_neto: 2000, importe_iva: 420, importe_total: 2420,
+      },
+    ]).select("id");
+
+    const itemIds = (items ?? []).map((i) => i.id);
+
+    await serviceDb.rpc("confirmar_compra", {
+      p_tenant_id: tenantAId, p_usuario_id: usuarioAId, p_compra_id: c!.id,
+    });
+
+    // 2. Anular compra
+    const motivo = "Factura anulada por devolución completa al proveedor";
+    const { data: resAnular, error: errAnular } = await serviceDb.rpc("anular_compra", {
+      p_tenant_id: tenantAId,
+      p_usuario_id: usuarioAId,
+      p_compra_id: c!.id,
+      p_motivo: motivo,
+    });
+    expect(errAnular).toBeNull();
+    expect(resAnular).toHaveLength(1);
+    expect(resAnular[0].movimientos_generados).toBe(2);
+
+    // Estado anulada y observaciones guardadas
+    const { data: cAnulada } = await serviceDb
+      .from("compras")
+      .select("estado, observaciones")
+      .eq("id", c!.id)
+      .single();
+    expect(cAnulada?.estado).toBe("anulada");
+    expect(cAnulada?.observaciones).toBe(motivo);
+
+    // Lotes de la compra tienen existencia en 0
+    const { data: lotes } = await serviceDb
+      .from("lotes")
+      .select("id")
+      .in("compra_item_id", itemIds);
+
+    for (const l of lotes ?? []) {
+      const { data: ex } = await serviceDb
+        .from("existencias_lote")
+        .select("cantidad")
+        .eq("lote_id", l.id)
+        .single();
+      expect(Number(ex?.cantidad)).toBe(0);
+    }
+  });
+
+  it("RN-CM3: anular con salidas falla", async () => {
+    const { data: c } = await serviceDb
+      .from("compras")
+      .insert({ tenant_id: tenantAId, proveedor_id: proveedorAId, fecha: "2026-09-08", usuario_id: usuarioAId })
+      .select("id").single();
+
+    const { data: it } = await serviceDb
+      .from("compras_items")
+      .insert({
+        tenant_id: tenantAId, compra_id: c!.id, producto_id: productoAId, cantidad: 10,
+        costo_unitario_neto: 100, alicuota_iva: 21, codigo_lote: `L-EXIT-${Date.now()}`, fecha_vencimiento: "2027-12-31",
+        importe_neto: 1000, importe_iva: 210, importe_total: 1210,
+      })
+      .select("id").single();
+
+    await serviceDb.rpc("confirmar_compra", {
+      p_tenant_id: tenantAId, p_usuario_id: usuarioAId, p_compra_id: c!.id,
+    });
+
+    const { data: lote } = await serviceDb
+      .from("lotes")
+      .select("id")
+      .eq("compra_item_id", it!.id)
+      .single();
+
+    // Generar una salida previa (por ejemplo salida_ajuste con motivo)
+    await serviceDb.from("movimientos_stock").insert({
+      tenant_id: tenantAId,
+      operacion_id: crypto.randomUUID(),
+      tipo: "salida_ajuste",
+      producto_id: productoAId,
+      lote_id: lote!.id,
+      cantidad: 2,
+      costo_unitario: 121,
+      costo_total: 242,
+      motivo: "Ajuste de prueba con salida",
+      usuario_id: usuarioAId,
+    });
+
+    // Intentar anular la compra -> debe fallar con PURCHASE_HAS_EXITS
+    const { error: errAnular } = await serviceDb.rpc("anular_compra", {
+      p_tenant_id: tenantAId,
+      p_usuario_id: usuarioAId,
+      p_compra_id: c!.id,
+      p_motivo: "Intento anular compra que ya tuvo salida",
+    });
+    expect(errAnular).not.toBeNull();
+    expect(errAnular?.message).toMatch(/PURCHASE_HAS_EXITS/);
+
+    // La compra sigue confirmada
+    const { data: cCheck } = await serviceDb
+      .from("compras")
+      .select("estado")
+      .eq("id", c!.id)
+      .single();
+    expect(cCheck?.estado).toBe("confirmada");
+  });
+
+  it("RN-CM3: anular sin motivo falla", async () => {
+    const { data: c } = await serviceDb
+      .from("compras")
+      .insert({ tenant_id: tenantAId, proveedor_id: proveedorAId, fecha: "2026-09-08", usuario_id: usuarioAId })
+      .select("id").single();
+
+    await serviceDb.from("compras_items").insert({
+      tenant_id: tenantAId, compra_id: c!.id, producto_id: productoAId, cantidad: 10,
+      costo_unitario_neto: 100, alicuota_iva: 21, codigo_lote: `L-NOMOT-${Date.now()}`, fecha_vencimiento: "2027-12-31",
+      importe_neto: 1000, importe_iva: 210, importe_total: 1210,
+    });
+
+    await serviceDb.rpc("confirmar_compra", {
+      p_tenant_id: tenantAId, p_usuario_id: usuarioAId, p_compra_id: c!.id,
+    });
+
+    // Sin motivo (null)
+    const { error: errNull } = await serviceDb.rpc("anular_compra", {
+      p_tenant_id: tenantAId, p_usuario_id: usuarioAId, p_compra_id: c!.id, p_motivo: null as any,
+    });
+    expect(errNull).not.toBeNull();
+    expect(errNull?.message).toMatch(/REASON_REQUIRED/);
+
+    // Con motivo corto (<10 chars)
+    const { error: errCorto } = await serviceDb.rpc("anular_compra", {
+      p_tenant_id: tenantAId, p_usuario_id: usuarioAId, p_compra_id: c!.id, p_motivo: "error",
+    });
+    expect(errCorto).not.toBeNull();
+    expect(errCorto?.message).toMatch(/REASON_REQUIRED/);
+  });
+
+  it("RN-MV9: nada se borra, se compensa", async () => {
+    const { data: c } = await serviceDb
+      .from("compras")
+      .insert({ tenant_id: tenantAId, proveedor_id: proveedorAId, fecha: "2026-09-08", usuario_id: usuarioAId })
+      .select("id").single();
+
+    const { data: items } = await serviceDb.from("compras_items").insert([
+      {
+        tenant_id: tenantAId, compra_id: c!.id, producto_id: productoAId, cantidad: 5,
+        costo_unitario_neto: 100, alicuota_iva: 21, codigo_lote: `L-MV9-1-${Date.now()}`, fecha_vencimiento: "2027-12-31",
+        importe_neto: 500, importe_iva: 105, importe_total: 605,
+      },
+      {
+        tenant_id: tenantAId, compra_id: c!.id, producto_id: productoAId, cantidad: 8,
+        costo_unitario_neto: 100, alicuota_iva: 21, codigo_lote: `L-MV9-2-${Date.now()}`, fecha_vencimiento: "2027-12-31",
+        importe_neto: 800, importe_iva: 168, importe_total: 968,
+      },
+    ]).select("id");
+
+    const itemIds = (items ?? []).map((i) => i.id);
+
+    await serviceDb.rpc("confirmar_compra", {
+      p_tenant_id: tenantAId, p_usuario_id: usuarioAId, p_compra_id: c!.id,
+    });
+
+    await serviceDb.rpc("anular_compra", {
+      p_tenant_id: tenantAId, p_usuario_id: usuarioAId, p_compra_id: c!.id,
+      p_motivo: "Compensación completa por error de carga en sistema",
+    });
+
+    const { data: lotes } = await serviceDb
+      .from("lotes")
+      .select("id")
+      .in("compra_item_id", itemIds);
+
+    const loteIds = (lotes ?? []).map((l) => l.id);
+
+    // En vez de 0 movimientos, hay 4 (2 entradas y 2 salidas de ajuste)
+    const { data: movs } = await serviceDb
+      .from("movimientos_stock")
+      .select("id, tipo")
+      .in("lote_id", loteIds);
+
+    expect(movs).toHaveLength(4);
+    const tipos = (movs ?? []).map((m) => m.tipo);
+    expect(tipos.filter((t) => t === "entrada_compra")).toHaveLength(2);
+    expect(tipos.filter((t) => t === "salida_ajuste")).toHaveLength(2);
+  });
 });

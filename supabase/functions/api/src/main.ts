@@ -43,6 +43,12 @@ import {
   conversionesRouter,
 } from "./modules/productos/productos.controller.ts";
 import { proveedoresRouter } from "./modules/proveedores/proveedores.controller.ts";
+import {
+  lotesRouter,
+  movimientosRouter,
+  existenciasRouter,
+} from "./modules/stock/stock.controller.ts";
+import { comprasRouter } from "./modules/compras/compras.controller.ts";
 
 const app = new Hono().basePath("/api/v1");
 
@@ -100,6 +106,12 @@ app.route("/productos", productosRouter);
 app.route("/familias-producto", familiasRouter);
 app.route("/producto-conversiones", conversionesRouter);
 app.route("/proveedores", proveedoresRouter);
+
+// ─── Stock y Compras (módulo vendible stock — Etapa C2) ────────────────────────
+app.route("/lotes", lotesRouter);
+app.route("/movimientos-stock", movimientosRouter);
+app.route("/existencias", existenciasRouter);
+app.route("/compras", comprasRouter);
 
 // ─── Doctores + Horarios de Atención (Transversal — Etapa 4) ───────────────────
 // Doctores: ABM (listar/editar) bajo manage_users.
