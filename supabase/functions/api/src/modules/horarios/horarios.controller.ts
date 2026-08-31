@@ -1,4 +1,4 @@
-import { Hono, type Context } from "hono";
+import { Hono, type Context, type MiddlewareHandler } from "hono";
 import { HorarioService, type CallerContext } from "./horarios.service.ts";
 import { CrearFranjaSchema, AlternarActivoSchema } from "./horarios.schemas.ts";
 import { DomainError, ErrorCode } from "../../shared/errors.ts";
@@ -37,28 +37,40 @@ export const horariosDoctorRouter = new Hono();
 // Ojo con el alcance: este router se monta en /doctores JUNTO con el de gestión
 // de profesionales, así que un `use("/*")` acá le aplicaba manage_schedules a
 // TODO /doctores —incluido el `GET /doctores` que sirve el otro router— y le
-// devolvía 403 a la recepcionista al abrir "Agendar turno". El middleware se
-// acota a las rutas que este router realmente atiende.
-const gateHorarios = [tenantContext, requireActiveTenant, requirePermission("manage_schedules")] as const;
-
-horariosDoctorRouter.use("/horarios/resumen", ...gateHorarios);
-horariosDoctorRouter.use("/:id/horarios", ...gateHorarios);
+// devolvía 403 a la recepcionista al abrir "Agendar turno".
+//
+// Por eso el gate NO puede montarse por prefijo: va adosado a cada ruta, en la
+// misma línea en que se la declara. Antes se enumeraban los paths en dos `use()`
+// aparte, y esa lista podía quedar desfasada de las rutas reales: cualquier ruta
+// nueva fuera de esos dos patrones quedaba sin autenticación alguna, ni siquiera
+// tenantContext. Lo que impide que eso vuelva a pasar es el guard de
+// `tests/unit/horarios.controller.test.ts`, que recorre las rutas registradas y
+// exige que todas rechacen al anónimo con 401.
+//
+// El tipo es una tupla `readonly` de longitud fija a propósito: spread de un
+// `MiddlewareHandler[]` común le hace perder a Hono la inferencia del path, y
+// `c.req.param("id")` pasa a ser `string | undefined`.
+const gateHorarios: readonly [MiddlewareHandler, MiddlewareHandler, MiddlewareHandler] = [
+  tenantContext,
+  requireActiveTenant,
+  requirePermission("manage_schedules"),
+];
 
 // ── GET /doctores/horarios/resumen ──────────────────────────────────────────────
 // Ruta estática: declarada antes de las rutas con :id para evitar capturas.
-horariosDoctorRouter.get("/horarios/resumen", async (c) => {
+horariosDoctorRouter.get("/horarios/resumen", ...gateHorarios, async (c) => {
   const resumen = await HorarioService.resumen(callerCtx(c));
   return c.json(ok(resumen), 200);
 });
 
 // ── GET /doctores/:id/horarios ──────────────────────────────────────────────────
-horariosDoctorRouter.get("/:id/horarios", async (c) => {
+horariosDoctorRouter.get("/:id/horarios", ...gateHorarios, async (c) => {
   const franjas = await HorarioService.listarPorDoctor(c.req.param("id"), callerCtx(c));
   return c.json(ok(franjas), 200);
 });
 
 // ── POST /doctores/:id/horarios ─────────────────────────────────────────────────
-horariosDoctorRouter.post("/:id/horarios", async (c) => {
+horariosDoctorRouter.post("/:id/horarios", ...gateHorarios, async (c) => {
   const body   = await c.req.json().catch(() => ({}));
   const parsed = CrearFranjaSchema.safeParse(body);
   if (!parsed.success) {

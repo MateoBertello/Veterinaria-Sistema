@@ -1,6 +1,7 @@
 import { DomainError, ErrorCode } from "../../shared/errors.ts";
 import { recordAudit } from "../../shared/audit.ts";
 import { getServiceDb } from "../../shared/db.ts";
+import { assertDoctorAsignable } from "../../shared/profesional.ts";
 import {
   CrearTurnoSchema,
   type CrearTurnoDto,
@@ -29,10 +30,22 @@ export interface TurnoPublico {
   cancellationReason:  string | null;
   cancelledAt:         string | null;
   servicio:            { id: string; nombre: string; tipo: string; duracionMinutos: number } | null;
-  doctor:              { id: string; name: string } | null;
+  /**
+   * RN-HOR8: `available` viaja en el DTO para que la pantalla de reprogramar
+   * pueda seguir MOSTRANDO el profesional asignado cuando fue dado de baja
+   * después de agendar el turno (el selector, en cambio, sólo ofrece
+   * disponibles). Filtrar las opciones nuevas no es ocultar lo ya asignado.
+   */
+  doctor:              { id: string; name: string; available: boolean } | null;
   mascota:             { id: string; name: string } | null;
   cliente:             { id: string; fullName: string } | null;
   accionesDisponibles: string[];
+  /**
+   * Turno vencido sin cerrar: su fecha/hora ya pasó y sigue en un estado no
+   * terminal (nadie lo completó ni lo canceló). Condición derivada — no se
+   * persiste ni se recalcula por un job; se recalcula en cada lectura.
+   */
+  vencido:             boolean;
 }
 
 /** Estados terminales del ciclo de vida (RN-ES3). */
@@ -55,7 +68,7 @@ export interface SlotDisponible {
 const TURNO_SELECT =
   "id, date, start_time, end_time, status, reason, notes, cancellation_reason, cancelled_at, " +
   "servicio:servicios(id, nombre, tipo, duracion_minutos), " +
-  "doctor:doctores(id, name), " +
+  "doctor:doctores(id, name, available), " +
   "mascota:mascotas(id, name), " +
   "cliente:clientes(id, full_name)";
 
@@ -89,6 +102,44 @@ function diaSemana(date: string): number {
   return new Date(`${date}T00:00:00Z`).getUTCDay();
 }
 
+/**
+ * Fecha ("YYYY-MM-DD") y hora ("minutos desde medianoche") de "ahora", en UTC.
+ *
+ * El sistema no tiene zona horaria de clínica configurada: `vacunacion.service.ts`
+ * (`today()`) y `web/src/components/turnos/fechas.ts` ya usan UTC de punta a punta
+ * ("Todo en UTC para evitar corrimientos por zona horaria"). Se sigue el mismo
+ * criterio acá para que frontend y backend coincidan en qué es "hoy"/"ahora"; si
+ * la clínica opera en otra zona, es una decisión de producto pendiente, no algo
+ * para inventar en este Service.
+ */
+function ahoraUTC(): { fecha: string; horaMin: number } {
+  const iso = new Date().toISOString(); // "YYYY-MM-DDTHH:MM:SS.sssZ"
+  return { fecha: iso.slice(0, 10), horaMin: toMinutes(iso.slice(11, 16)) };
+}
+
+/**
+ * RN-TU1: no se agenda ni se reprograma a una fecha/hora ya pasada. Compartida por
+ * `crearTurno` y `modificarTurno` para que la regla no vuelva a divergir entre las
+ * dos rutas (el bug original: solo se comparaba la fecha, nunca la hora).
+ */
+function assertFechaHoraFutura(date: string, startTime: string, mensaje: string): void {
+  const { fecha: hoy, horaMin: ahoraMin } = ahoraUTC();
+  if (date < hoy || (date === hoy && toMinutes(startTime) <= ahoraMin)) {
+    throw new DomainError(ErrorCode.PAST_DATE, 422, mensaje);
+  }
+}
+
+/**
+ * Turno vencido sin cerrar: no está en un estado terminal y su bloque
+ * [date, endTime) ya terminó. Condición derivada del mismo "ahora" UTC que
+ * RN-TU1 — no es una columna de estado que haya que mantener sincronizada.
+ */
+function calcularVencido(date: string, endTime: string, status: string): boolean {
+  if (ESTADOS_TERMINALES.has(status)) return false;
+  const { fecha: hoy, horaMin: ahoraMin } = ahoraUTC();
+  return date < hoy || (date === hoy && toMinutes(endTime) <= ahoraMin);
+}
+
 function unwrapEmbed<T>(v: unknown): T | null {
   // PostgREST devuelve el embed como objeto o como array de un elemento según la relación.
   if (Array.isArray(v)) return (v[0] as T) ?? null;
@@ -119,10 +170,23 @@ function toPublic(row: Record<string, unknown>, accionesDisponibles: string[] = 
           duracionMinutos: svc["duracion_minutos"] as number,
         }
       : null,
-    doctor:              doc ? { id: doc["id"] as string, name: doc["name"] as string } : null,
+    doctor:              doc
+      ? {
+          id:        doc["id"]   as string,
+          name:      doc["name"] as string,
+          // Turnos viejos leídos por un select sin la columna: se asume
+          // disponible (el caso "de baja" es el excepcional y se marca).
+          available: (doc["available"] as boolean | undefined) ?? true,
+        }
+      : null,
     mascota:             pet ? { id: pet["id"] as string, name: pet["name"] as string } : null,
     cliente:             cli ? { id: cli["id"] as string, fullName: cli["full_name"] as string } : null,
     accionesDisponibles,
+    vencido: calcularVencido(
+      row["date"] as string,
+      row["end_time"] as string,
+      row["status"] as string,
+    ),
   };
 }
 
@@ -181,11 +245,8 @@ export const TurnoService = {
       );
     }
 
-    // RN-TU1: no se agenda en fechas pasadas (comparación lexicográfica de YYYY-MM-DD).
-    const hoy = new Date().toISOString().slice(0, 10);
-    if (data.date < hoy) {
-      throw new DomainError(ErrorCode.PAST_DATE, 422, "No se puede agendar en una fecha pasada");
-    }
+    // RN-TU1: no se agenda en fecha/hora ya pasada.
+    assertFechaHoraFutura(data.date, data.startTime, "No se puede agendar en una fecha u hora ya pasada");
 
     // RN-TU6: la mascota debe existir en el tenant y estar viva (estado='Activa').
     const { data: mascota } = await db
@@ -220,8 +281,12 @@ export const TurnoService = {
     }
     const endTime = fromMinutes(finMin);
 
-    // RN-TU2: si hay doctor, el bloque [start, end) debe caber en una franja activa.
     if (data.doctorId) {
+      // RN-HOR8: un profesional dado de baja no recibe turnos nuevos. Va ANTES
+      // de la franja porque un doctor de baja conserva sus franjas: sin esta
+      // guarda el bloque encajaba y el turno se agendaba igual.
+      await assertDoctorAsignable(db, ctx.tenantId, data.doctorId);
+      // RN-TU2: el bloque [start, end) debe caber en una franja activa.
       await this._assertBloqueEnFranja(db, ctx.tenantId, data.doctorId, data.date, inicioMin, finMin);
     }
 
@@ -410,11 +475,13 @@ export const TurnoService = {
         );
       }
 
-      // RN-TU1: no fechas pasadas.
-      const hoy = new Date().toISOString().slice(0, 10);
-      if (efectivaDate < hoy) {
-        throw new DomainError(ErrorCode.PAST_DATE, 422, "No se puede mover el turno a una fecha pasada");
-      }
+      // RN-TU1: no se reprograma a una fecha/hora ya pasada (incluye un turno
+      // vencido sin cerrar: solo puede moverse a un horario efectivamente futuro).
+      assertFechaHoraFutura(
+        efectivaDate,
+        efectivoStartTime,
+        "No se puede mover el turno a una fecha u hora ya pasada",
+      );
 
       const duracion  = svc["duracion_minutos"] as number;
       const inicioMin = toMinutes(efectivoStartTime);
@@ -423,6 +490,18 @@ export const TurnoService = {
         throw new DomainError(ErrorCode.VALIDATION_ERROR, 422, "La duración del servicio excede el final del día");
       }
       efectivoEndTime = fromMinutes(finMin);
+
+      // RN-HOR8: la baja del profesional corta las asignaciones NUEVAS, no las
+      // que ya existen. Por eso la guarda mira si el turno CAMBIA de doctor y
+      // no el doctor efectivo: mover la hora de un turno cuyo profesional fue
+      // dado de baja después de agendarlo sigue permitido (bloquearlo
+      // castigaría al paciente por una decisión administrativa). Sólo se exige
+      // un profesional disponible cuando el usuario elige uno distinto.
+      // El frontend reenvía `doctorId` sin cambios al reprogramar, así que la
+      // comparación es contra el valor actual, no contra `!== undefined`.
+      if (efectivoDoctorId && efectivoDoctorId !== (cur["doctor_id"] as string | null)) {
+        await assertDoctorAsignable(db, ctx.tenantId, efectivoDoctorId);
+      }
 
       // RN-TU2: bloque debe caber en franja si hay doctor.
       if (efectivoDoctorId) {

@@ -6,7 +6,9 @@ export type AuditAction =
 
 export type AuditModule =
   | "clients" | "pets" | "medical_records" | "appointments" | "daycare"
-  | "users"   | "security" | "services" | "system" | "platform";
+  | "users"   | "security" | "services" | "system" | "platform"
+  // Catálogos clínicos del tenant (especies, razas, tipos de vacuna).
+  | "catalogs";
 
 export interface AuditPayload {
   tenantId:   string | null;

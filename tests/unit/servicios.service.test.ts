@@ -158,6 +158,46 @@ describe("ServicioService", () => {
     ).rejects.toMatchObject({ code: ErrorCode.VALIDATION_ERROR, statusCode: 422 });
   });
 
+  it("A3 — RN-SV3: el guard de turnos futuros filtra por tenant_id", async () => {
+    // La consulta corre con service role (RLS bypasseada). Sin `tenant_id`
+    // contaba los turnos de TODAS las clínicas que apunten al mismo
+    // servicio_id: un turno ajeno bloqueaba la baja acá y, de paso, confirmaba
+    // su existencia. `turnos.servicio_id` referencia `servicios(id)` a secas,
+    // así que la integridad referencial no lo impide.
+    // Se registra cada `.eq()` junto a la tabla del `.from()` que lo precede,
+    // para poder afirmar sobre la consulta a `turnos` en particular.
+    const db: Record<string, unknown> = {};
+    const filtros: Array<{ tabla: string; col: string; val: unknown }> = [];
+    let tablaActual = "";
+
+    db["from"]   = vi.fn().mockImplementation((t: string) => { tablaActual = t; return db; });
+    db["select"] = vi.fn().mockReturnValue(db);
+    db["update"] = vi.fn().mockReturnValue(db);
+    db["gte"]    = vi.fn().mockReturnValue(db);
+    db["order"]  = vi.fn().mockReturnValue(db);
+    db["eq"]     = vi.fn().mockImplementation((col: string, val: unknown) => {
+      filtros.push({ tabla: tablaActual, col, val });
+      return db;
+    });
+    db["range"]  = vi.fn().mockResolvedValue({ data: [], error: null, count: 0 });
+    db["single"] = vi.fn().mockResolvedValue({
+      data: { id: SVC_ID, tenant_id: TENANT_ID, nombre: "Consulta", tipo: "clinica",
+              duracion_minutos: 30, requiere_profesional: true, descripcion: null,
+              activo: true, created_at: "2026-06-22T00:00:00Z" },
+      error: null,
+    });
+    db["maybeSingle"] = vi.fn().mockResolvedValue({ data: null, error: null });
+
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    await ServicioService.cambiarEstado(SVC_ID, false, ctx);
+
+    const filtrosTurnos = filtros.filter((f) => f.tabla === "turnos");
+    expect(filtrosTurnos.length).toBeGreaterThan(0);
+    expect(filtrosTurnos).toContainEqual({ tabla: "turnos", col: "servicio_id", val: SVC_ID });
+    expect(filtrosTurnos).toContainEqual({ tabla: "turnos", col: "tenant_id", val: TENANT_ID });
+  });
+
   // ── RN-SV4 ────────────────────────────────────────────────────────────────
 
   it("RN-SV4: crearServicio con requiereProfesional=false persiste el valor correctamente", async () => {

@@ -26,6 +26,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import app from "../../supabase/functions/api/src/main.ts";
 import { SUPABASE_URL, SUPABASE_ANON_KEY, SERVICE_ROLE_KEY, describeIntegration } from "./_env.ts";
+import { crearUsuarioAuth, limpiarTenant, catalogoDelTenant } from "./_teardown.ts";
 
 function skipIfNoCredentials(): boolean {
   if (!SUPABASE_URL || !SERVICE_ROLE_KEY || !SUPABASE_ANON_KEY) {
@@ -35,12 +36,6 @@ function skipIfNoCredentials(): boolean {
   return false;
 }
 
-const adminHeaders = () => ({
-  "Content-Type":  "application/json",
-  "Authorization": `Bearer ${SERVICE_ROLE_KEY}`,
-  "apikey":        SERVICE_ROLE_KEY,
-});
-
 async function signIn(email: string, password: string): Promise<string> {
   const res = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=password`, {
     method:  "POST",
@@ -49,16 +44,6 @@ async function signIn(email: string, password: string): Promise<string> {
   });
   const data = await res.json() as { access_token?: string };
   return data.access_token ?? "";
-}
-
-async function createAuthUser(email: string, appMetadata: Record<string, unknown>): Promise<string> {
-  const res = await fetch(`${SUPABASE_URL}/auth/v1/admin/users`, {
-    method:  "POST",
-    headers: adminHeaders(),
-    body:    JSON.stringify({ email, password: "TestPass123!", email_confirm: true, app_metadata: appMetadata }),
-  });
-  const user = await res.json() as { id?: string };
-  return user.id ?? "";
 }
 
 async function callApp(path: string, opts: { method?: string; jwt?: string; body?: unknown } = {}) {
@@ -86,7 +71,7 @@ async function provisionTenant(serviceDb: SupabaseClient, sufijo: string) {
   await serviceDb.rpc("on_tenant_created", { p_tenant_id: tenantId });
 
   const email  = `admin-vacunacion-${sufijo}@test.com`;
-  const userId = await createAuthUser(email, { tenant_id: tenantId });
+  const userId = await crearUsuarioAuth(email, { tenant_id: tenantId });
   const { data: rolAdmin } = await serviceDb
     .from("roles").select("id").eq("tenant_id", tenantId).eq("name", "admin").single();
   await serviceDb.from("usuarios").insert({
@@ -101,26 +86,26 @@ async function provisionTenant(serviceDb: SupabaseClient, sufijo: string) {
     .select("id")
     .single();
 
-  return { tenantId, jwt, userId, clienteId: cliente?.id as string };
+  // Catálogo clínico DE ESTA CLÍNICA. Desde
+  // 20260827000001_catalogos_por_tenant.sql lo siembra `on_tenant_created` por
+  // tenant, y las FKs compuestas rechazan el catálogo de otra: el fixture tiene
+  // que llevar el suyo encima, no uno global.
+  const catalogo = await catalogoDelTenant(serviceDb, tenantId);
+
+  return { tenantId, jwt, userId, clienteId: cliente?.id as string, ...catalogo };
 }
 
 // ─── Estado global del arnés ──────────────────────────────────────────────────
 
 let serviceDb: SupabaseClient;
-let tenantA = { tenantId: "", jwt: "", userId: "", clienteId: "" };
-let tenantB = { tenantId: "", jwt: "", userId: "", clienteId: "" };
-let especieId    = "";
-let tipoVacunaId = "";
+const tenantVacio = { tenantId: "", jwt: "", userId: "", clienteId: "", especieId: "", razaId: "", tipoVacunaId: "" };
+let tenantA = { ...tenantVacio };
+let tenantB = { ...tenantVacio };
 
 beforeAll(async () => {
   if (skipIfNoCredentials()) return;
 
   serviceDb = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, { auth: { persistSession: false } });
-
-  const { data: esp } = await serviceDb.from("especies").select("id").limit(1).single();
-  especieId = esp?.id ?? "";
-  const { data: tv } = await serviceDb.from("tipos_vacuna").select("id").eq("active", true).limit(1).single();
-  tipoVacunaId = tv?.id ?? "";
 
   tenantA = await provisionTenant(serviceDb, "VA");
   tenantB = await provisionTenant(serviceDb, "VB");
@@ -128,41 +113,26 @@ beforeAll(async () => {
 
 afterAll(async () => {
   if (!serviceDb) return;
-  for (const tid of [tenantA.tenantId, tenantB.tenantId]) {
-    if (!tid) continue;
-    // ORDEN IMPORTANTE: primero el tenant, después las cuentas de Auth.
-    // Desde que `usuarios.id` referencia a `auth.users` con ON DELETE CASCADE
-    // (migración 20260725000005), borrar la cuenta arrastra la fila espejo — y
-    // eso lo frena cualquier FK que apunte al usuario, como
-    // `historial_clinico.professional_id`. Borrando primero el tenant, su
-    // cascade se lleva todo lo dependiente y la cuenta sale limpia. Al revés,
-    // el DELETE de Auth falla en silencio y deja cuentas huérfanas que hacen
-    // fallar la corrida SIGUIENTE (el email ya existe).
-    const { data: usuarios } = await serviceDb.from("usuarios").select("id").eq("tenant_id", tid);
-    await serviceDb.from("tenants").delete().eq("id", tid);
-    for (const u of (usuarios ?? []) as { id: string }[]) {
-      await fetch(`${SUPABASE_URL}/auth/v1/admin/users/${u.id}`, { method: "DELETE", headers: adminHeaders() });
-    }
-  }
+  for (const tid of [tenantA.tenantId, tenantB.tenantId]) await limpiarTenant(serviceDb, tid);
 });
 
 // ─── Helpers de datos ──────────────────────────────────────────────────────────
 
-async function crearMascota(jwt: string, clienteId: string, name: string): Promise<string> {
+async function crearMascota(t: typeof tenantA, name: string): Promise<string> {
   const res = await callApp("/mascotas", {
-    method: "POST", jwt,
-    body: { name, clientId: clienteId, especieId, sex: "Macho", tamano: "Mediano" },
+    method: "POST", jwt: t.jwt,
+    body: { name, clientId: t.clienteId, especieId: t.especieId, sex: "Macho", tamano: "Mediano" },
   });
   const body = await res.json() as { data: { id: string } };
   return body.data.id;
 }
 
 /** Siembra una dosis Pendiente para una mascota del tenant indicado vía serviceDb. */
-async function seedDosis(tenantId: string, petId: string, fechaEstimada = "2026-10-01"): Promise<string> {
+async function seedDosis(t: typeof tenantA, petId: string, fechaEstimada = "2026-10-01"): Promise<string> {
   const { data } = await serviceDb
     .from("plan_vacunacion")
     .insert({
-      tenant_id: tenantId, pet_id: petId, tipo_vacuna_id: tipoVacunaId,
+      tenant_id: t.tenantId, pet_id: petId, tipo_vacuna_id: t.tipoVacunaId,
       fecha_estimada: fechaEstimada, estado: "Pendiente",
     })
     .select("id")
@@ -211,8 +181,8 @@ describeIntegration("Vacunación: aislamiento de tenant en las 4 operaciones (bl
   it("GET /mascotas/:petId/plan-vacunacion — B no lista dosis de mascota de A → 404 MASCOTA_NOT_FOUND", async () => {
     if (skipIfNoCredentials() || !tenantA.jwt || !tenantB.jwt) return;
 
-    const petId = await crearMascota(tenantA.jwt, tenantA.clienteId, "MascotaGET_B");
-    await seedDosis(tenantA.tenantId, petId);
+    const petId = await crearMascota(tenantA, "MascotaGET_B");
+    await seedDosis(tenantA, petId);
 
     const res  = await callApp(`/mascotas/${petId}/plan-vacunacion`, { jwt: tenantB.jwt });
     const body = await res.json() as { error: { code: string } };
@@ -224,11 +194,11 @@ describeIntegration("Vacunación: aislamiento de tenant en las 4 operaciones (bl
   it("POST /mascotas/:petId/plan-vacunacion — B no programa dosis para mascota de A → 404 MASCOTA_NOT_FOUND", async () => {
     if (skipIfNoCredentials() || !tenantA.jwt || !tenantB.jwt) return;
 
-    const petId = await crearMascota(tenantA.jwt, tenantA.clienteId, "MascotaPOST_B");
+    const petId = await crearMascota(tenantA, "MascotaPOST_B");
 
     const res  = await callApp(`/mascotas/${petId}/plan-vacunacion`, {
       method: "POST", jwt: tenantB.jwt,
-      body: { tipoVacunaId, fechaEstimada: futureDate(30) },
+      body: { tipoVacunaId: tenantA.tipoVacunaId, fechaEstimada: futureDate(30) },
     });
     const body = await res.json() as { error: { code: string } };
 
@@ -239,8 +209,8 @@ describeIntegration("Vacunación: aislamiento de tenant en las 4 operaciones (bl
   it("PUT /plan-vacunacion/:id — B no edita dosis de A → 404 VACCINE_PLAN_NOT_FOUND", async () => {
     if (skipIfNoCredentials() || !tenantA.jwt || !tenantB.jwt) return;
 
-    const petId   = await crearMascota(tenantA.jwt, tenantA.clienteId, "MascotaPUT_B");
-    const dosisId = await seedDosis(tenantA.tenantId, petId);
+    const petId   = await crearMascota(tenantA, "MascotaPUT_B");
+    const dosisId = await seedDosis(tenantA, petId);
 
     const res  = await callApp(`/plan-vacunacion/${dosisId}`, {
       method: "PUT", jwt: tenantB.jwt,
@@ -258,8 +228,8 @@ describeIntegration("Vacunación: aislamiento de tenant en las 4 operaciones (bl
   it("PATCH /plan-vacunacion/:id/cancelar — B no cancela dosis de A → 404 VACCINE_PLAN_NOT_FOUND", async () => {
     if (skipIfNoCredentials() || !tenantA.jwt || !tenantB.jwt) return;
 
-    const petId   = await crearMascota(tenantA.jwt, tenantA.clienteId, "MascotaPATCH_B");
-    const dosisId = await seedDosis(tenantA.tenantId, petId);
+    const petId   = await crearMascota(tenantA, "MascotaPATCH_B");
+    const dosisId = await seedDosis(tenantA, petId);
 
     const res  = await callApp(`/plan-vacunacion/${dosisId}/cancelar`, {
       method: "PATCH", jwt: tenantB.jwt,
@@ -289,8 +259,8 @@ describeIntegration("Vacunación ↔ Eutanasia: cruce RN-PV4 (dos caras)", () =>
   it("cara 1 (RPC): eutanasia cancela dosis Pendiente de la mascota", async () => {
     if (skipIfNoCredentials() || !tenantA.jwt) return;
 
-    const petId   = await crearMascota(tenantA.jwt, tenantA.clienteId, "EutanasiaCaraUno");
-    const dosisId = await seedDosis(tenantA.tenantId, petId);
+    const petId   = await crearMascota(tenantA, "EutanasiaCaraUno");
+    const dosisId = await seedDosis(tenantA, petId);
 
     // Verificar punto de partida
     expect(await getEstadoDosis(dosisId)).toBe("Pendiente");
@@ -317,7 +287,7 @@ describeIntegration("Vacunación ↔ Eutanasia: cruce RN-PV4 (dos caras)", () =>
     if (skipIfNoCredentials() || !tenantA.jwt) return;
 
     // Crear una mascota nueva y matarla
-    const petId = await crearMascota(tenantA.jwt, tenantA.clienteId, "EutanasiaCaraDosA");
+    const petId = await crearMascota(tenantA, "EutanasiaCaraDosA");
     const res1 = await callApp(`/mascotas/${petId}/eutanasia`, {
       method: "POST", jwt: tenantA.jwt,
       body: { date: "2026-07-02", professionalId: tenantA.userId, description: "Test PET_DECEASED", euthanasiaConfirmed: true },
@@ -327,7 +297,7 @@ describeIntegration("Vacunación ↔ Eutanasia: cruce RN-PV4 (dos caras)", () =>
     // Intentar programar una dosis para la mascota ya Fallecida
     const res2 = await callApp(`/mascotas/${petId}/plan-vacunacion`, {
       method: "POST", jwt: tenantA.jwt,
-      body: { tipoVacunaId, fechaEstimada: futureDate(30) },
+      body: { tipoVacunaId: tenantA.tipoVacunaId, fechaEstimada: futureDate(30) },
     });
     const body2 = await res2.json() as { error: { code: string } };
 
@@ -339,8 +309,8 @@ describeIntegration("Vacunación ↔ Eutanasia: cruce RN-PV4 (dos caras)", () =>
     if (skipIfNoCredentials() || !tenantA.jwt) return;
 
     // Crear mascota con dosis Pendiente y luego registrar eutanasia
-    const petId   = await crearMascota(tenantA.jwt, tenantA.clienteId, "EutanasiaCaraDosB");
-    const dosisId = await seedDosis(tenantA.tenantId, petId);
+    const petId   = await crearMascota(tenantA, "EutanasiaCaraDosB");
+    const dosisId = await seedDosis(tenantA, petId);
 
     const res1 = await callApp(`/mascotas/${petId}/eutanasia`, {
       method: "POST", jwt: tenantA.jwt,
@@ -373,8 +343,8 @@ describeIntegration("Vacunación: marcar dosis Aplicada (transacción plan+event
   it("happy path: dosis Aplicada + evento 'Vacunación' enlazado + auditoría, todo atómico", async () => {
     if (skipIfNoCredentials() || !tenantA.jwt) return;
 
-    const petId   = await crearMascota(tenantA.jwt, tenantA.clienteId, "AplicarOK");
-    const dosisId = await seedDosis(tenantA.tenantId, petId);
+    const petId   = await crearMascota(tenantA, "AplicarOK");
+    const dosisId = await seedDosis(tenantA, petId);
     expect(await getEstadoDosis(dosisId)).toBe("Pendiente");
 
     const res = await callApp(`/plan-vacunacion/${dosisId}/aplicar`, {
@@ -407,8 +377,8 @@ describeIntegration("Vacunación: marcar dosis Aplicada (transacción plan+event
   it("RN-PV5: aplicar una dosis ya Aplicada → 422 VACCINE_PLAN_ALREADY_APPLIED", async () => {
     if (skipIfNoCredentials() || !tenantA.jwt) return;
 
-    const petId   = await crearMascota(tenantA.jwt, tenantA.clienteId, "AplicarDosVeces");
-    const dosisId = await seedDosis(tenantA.tenantId, petId);
+    const petId   = await crearMascota(tenantA, "AplicarDosVeces");
+    const dosisId = await seedDosis(tenantA, petId);
 
     const res1 = await callApp(`/plan-vacunacion/${dosisId}/aplicar`, {
       method: "PATCH", jwt: tenantA.jwt, body: { professionalId: tenantA.userId },
@@ -426,8 +396,8 @@ describeIntegration("Vacunación: marcar dosis Aplicada (transacción plan+event
   it("rollback atómico: si falla el INSERT del evento, la dosis NO queda Aplicada (ni evento ni auditoría)", async () => {
     if (skipIfNoCredentials() || !tenantA.jwt) return;
 
-    const petId   = await crearMascota(tenantA.jwt, tenantA.clienteId, "AplicarRollback");
-    const dosisId = await seedDosis(tenantA.tenantId, petId);
+    const petId   = await crearMascota(tenantA, "AplicarRollback");
+    const dosisId = await seedDosis(tenantA, petId);
 
     // Falla determinista: weight_kg fuera del CHECK (BETWEEN 0 AND 200) del evento.
     // El INSERT en historial_clinico (paso 1) revienta → toda la transacción rollbackea.
@@ -459,8 +429,8 @@ describeIntegration("Vacunación: marcar dosis Aplicada (transacción plan+event
   it("cruce RN-PV4: una dosis cancelada por eutanasia NO puede marcarse Aplicada → 422", async () => {
     if (skipIfNoCredentials() || !tenantA.jwt) return;
 
-    const petId   = await crearMascota(tenantA.jwt, tenantA.clienteId, "AplicarTrasEutanasia");
-    const dosisId = await seedDosis(tenantA.tenantId, petId);
+    const petId   = await crearMascota(tenantA, "AplicarTrasEutanasia");
+    const dosisId = await seedDosis(tenantA, petId);
 
     // Eutanasia (Etapa 5): cancela la dosis Pendiente vía RN-PV4.
     const resEut = await callApp(`/mascotas/${petId}/eutanasia`, {
@@ -485,8 +455,8 @@ describeIntegration("Vacunación: marcar dosis Aplicada (transacción plan+event
   it("aislamiento: B no puede aplicar una dosis de A → 404 VACCINE_PLAN_NOT_FOUND, dosis de A intacta", async () => {
     if (skipIfNoCredentials() || !tenantA.jwt || !tenantB.jwt) return;
 
-    const petId   = await crearMascota(tenantA.jwt, tenantA.clienteId, "AplicarAjena");
-    const dosisId = await seedDosis(tenantA.tenantId, petId);
+    const petId   = await crearMascota(tenantA, "AplicarAjena");
+    const dosisId = await seedDosis(tenantA, petId);
 
     const res = await callApp(`/plan-vacunacion/${dosisId}/aplicar`, {
       method: "PATCH", jwt: tenantB.jwt, body: { professionalId: tenantB.userId },
@@ -510,14 +480,14 @@ describeIntegration("Vacunación: CRUD básico (happy path end-to-end)", () => {
   it("programar → listar (Proxima) → editar → cancelar", async () => {
     if (skipIfNoCredentials() || !tenantA.jwt) return;
 
-    const petId = await crearMascota(tenantA.jwt, tenantA.clienteId, "CrudBasico");
+    const petId = await crearMascota(tenantA, "CrudBasico");
     const fecha1 = futureDate(20);
     const fecha2 = futureDate(40);
 
     // Programar
     const resPost = await callApp(`/mascotas/${petId}/plan-vacunacion`, {
       method: "POST", jwt: tenantA.jwt,
-      body: { tipoVacunaId, fechaEstimada: fecha1 },
+      body: { tipoVacunaId: tenantA.tipoVacunaId, fechaEstimada: fecha1 },
     });
     expect(resPost.status).toBe(201);
     const postBody = await resPost.json() as { data: { id: string; estadoVisual: string; estado: string } };
@@ -557,14 +527,199 @@ describeIntegration("Vacunación: CRUD básico (happy path end-to-end)", () => {
   it("RN-PV1: dosis con fecha pasada → estadoVisual=Vencida en el listado", async () => {
     if (skipIfNoCredentials() || !tenantA.jwt) return;
 
-    const petId = await crearMascota(tenantA.jwt, tenantA.clienteId, "DosisVencida");
+    const petId = await crearMascota(tenantA, "DosisVencida");
 
     // Sembrar directamente con fecha en el pasado (no se puede programar via API RN-PV2)
-    await seedDosis(tenantA.tenantId, petId, "2026-01-01");
+    await seedDosis(tenantA, petId, "2026-01-01");
 
     const resGet = await callApp(`/mascotas/${petId}/plan-vacunacion`, { jwt: tenantA.jwt });
     expect(resGet.status).toBe(200);
     const getBody = await resGet.json() as { data: { estadoVisual: string }[] };
     expect(getBody.data[0].estadoVisual).toBe("Vencida");
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// RN-PV11 — Una vacuna solo se programa si aplica a la especie de la mascota.
+// ══════════════════════════════════════════════════════════════════════════════
+//
+// ESTA SUITE ES LA QUE VALE PARA LOS EMBEDS. Las FKs de `especie_tipo_vacuna`
+// hacia `especies` y `tipos_vacuna` son COMPUESTAS sobre (fk_id, tenant_id), y
+// una pista de embed que nombre una COLUMNA en vez de la CONSTRAINT deja de
+// resolver: PostgREST responde PGRST200 y el endpoint termina en 500. Los tests
+// unitarios no pueden verlo —el mock de supabase-js acepta cualquier string—,
+// así que la única prueba real es pegarle a una base migrada, que es lo que se
+// hace acá.
+
+describeIntegration("Vacunación: aplicabilidad por especie (RN-PV11)", () => {
+  /** El tipo de vacuna de la semilla asociado a "Gato" y NO a "Perro". */
+  async function vacunaSoloDeGato(tenantId: string): Promise<string> {
+    const { data: gato } = await serviceDb
+      .from("especies").select("id")
+      .eq("tenant_id", tenantId).eq("name", "Gato").single();
+
+    const { data } = await serviceDb
+      .from("especie_tipo_vacuna").select("tipo_vacuna_id")
+      .eq("tenant_id", tenantId).eq("especie_id", (gato as { id: string }).id);
+
+    const deGato = new Set(((data ?? []) as Array<{ tipo_vacuna_id: string }>).map((r) => r.tipo_vacuna_id));
+
+    const { data: perro } = await serviceDb
+      .from("especies").select("id")
+      .eq("tenant_id", tenantId).eq("name", "Perro").single();
+
+    const { data: dataPerro } = await serviceDb
+      .from("especie_tipo_vacuna").select("tipo_vacuna_id")
+      .eq("tenant_id", tenantId).eq("especie_id", (perro as { id: string }).id);
+
+    for (const r of (dataPerro ?? []) as Array<{ tipo_vacuna_id: string }>) deGato.delete(r.tipo_vacuna_id);
+
+    const id = [...deGato][0];
+    if (!id) throw new Error("La semilla no tiene ninguna vacuna exclusiva de Gato: revisar seed_catalogos_tenant");
+    return id;
+  }
+
+  it("GET /mascotas/:petId/tipos-vacuna-aplicables — 200 y solo vacunas de la especie", async () => {
+    if (skipIfNoCredentials()) return;
+    const petId = await crearMascota(tenantA, "PerroAplicables");
+
+    const res = await callApp(`/mascotas/${petId}/tipos-vacuna-aplicables`, { jwt: tenantA.jwt });
+    const body = await res.json() as { success: boolean; data: Array<{ id: string; nombre: string }> };
+
+    // Un 500 acá es la firma del embed roto por FK compuesta (PGRST200).
+    expect(res.status, JSON.stringify(body)).toBe(200);
+    expect(body.success).toBe(true);
+    expect(body.data.length).toBeGreaterThan(0);
+
+    const soloGato = await vacunaSoloDeGato(tenantA.tenantId);
+    expect(body.data.map((t) => t.id)).not.toContain(soloGato);
+    expect(body.data.map((t) => t.id)).toContain(tenantA.tipoVacunaId);
+  });
+
+  it("RN-PV11: programar una vacuna felina para un perro → 422 VACCINE_NOT_APPLICABLE_TO_SPECIES", async () => {
+    if (skipIfNoCredentials()) return;
+    const petId    = await crearMascota(tenantA, "PerroNoAplica");
+    const soloGato = await vacunaSoloDeGato(tenantA.tenantId);
+
+    const res = await callApp(`/mascotas/${petId}/plan-vacunacion`, {
+      method: "POST", jwt: tenantA.jwt,
+      body: { tipoVacunaId: soloGato, fechaEstimada: futureDate(30) },
+    });
+    const body = await res.json() as { error?: { code: string } };
+
+    expect(res.status).toBe(422);
+    expect(body.error?.code).toBe("VACCINE_NOT_APPLICABLE_TO_SPECIES");
+
+    // Y no quedó nada escrito: la guarda corre ANTES del INSERT.
+    const { count } = await serviceDb
+      .from("plan_vacunacion").select("*", { count: "exact", head: true }).eq("pet_id", petId);
+    expect(count).toBe(0);
+  });
+
+  it("RN-PV11: una vacuna SÍ aplicable a la especie se programa normalmente", async () => {
+    if (skipIfNoCredentials()) return;
+    const petId = await crearMascota(tenantA, "PerroSiAplica");
+
+    const res = await callApp(`/mascotas/${petId}/plan-vacunacion`, {
+      method: "POST", jwt: tenantA.jwt,
+      body: { tipoVacunaId: tenantA.tipoVacunaId, fechaEstimada: futureDate(30) },
+    });
+    expect(res.status, JSON.stringify(await res.clone().json())).toBe(201);
+  });
+
+  it("RN-PV3 sigue distinguiéndose: un tipo de vacuna inexistente da VACCINE_TYPE_NOT_FOUND", async () => {
+    if (skipIfNoCredentials()) return;
+    const petId = await crearMascota(tenantA, "PerroTipoInexistente");
+
+    const res = await callApp(`/mascotas/${petId}/plan-vacunacion`, {
+      method: "POST", jwt: tenantA.jwt,
+      body: { tipoVacunaId: "00000000-0000-4000-8000-000000000000", fechaEstimada: futureDate(30) },
+    });
+    const body = await res.json() as { error?: { code: string } };
+
+    expect(res.status).toBe(422);
+    // Los dos errores se arreglan distinto (cargar la vacuna vs. asociarla a la
+    // especie), así que colapsarlos en uno solo sería una regresión.
+    expect(body.error?.code).toBe("VACCINE_TYPE_NOT_FOUND");
+  });
+
+  it("RN-PV11 aplica al PROGRAMAR, no al leer: desasociar la especie no toca las dosis ya registradas", async () => {
+    if (skipIfNoCredentials()) return;
+    const petId = await crearMascota(tenantA, "PerroDesasociado");
+
+    const creada = await callApp(`/mascotas/${petId}/plan-vacunacion`, {
+      method: "POST", jwt: tenantA.jwt,
+      body: { tipoVacunaId: tenantA.tipoVacunaId, fechaEstimada: futureDate(30) },
+    });
+    expect(creada.status).toBe(201);
+
+    // Se desasocia la vacuna de "Perro" por el endpoint del catálogo. Queda
+    // asociada a alguna otra especie para no violar el mínimo de RN-CAT10.
+    const { data: gato } = await serviceDb
+      .from("especies").select("id").eq("tenant_id", tenantA.tenantId).eq("name", "Gato").single();
+
+    const put = await callApp(`/tipos-vacuna/${tenantA.tipoVacunaId}/especies`, {
+      method: "PUT", jwt: tenantA.jwt,
+      body: { especieIds: [(gato as { id: string }).id] },
+    });
+    expect(put.status, JSON.stringify(await put.clone().json())).toBe(200);
+
+    try {
+      // RN-CAT11: la dosis sigue ahí y se sigue leyendo. El historial clínico no
+      // se recalcula porque la clínica corrija su calendario sanitario.
+      const lista = await callApp(`/mascotas/${petId}/plan-vacunacion`, { jwt: tenantA.jwt });
+      const body  = await lista.json() as { data: Array<{ id: string }>; meta: { total: number } };
+      expect(lista.status, JSON.stringify(body)).toBe(200);
+      expect(body.meta.total).toBe(1);
+
+      // Pero programar una NUEVA con esa vacuna ya se rechaza.
+      const otra = await callApp(`/mascotas/${petId}/plan-vacunacion`, {
+        method: "POST", jwt: tenantA.jwt,
+        body: { tipoVacunaId: tenantA.tipoVacunaId, fechaEstimada: futureDate(60) },
+      });
+      const otraBody = await otra.json() as { error?: { code: string } };
+      expect(otra.status).toBe(422);
+      expect(otraBody.error?.code).toBe("VACCINE_NOT_APPLICABLE_TO_SPECIES");
+    } finally {
+      // Se restituye la asociación: las suites de este archivo comparten tenant
+      // y las de más abajo programan dosis con `tenantA.tipoVacunaId`.
+      const { data: perro } = await serviceDb
+        .from("especies").select("id").eq("tenant_id", tenantA.tenantId).eq("name", "Perro").single();
+      await callApp(`/tipos-vacuna/${tenantA.tipoVacunaId}/especies`, {
+        method: "PUT", jwt: tenantA.jwt,
+        body: { especieIds: [(perro as { id: string }).id, (gato as { id: string }).id] },
+      });
+    }
+  });
+
+  it("RN-CAT1: B no puede asociarle especies a un tipo de vacuna de A", async () => {
+    if (skipIfNoCredentials()) return;
+
+    const res = await callApp(`/tipos-vacuna/${tenantA.tipoVacunaId}/especies`, {
+      method: "PUT", jwt: tenantB.jwt,
+      body: { especieIds: [tenantB.especieId] },
+    });
+    const body = await res.json() as { error?: { code: string } };
+
+    expect(res.status).toBe(404);
+    expect(body.error?.code).toBe("CATALOG_NOT_FOUND");
+  });
+
+  it("RN-CAT10: B no puede asociar una especie de A a una vacuna suya", async () => {
+    if (skipIfNoCredentials()) return;
+
+    const { data: tipoB } = await serviceDb
+      .from("tipos_vacuna").select("id").eq("tenant_id", tenantB.tenantId).limit(1).single();
+
+    const res = await callApp(`/tipos-vacuna/${(tipoB as { id: string }).id}/especies`, {
+      method: "PUT", jwt: tenantB.jwt,
+      body: { especieIds: [tenantA.especieId] },
+    });
+    const body = await res.json() as { error?: { code: string } };
+
+    // 422 de dominio, no un 500 de la FK compuesta: el Service resuelve la
+    // especie contra SU tenant antes de escribir.
+    expect(res.status).toBe(422);
+    expect(body.error?.code).toBe("VALIDATION_ERROR");
   });
 });

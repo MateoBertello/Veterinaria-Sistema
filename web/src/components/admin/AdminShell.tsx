@@ -2,8 +2,7 @@ import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { Building2, LogOut, ShieldCheck } from "lucide-react";
 import { Button } from "../ui/button.tsx";
 import { cn } from "../ui/utils.ts";
-import { getPlatformSession } from "../../lib/platform.ts";
-import { clearToken } from "../../lib/session.ts";
+import { usePlatformAuth } from "../../auth/PlatformAuthContext.tsx";
 
 /**
  * Shell del área de plataforma. Deliberadamente distinto del shell del tenant
@@ -12,14 +11,15 @@ import { clearToken } from "../../lib/session.ts";
  */
 export function AdminShell() {
   const navigate = useNavigate();
-  const sesion = getPlatformSession();
+  const { session: sesion, logout } = usePlatformAuth();
 
-  // El Super Admin no tiene sesión de tenant: `POST /auth/logout` pasa por
-  // `tenantContext` y rechazaría su token. Se limpia la sesión local y se vuelve
-  // al login; el guard hace el resto.
-  function cerrarSesion() {
-    clearToken();
-    navigate("/login", { replace: true });
+  // Logout propio de plataforma (`POST /admin/auth/logout`): el del tenant pasa
+  // por `tenantContext` y rechazaría este token. Además de limpiar el par local
+  // invalida la sesión en GoTrue — importante ahora que la consola guarda un
+  // refresh token, que de otro modo seguiría sirviendo para renovar.
+  async function cerrarSesion() {
+    await logout();
+    navigate("/admin/login", { replace: true });
   }
 
   return (
@@ -31,7 +31,9 @@ export function AdminShell() {
         Saltar al contenido
       </a>
 
-      <aside className="hidden w-60 shrink-0 flex-col border-r border-slate-800 bg-slate-900 text-slate-100 md:flex">
+      {/* Sticky con alto de viewport, igual que el shell del tenant: la lista
+          de tenants es larga y la navegación no puede irse con el scroll. */}
+      <aside className="sticky top-0 hidden h-screen w-60 shrink-0 flex-col self-start border-r border-slate-800 bg-slate-900 text-slate-100 md:flex">
         <div className="flex items-center gap-3 px-6 py-5">
           <div className="rounded-xl bg-gradient-to-br from-orange-500 to-orange-600 p-2 shadow-md">
             <ShieldCheck className="size-6 text-white" aria-hidden />
@@ -42,7 +44,7 @@ export function AdminShell() {
           </div>
         </div>
 
-        <nav className="flex flex-1 flex-col gap-1 px-3" aria-label="Navegación de plataforma">
+        <nav className="flex flex-1 flex-col gap-1 overflow-y-auto px-3" aria-label="Navegación de plataforma">
           <NavLink
             to="/admin/tenants"
             className={({ isActive }) =>
@@ -70,7 +72,7 @@ export function AdminShell() {
             variant="ghost"
             size="sm"
             className="w-full justify-start text-slate-300 hover:bg-slate-800 hover:text-white"
-            onClick={cerrarSesion}
+            onClick={() => void cerrarSesion()}
           >
             <LogOut aria-hidden />
             Cerrar sesión

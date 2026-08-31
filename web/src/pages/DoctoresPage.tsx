@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Pencil, Search, Stethoscope } from "lucide-react";
 import {
   Table,
+  TableScrollContainer,
   TableBody,
   TableCell,
   TableHead,
@@ -128,9 +129,9 @@ export function DoctoresPage() {
       </div>
 
       {/* Tabla */}
-      <div className="rounded-lg border">
-        <Table>
-          <TableHeader>
+      <TableScrollContainer aria-label="Listado de doctores">
+        <Table containerClassName="overflow-visible">
+          <TableHeader className="sticky top-0 z-10">
             <TableRow className="bg-orange-50 hover:bg-orange-50">
               <TableHead>Nombre</TableHead>
               <TableHead className="hidden md:table-cell">Especialidad</TableHead>
@@ -163,14 +164,14 @@ export function DoctoresPage() {
             ) : (
               doctores.map((d) => (
                 <TableRow key={d.id}>
-                  <TableCell className="font-medium">{d.name}</TableCell>
-                  <TableCell className="hidden md:table-cell">
+                  <TableCell className="whitespace-normal font-medium">{d.name}</TableCell>
+                  <TableCell className="hidden whitespace-normal md:table-cell">
                     {d.specialty ?? <span className="text-muted-foreground">—</span>}
                   </TableCell>
                   <TableCell className="hidden lg:table-cell">
                     {d.licenseNumber ?? <span className="text-muted-foreground">—</span>}
                   </TableCell>
-                  <TableCell className="hidden xl:table-cell">
+                  <TableCell className="hidden whitespace-normal xl:table-cell">
                     {d.usuario ? d.usuario.username : <span className="text-muted-foreground">—</span>}
                   </TableCell>
                   <TableCell>
@@ -198,7 +199,7 @@ export function DoctoresPage() {
             )}
           </TableBody>
         </Table>
-      </div>
+      </TableScrollContainer>
 
       {/* Paginación */}
       {!loading && !error && doctores.length > 0 ? (

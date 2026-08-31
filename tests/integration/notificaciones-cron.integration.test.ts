@@ -33,6 +33,7 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import app from "../../supabase/functions/api/src/main.ts";
 import { NotificacionService } from "../../supabase/functions/api/src/modules/notificaciones/notificaciones.service.ts";
 import { SUPABASE_URL, SERVICE_ROLE_KEY, describeIntegration } from "./_env.ts";
+import { limpiarTenant, catalogoDelTenant } from "./_teardown.ts";
 
 // Reloj fijo lejano: aísla el barrido all-tenants de datos in-window de otros archivos.
 const NOW = new Date("2026-09-01T09:00:00Z");
@@ -56,8 +57,6 @@ function addDays(base: Date, n: number): string {
 // ─── Estado global ──────────────────────────────────────────────────────────
 
 let serviceDb: SupabaseClient;
-let especieId = "";
-let tipoVacunaId = "";
 
 let tPro    = { tenantId: "", clienteId: "" }; // profesional → 'turnos' + 'historial_clinico'
 let tBasico = { tenantId: "", clienteId: "" }; // basico      → 'historial_clinico' (turnos NO)
@@ -109,6 +108,9 @@ async function provisionTenant(sufijo: string, plan: "basico" | "profesional") {
 }
 
 async function seedMascota(tenantId: string, clienteId: string, name: string): Promise<string> {
+  // Catálogo por tenant (20260827000001_catalogos_por_tenant.sql): esta suite
+  // siembra sobre varios tenants, y cada uno tiene su propia especie "Perro".
+  const { especieId } = await catalogoDelTenant(serviceDb, tenantId);
   const { data } = await serviceDb
     .from("mascotas")
     .insert({ tenant_id: tenantId, name, client_id: clienteId, especie_id: especieId, sex: "Macho", tamano: "Mediano" })
@@ -144,6 +146,7 @@ async function seedTurno(tenantId: string, clienteId: string, petId: string, ser
 }
 
 async function seedDosis(tenantId: string, petId: string, fechaEstimada: string): Promise<string> {
+  const { tipoVacunaId } = await catalogoDelTenant(serviceDb, tenantId);
   const { data } = await serviceDb
     .from("plan_vacunacion")
     .insert({ tenant_id: tenantId, pet_id: petId, tipo_vacuna_id: tipoVacunaId, fecha_estimada: fechaEstimada, estado: "Pendiente" })
@@ -171,11 +174,6 @@ beforeAll(async () => {
   if (skipIfNoCredentials()) return;
   serviceDb = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, { auth: { persistSession: false } });
 
-  const { data: esp } = await serviceDb.from("especies").select("id").limit(1).single();
-  especieId = esp?.id ?? "";
-  const { data: tv } = await serviceDb.from("tipos_vacuna").select("id").eq("active", true).limit(1).single();
-  tipoVacunaId = tv?.id ?? "";
-
   tPro    = await provisionTenant("PRO", "profesional");
   tBasico = await provisionTenant("BAS", "basico");
 
@@ -189,9 +187,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   if (!serviceDb) return;
-  for (const tid of [tPro.tenantId, tBasico.tenantId]) {
-    if (tid) await serviceDb.from("tenants").delete().eq("id", tid); // cascade → turnos, plan_vacunacion, notificaciones
-  }
+  for (const tid of [tPro.tenantId, tBasico.tenantId]) await limpiarTenant(serviceDb, tid);
 });
 
 // ─── RN-NT5: el barrido dispara y NO spamea (idempotencia real por UNIQUE) ────────

@@ -572,10 +572,14 @@ export const NotificacionService = {
 
     try {
       await impl.enviar({ destino: aviso.destino, asunto: aviso.asunto, cuerpo: aviso.cuerpo });
+      // El filtro por tenant_id acompaña al id aunque el id ya sea de este
+      // tenant (lo devolvió el INSERT de arriba): estas escrituras corren con
+      // service role, así que el alcance del UPDATE es el que escribe la query.
       await db
         .from("notificaciones")
         .update({ estado: "enviada", sent_at: now.toISOString() })
-        .eq("id", notifId);
+        .eq("id", notifId)
+        .eq("tenant_id", tenantId);
 
       await recordAudit(db as never, {
         tenantId,
@@ -593,7 +597,8 @@ export const NotificacionService = {
       await db
         .from("notificaciones")
         .update({ estado: "fallida", failure_reason: motivo })
-        .eq("id", notifId);
+        .eq("id", notifId)
+        .eq("tenant_id", tenantId);
       return "failed";
     }
   },

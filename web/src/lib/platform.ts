@@ -10,6 +10,9 @@ import { getToken } from "./session.ts";
  * (ese endpoint pasa por `tenantContext` y exige tenant_id): el front lee el
  * claim del token, que es el equivalente exacto de la sesión.
  *
+ * El token sale de `POST /api/v1/admin/auth/login` y se guarda en el scope
+ * `platform` de `session.ts`, aparte del de la clínica.
+ *
  * Esto es un gate de UX, no la autorización: el backend revalida el claim en
  * cada request de /admin/*. Un token manipulado en el browser abre la pantalla
  * pero cada llamada responde 403 FORBIDDEN.
@@ -68,7 +71,7 @@ export function platformSessionFromToken(token: string | null): PlatformSession 
 
 /** Sesión de plataforma del token almacenado, o null si no hay Super Admin. */
 export function getPlatformSession(): PlatformSession | null {
-  return platformSessionFromToken(getToken());
+  return platformSessionFromToken(getToken("platform"));
 }
 
 /** `true` si la sesión actual acredita Super Admin de plataforma. */

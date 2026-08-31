@@ -1,0 +1,46 @@
+-- =====================================================================
+-- FIX: el módulo `catalogs` no existía en el enum de auditoría
+-- =====================================================================
+-- SÍNTOMA
+--
+-- Toda escritura del CRUD de catálogos (`catalogos.service.ts`, que audita con
+-- `module: "catalogs"`) fallaba al registrar su asiento con:
+--
+--   invalid input value for enum modulo_auditoria: "catalogs"
+--
+-- POR QUÉ NO SE NOTÓ
+--
+-- `recordAudit` es best-effort: atrapa el error, lo loguea y deja seguir la
+-- operación. Es la decisión correcta —que falle la auditoría no debería
+-- deshacer un alta de raza ya confirmada al usuario—, pero convierte este bug
+-- en uno SILENCIOSO: el catálogo se escribía, la respuesta era 200, y el
+-- asiento simplemente no quedaba. Los tests unitarios tampoco lo veían porque
+-- mockean `recordAudit` y solo verifican con qué argumentos se lo llamó, no
+-- que la base acepte esos argumentos.
+--
+-- Apareció recién al correr integración contra una base migrada, en el stderr
+-- de una suite que pasaba en verde.
+--
+-- QUÉ ROMPÍA
+--
+-- RN-CAT8 y, por encima, la regla 6 del CLAUDE.md: toda escritura registra en
+-- `registros_auditoria`. En los hechos el módulo de catálogos no auditaba nada
+-- —ni altas, ni ediciones, ni bajas lógicas—, que es justo lo que un
+-- administrador necesita para saber quién sacó de circulación una vacuna.
+--
+-- POR QUÉ UNA MIGRACIÓN APARTE
+--
+-- `ALTER TYPE ... ADD VALUE` no puede usar el valor nuevo en la misma
+-- transacción que lo agrega. Separarlo del resto deja el commit hecho antes de
+-- que cualquier INSERT lo necesite, y de paso el fix queda con su propio
+-- historial en vez de escondido dentro de una migración sobre otro tema.
+--
+-- LA REGRESIÓN QUEDA CUBIERTA SIN BASE
+--
+-- `tests/unit/audit-modulo-enum.test.ts` parsea este enum desde las migraciones
+-- y lo compara contra los `module:` que los Services le pasan a `recordAudit`.
+-- Es bloqueante y corre en cada `npm test`: un módulo nuevo que se olvide de
+-- pasar por acá se pone rojo sin necesidad de un Supabase levantado.
+-- =====================================================================
+
+ALTER TYPE modulo_auditoria ADD VALUE IF NOT EXISTS 'catalogs';

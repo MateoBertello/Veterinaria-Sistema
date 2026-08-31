@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Pencil, Plus, Power, Users } from "lucide-react";
 import {
   Table,
+  TableScrollContainer,
   TableBody,
   TableCell,
   TableHead,
@@ -21,11 +22,18 @@ import {
   listarUsuarios,
 } from "../api/usuarios.ts";
 import { getRolMeta } from "../lib/roles.ts";
+import { useAuth } from "../auth/AuthContext.tsx";
 import { ApiError, type ApiMeta, type Rol, type Usuario } from "../types/index.ts";
 
 const PAGE_SIZE = 20;
 
 export function UsuariosPage() {
+  // RN-SEC8: el propio usuario no puede cambiarse el rol ni el estado. Los
+  // controles de esos dos campos se deshabilitan sobre su fila con la
+  // explicación a la vista: un botón que existe y falla al apretarlo es peor
+  // que uno que no está.
+  const { user } = useAuth();
+
   const [usuarios, setUsuarios] = useState<Usuario[]>([]);
   const [meta,     setMeta]     = useState<ApiMeta>({ page: 1, limit: PAGE_SIZE, total: 0 });
   const [loading,  setLoading]  = useState(true);
@@ -100,9 +108,9 @@ export function UsuariosPage() {
       </header>
 
       {/* Tabla */}
-      <div className="rounded-lg border">
-        <Table>
-          <TableHeader>
+      <TableScrollContainer aria-label="Listado de usuarios">
+        <Table containerClassName="overflow-visible">
+          <TableHeader className="sticky top-0 z-10">
             <TableRow className="bg-orange-50 hover:bg-orange-50">
               <TableHead>Usuario</TableHead>
               <TableHead>Nombre completo</TableHead>
@@ -131,11 +139,13 @@ export function UsuariosPage() {
                 </TableCell>
               </TableRow>
             ) : (
-              usuarios.map((u) => (
+              usuarios.map((u) => {
+                const esUnoMismo = u.id === user?.id;
+                return (
                 <TableRow key={u.id} className={u.active ? undefined : "opacity-70"}>
-                  <TableCell className="font-medium">{u.username}</TableCell>
-                  <TableCell>{u.fullName}</TableCell>
-                  <TableCell className="hidden md:table-cell text-muted-foreground">{u.email}</TableCell>
+                  <TableCell className="whitespace-normal font-medium">{u.username}</TableCell>
+                  <TableCell className="whitespace-normal">{u.fullName}</TableCell>
+                  <TableCell className="hidden whitespace-normal md:table-cell text-muted-foreground">{u.email}</TableCell>
                   <TableCell>
                     <RolBadge usuario={u} rol={rolesById.get(u.rolId)} />
                   </TableCell>
@@ -160,25 +170,36 @@ export function UsuariosPage() {
 
                       <Tooltip>
                         <TooltipTrigger asChild>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            aria-label={u.active ? `Desactivar ${u.username}` : `Activar ${u.username}`}
-                            onClick={() => (u.active ? setToDesactivar(u) : void activar(u))}
-                          >
-                            <Power className="size-4" aria-hidden />
-                          </Button>
+                          {/* El span envuelve al botón deshabilitado para que el
+                              tooltip siga recibiendo el hover y la explicación
+                              sea visible (un botón disabled no emite eventos). */}
+                          <span>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              disabled={esUnoMismo}
+                              aria-label={u.active ? `Desactivar ${u.username}` : `Activar ${u.username}`}
+                              onClick={() => (u.active ? setToDesactivar(u) : void activar(u))}
+                            >
+                              <Power className="size-4" aria-hidden />
+                            </Button>
+                          </span>
                         </TooltipTrigger>
-                        <TooltipContent>{u.active ? "Desactivar" : "Activar"}</TooltipContent>
+                        <TooltipContent>
+                          {esUnoMismo
+                            ? "No podés cambiar tu propio estado de acceso: pedíselo a otro administrador"
+                            : u.active ? "Desactivar" : "Activar"}
+                        </TooltipContent>
                       </Tooltip>
                     </div>
                   </TableCell>
                 </TableRow>
-              ))
+                );
+              })
             )}
           </TableBody>
         </Table>
-      </div>
+      </TableScrollContainer>
 
       {/* Paginación */}
       {!loading && !error && usuarios.length > 0 ? (
@@ -212,6 +233,7 @@ export function UsuariosPage() {
         open={formOpen}
         onOpenChange={setFormOpen}
         usuario={editing}
+        esUnoMismo={Boolean(editing && user && editing.id === user.id)}
         roles={roles}
         crear={crearUsuario}
         editar={editarUsuario}

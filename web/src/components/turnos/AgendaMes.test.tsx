@@ -31,6 +31,7 @@ function makeTurno(over: Partial<Turno> = {}): Turno {
     mascota: { id: "p1", name: "Max" },
     cliente: { id: "c1", fullName: "Ana" },
     accionesDisponibles: [],
+    vencido: false,
     ...over,
   };
 }
@@ -59,7 +60,7 @@ describe("AgendaMes", () => {
     render(<AgendaMes fechaInicial={MES} onSelectDay={onSelectDay} />);
     await screen.findByText("1 turno");
 
-    await userEvent.click(screen.getByRole("button", { name: /10 de julio de 2026, 1 turno/ }));
+    await userEvent.click(screen.getByRole("button", { name: /Ver el detalle del.*10 de julio de 2026: 1 turno/ }));
 
     expect(onSelectDay).toHaveBeenCalledWith("2026-07-10");
   });
@@ -71,7 +72,7 @@ describe("AgendaMes", () => {
     render(<AgendaMes fechaInicial={MES} onSelectDay={onSelectDay} />);
     await screen.findByText("1 turno");
 
-    const dia = screen.getByRole("button", { name: /10 de julio de 2026, 1 turno/ });
+    const dia = screen.getByRole("button", { name: /Ver el detalle del.*10 de julio de 2026: 1 turno/ });
     dia.focus();
     expect(dia).toHaveFocus();
     await userEvent.keyboard("{Enter}");
@@ -97,5 +98,43 @@ describe("AgendaMes", () => {
     mockMes.mockResolvedValue([]);
     await userEvent.click(screen.getByRole("button", { name: /Reintentar/ }));
     await waitFor(() => expect(mockMes).toHaveBeenCalledTimes(2));
+  });
+
+  it("el popover de vista previa lista mascota, cliente y horario sin salir del mes", async () => {
+    mockMes.mockResolvedValue([
+      makeTurno({ date: "2026-07-10", startTime: "09:00", mascota: { id: "p1", name: "Max" }, cliente: { id: "c1", fullName: "Ana Pérez" } }),
+    ]);
+    render(<AgendaMes fechaInicial={MES} onSelectDay={() => {}} />);
+    await screen.findByText("1 turno");
+
+    const preview = screen.getByRole("button", { name: /Vista previa del.*10 de julio de 2026: 1 turno/ });
+    await userEvent.click(preview);
+
+    expect(await screen.findByText("Max")).toBeInTheDocument();
+    expect(screen.getByText(/Ana Pérez/)).toBeInTheDocument();
+    // El mes sigue visible: el popover complementa el drill-down, no lo reemplaza.
+    expect(screen.getByRole("button", { name: "Mes siguiente" })).toBeInTheDocument();
+  });
+
+  it("el popover se abre por teclado (Enter) sin disparar el drill-down del día", async () => {
+    const onSelectDay = vi.fn();
+    mockMes.mockResolvedValue([makeTurno({ date: "2026-07-10", mascota: { id: "p1", name: "Max" } })]);
+    render(<AgendaMes fechaInicial={MES} onSelectDay={onSelectDay} />);
+    await screen.findByText("1 turno");
+
+    const preview = screen.getByRole("button", { name: /Vista previa del.*10 de julio de 2026/ });
+    preview.focus();
+    await userEvent.keyboard("{Enter}");
+
+    expect(await screen.findByText("Max")).toBeInTheDocument();
+    expect(onSelectDay).not.toHaveBeenCalled();
+  });
+
+  it("no ofrece vista previa en días sin turnos", async () => {
+    mockMes.mockResolvedValue([makeTurno({ date: "2026-07-10" })]);
+    render(<AgendaMes fechaInicial={MES} onSelectDay={() => {}} />);
+    await screen.findByText("1 turno");
+
+    expect(screen.queryByRole("button", { name: /Vista previa del.*11 de julio de 2026/ })).not.toBeInTheDocument();
   });
 });

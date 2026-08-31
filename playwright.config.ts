@@ -20,9 +20,42 @@ export default defineConfig({
     storageState: "playwright/.auth/admin.json",
   },
   projects: [
-    { name: "chromium", use: { ...devices["Desktop Chrome"] } },
+    {
+      name: "chromium",
+      use: { ...devices["Desktop Chrome"] },
+      // El spec de accesibilidad mobile mide layout/objetivos táctiles a un
+      // viewport de teléfono: no aporta nada corrido en Desktop Chrome.
+      testIgnore: ["**/mobile-accesibilidad.spec.ts"],
+    },
+    {
+      // Cobertura mobile (Etapa cobertura mobile): hasta acá el único
+      // proyecto E2E era Desktop Chrome, así que ningún test tocaba un
+      // viewport de teléfono. Pixel 5 usa Chromium (mismo browser ya
+      // instalado que "chromium" de arriba), a diferencia de un device
+      // iPhone que requeriría instalar el binario de WebKit.
+      name: "mobile-chromium",
+      use: { ...devices["Pixel 5"] },
+      // Alcance acotado a propósito: el spec de login (auth) y los flujos
+      // principales de turnos y guardería, más el spec dedicado a objetivos
+      // táctiles/preferencias de accesibilidad en mobile. El resto de la
+      // suite (admin-login, clientes-mascotas, historial, vacunacion,
+      // rn-ux1) ya corre en Desktop Chrome y no ejercita nada específico de
+      // mobile más allá de lo que login/turnos/guardería ya cubren con
+      // comboboxes, diálogos y formularios — correrla dos veces solo suma
+      // tiempo de CI sin sumar señal.
+      testMatch: [
+        "**/auth.spec.ts",
+        "**/turnos.spec.ts",
+        "**/guarderia.spec.ts",
+        "**/mobile-accesibilidad.spec.ts",
+      ],
+    },
   ],
   globalSetup: "./tests/e2e/global-setup.ts",
+  // Los specs crean entidades con nombre único (`unico()`) y la stack local no
+  // se resetea entre corridas: sin esto, cada ejecución sedimenta filas
+  // "Especie E2E …" / "Cliente E2E …" que quedan a la vista en la app.
+  globalTeardown: "./tests/e2e/global-teardown.ts",
   webServer: {
     command: "npm run dev --prefix web",
     url: "http://127.0.0.1:5173",

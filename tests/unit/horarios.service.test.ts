@@ -35,7 +35,8 @@ const ctx = {
   canManageAll: true,
 };
 
-const doctorRow = { id: DOCTOR_ID, tenant_id: TENANT_ID, user_id: VET_USER_ID };
+const doctorRow = { id: DOCTOR_ID, tenant_id: TENANT_ID, user_id: VET_USER_ID, available: true };
+const doctorInactivoRow = { ...doctorRow, available: false };
 
 function franjaRow(over: Record<string, unknown> = {}) {
   return {
@@ -202,8 +203,9 @@ describe("HorarioService", () => {
 
   it("RN-HOR2: alternarActivo re-valida solapamiento al reactivar una franja", async () => {
     // La franja a reactivar (inactiva) choca con otra activa existente.
+    // RN-HOR8: al reactivar también se carga el doctor (pertenencia + disponibilidad).
     const db = buildDbChain({
-      singleSeq: [franjaRow({ active: false, start_time: "12:00:00", end_time: "14:00:00" })],
+      singleSeq: [franjaRow({ active: false, start_time: "12:00:00", end_time: "14:00:00" }), doctorRow],
       thenData:  [{ id: "otra", start_time: "09:00:00", end_time: "13:00:00" }],
     });
     mockGetServiceDb.mockReturnValue(db as never);
@@ -373,5 +375,69 @@ describe("HorarioService", () => {
     const franjas = await HorarioService.listarPorDoctor(DOCTOR_ID, ctxOtroVet);
 
     expect(franjas).toHaveLength(1);
+  });
+
+  // ── RN-HOR8 (baja lógica del profesional) ───────────────────────────────────
+  // Un doctor con available=false no puede recibir franjas nuevas ni reactivar
+  // las que tenía (no tiene sentido ofrecerlo para turnos nuevos), pero la baja
+  // no es destructiva: conserva sus franjas, se pueden listar, desactivar y
+  // eliminar sin restricción.
+
+  it("RN-HOR8: rechaza crear franja para doctor inactivo -> DOCTOR_INACTIVE", async () => {
+    const db = buildDbChain({ singleSeq: [doctorInactivoRow] });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    await expect(
+      HorarioService.crearFranja(
+        DOCTOR_ID,
+        { dayOfWeek: 1, startTime: "09:00", endTime: "13:00", active: true },
+        ctx,
+      ),
+    ).rejects.toMatchObject({ code: ErrorCode.DOCTOR_INACTIVE, statusCode: 422 });
+
+    expect(db["insert"]).not.toHaveBeenCalled();
+  });
+
+  it("RN-HOR8: rechaza reactivar (alternarActivo a true) la franja de un doctor inactivo -> DOCTOR_INACTIVE", async () => {
+    const db = buildDbChain({
+      singleSeq: [franjaRow({ active: false }), doctorInactivoRow],
+    });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    await expect(
+      HorarioService.alternarActivo(FRANJA_ID, true, ctx),
+    ).rejects.toMatchObject({ code: ErrorCode.DOCTOR_INACTIVE, statusCode: 422 });
+
+    expect(db["update"]).not.toHaveBeenCalled();
+    expect(mockRecordAudit).not.toHaveBeenCalled();
+  });
+
+  it("RN-HOR8: permite DESACTIVAR una franja de un doctor inactivo (la baja no es destructiva)", async () => {
+    const db = buildDbChain({
+      singleSeq: [franjaRow(), franjaRow({ active: false })],
+    });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    const result = await HorarioService.alternarActivo(FRANJA_ID, false, ctx);
+
+    expect(result.active).toBe(false);
+  });
+
+  it("RN-HOR8: permite LISTAR las franjas de un doctor inactivo", async () => {
+    const db = buildDbChain({ singleSeq: [doctorInactivoRow], thenData: [franjaRow()] });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    const franjas = await HorarioService.listarPorDoctor(DOCTOR_ID, ctx);
+
+    expect(franjas).toHaveLength(1);
+  });
+
+  it("RN-HOR8: permite ELIMINAR la franja de un doctor inactivo", async () => {
+    const db = buildDbChain({ singleSeq: [franjaRow()], thenData: [] });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    await HorarioService.eliminar(FRANJA_ID, ctx);
+
+    expect(db["delete"]).toHaveBeenCalled();
   });
 });

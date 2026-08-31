@@ -1,7 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronDown, ChevronLeft, ChevronRight } from "lucide-react";
 import { Button } from "../ui/button.tsx";
+import { Badge } from "../ui/badge.tsx";
 import { Skeleton } from "../ui/skeleton.tsx";
+import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover.tsx";
+import { ESTADO_BADGE_CLASS } from "./estado.ts";
 import {
   addMeses,
   construirGrillaMes,
@@ -20,6 +23,10 @@ interface Props {
   fechaInicial: string;
   /** Al elegir un día se navega a la agenda de ese día (reusa la vista día). */
   onSelectDay: (iso: string) => void;
+}
+
+function etiquetaCantidad(cantidad: number): string {
+  return cantidad === 0 ? "sin turnos" : `${cantidad} turno${cantidad === 1 ? "" : "s"}`;
 }
 
 export function AgendaMes({ fechaInicial, onSelectDay }: Props) {
@@ -43,9 +50,15 @@ export function AgendaMes({ fechaInicial, onSelectDay }: Props) {
     return () => { vigente = false; };
   }, [intento]);
 
-  const conteoPorDia = useMemo(() => {
-    const map = new Map<string, number>();
-    for (const t of turnos) map.set(t.date, (map.get(t.date) ?? 0) + 1);
+  // Agrupa por día conservando los turnos completos (no solo el conteo): el
+  // popover de vista previa se arma con datos ya traídos, sin pedir nada al abrir.
+  const turnosPorDia = useMemo(() => {
+    const map = new Map<string, Turno[]>();
+    for (const t of turnos) {
+      const arr = map.get(t.date);
+      if (arr) arr.push(t); else map.set(t.date, [t]);
+    }
+    for (const arr of map.values()) arr.sort((a, b) => a.startTime.localeCompare(b.startTime));
     return map;
   }, [turnos]);
 
@@ -87,33 +100,74 @@ export function AgendaMes({ fechaInicial, onSelectDay }: Props) {
               </div>
             ))}
             {semanas.flat().map((celda) => {
-              const cantidad = conteoPorDia.get(celda.iso) ?? 0;
+              const items = turnosPorDia.get(celda.iso) ?? [];
+              const cantidad = items.length;
               const esHoy = celda.iso === hoy;
+              const etiqueta = etiquetaCantidad(cantidad);
               return (
-                <button
+                <div
                   key={celda.iso}
-                  type="button"
-                  onClick={() => onSelectDay(celda.iso)}
-                  aria-label={`${formatFechaLarga(celda.iso)}, ${cantidad === 0 ? "sin turnos" : `${cantidad} turno${cantidad === 1 ? "" : "s"}`}`}
                   className={[
-                    "flex min-h-20 flex-col items-start gap-1 bg-white p-2 text-left transition-colors hover:bg-orange-50 focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-orange-700",
+                    "relative flex min-h-20 flex-col bg-white",
                     celda.enMes ? "" : "bg-gray-50 text-muted-foreground",
                   ].join(" ")}
                 >
-                  <span
-                    className={[
-                      "flex size-6 items-center justify-center rounded-full text-sm",
-                      esHoy ? "bg-orange-700 font-semibold text-white" : "",
-                    ].join(" ")}
+                  <button
+                    type="button"
+                    onClick={() => onSelectDay(celda.iso)}
+                    aria-label={`Ver el detalle del ${formatFechaLarga(celda.iso)}: ${etiqueta}`}
+                    className="flex w-full flex-1 cursor-pointer flex-col items-start gap-1 p-2 text-left transition-colors hover:bg-orange-50 focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-orange-700"
                   >
-                    {diaDelMes(celda.iso)}
-                  </span>
-                  {cantidad > 0 ? (
-                    <span className="rounded-full bg-orange-100 px-2 py-0.5 text-xs font-medium text-orange-800">
-                      {cantidad} turno{cantidad === 1 ? "" : "s"}
+                    <span
+                      className={[
+                        "flex size-6 items-center justify-center rounded-full text-sm",
+                        esHoy ? "bg-orange-700 font-semibold text-white" : "",
+                      ].join(" ")}
+                    >
+                      {diaDelMes(celda.iso)}
                     </span>
+                    {cantidad > 0 ? (
+                      <span className="rounded-full bg-orange-100 px-2 py-0.5 text-xs font-medium text-orange-800">
+                        {cantidad} turno{cantidad === 1 ? "" : "s"}
+                      </span>
+                    ) : null}
+                  </button>
+                  {cantidad > 0 ? (
+                    <Popover>
+                      <PopoverTrigger asChild>
+                        <button
+                          type="button"
+                          aria-label={`Vista previa del ${formatFechaLarga(celda.iso)}: ${etiqueta}`}
+                          className="absolute right-1 top-1 flex size-5 cursor-pointer items-center justify-center rounded-full text-orange-700 hover:bg-orange-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-orange-700"
+                        >
+                          <ChevronDown className="size-3.5" aria-hidden />
+                        </button>
+                      </PopoverTrigger>
+                      <PopoverContent align="start" className="w-72 p-3">
+                        <div className="space-y-2">
+                          <p className="text-sm font-medium capitalize">{formatFechaLarga(celda.iso)}</p>
+                          {items.length === 0 ? (
+                            <p className="text-sm text-muted-foreground">Sin turnos este día.</p>
+                          ) : (
+                            <ul className="max-h-64 space-y-2 overflow-y-auto">
+                              {items.map((t) => (
+                                <li key={t.id} className="flex items-start justify-between gap-2 text-sm">
+                                  <div className="flex flex-col">
+                                    <span className="font-medium">{t.mascota?.name ?? "—"}</span>
+                                    <span className="text-xs text-muted-foreground">
+                                      {t.cliente?.fullName ?? "—"} · {t.startTime}
+                                    </span>
+                                  </div>
+                                  <Badge className={ESTADO_BADGE_CLASS[t.status]}>{t.status}</Badge>
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+                        </div>
+                      </PopoverContent>
+                    </Popover>
                   ) : null}
-                </button>
+                </div>
               );
             })}
           </div>

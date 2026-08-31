@@ -79,8 +79,8 @@ guarderiaRouter.post("/", async (c) => {
 });
 
 // PUT /estadias/:id — Modificar Estadía (RN-ME1..ME2, ME5-ME6).
-// El controller lee la estadía vigente y pre-rellena los campos no enviados
-// en el body para que el service siempre envíe valores completos al RPC.
+// Body parcial: el pre-relleno con los valores vigentes lo resuelve el Service
+// (regla 3 — acá solo se valida, se resuelve el permiso, se delega y se serializa).
 guarderiaRouter.put("/:id", async (c) => {
   const id = c.req.param("id");
   const idParsed = z.string().uuid().safeParse(id);
@@ -93,31 +93,7 @@ guarderiaRouter.put("/:id", async (c) => {
     throw new DomainError(ErrorCode.VALIDATION_ERROR, 422, "Datos de modificación inválidos", body.error.issues);
   }
 
-  const { tenantId } = getTenantContext(c);
-  const { getServiceDb } = await import("../../shared/db.ts");
-  const db = getServiceDb();
-
-  // Leer estadía vigente para pre-rellenar campos no enviados.
-  const { data: vigente, error: fetchErr } = await db
-    .from("estadias")
-    .select("check_in_date, check_out_date, reason, notes")
-    .eq("id", idParsed.data)
-    .eq("tenant_id", tenantId)
-    .single();
-
-  if (fetchErr || !vigente) {
-    throw new DomainError(ErrorCode.STAY_NOT_FOUND, 404, "Estadía no encontrada");
-  }
-
-  const v = vigente as Record<string, unknown>;
-  const dto = {
-    checkInDate:  (body.data.checkInDate  ?? v["check_in_date"])  as string,
-    checkOutDate: (body.data.checkOutDate ?? v["check_out_date"]) as string,
-    reason:       (body.data.reason       ?? v["reason"])         as string,
-    notes:        body.data.notes !== undefined ? body.data.notes : (v["notes"] as string | null) ?? null,
-  };
-
-  const estadia = await EstadiaService.actualizar(idParsed.data, dto, callerCtx(c));
+  const estadia = await EstadiaService.actualizar(idParsed.data, body.data, callerCtx(c));
   return c.json(ok(estadia), 200);
 });
 

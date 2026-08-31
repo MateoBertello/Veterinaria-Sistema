@@ -3,12 +3,13 @@ import { Hono } from "hono";
 
 vi.mock("../../supabase/functions/api/src/modules/historial/historial.service.ts", () => ({
   HistorialService: {
-    crearRegistro:      vi.fn().mockResolvedValue({ id: "ev1" }),
-    exportarHistorial:  vi.fn().mockResolvedValue({
+    crearRegistro:        vi.fn().mockResolvedValue({ id: "ev1" }),
+    exportarHistorial:    vi.fn().mockResolvedValue({
       buffer:      new Uint8Array([1, 2, 3]),
       contentType: "application/pdf",
       filename:    "historial.pdf",
     }),
+    obtenerEventoPorId:   vi.fn().mockResolvedValue({ id: "ev1" }),
   },
 }));
 
@@ -19,7 +20,7 @@ vi.mock("../../supabase/functions/api/src/shared/db.ts", () => ({
 
 import { HistorialService } from "../../supabase/functions/api/src/modules/historial/historial.service.ts";
 import { getDb } from "../../supabase/functions/api/src/shared/db.ts";
-import { historialMascotaRouter } from "../../supabase/functions/api/src/modules/historial/historial.controller.ts";
+import { historialMascotaRouter, historialRouter } from "../../supabase/functions/api/src/modules/historial/historial.controller.ts";
 import { errorHandler } from "../../supabase/functions/api/src/middleware/errorHandler.ts";
 import { invalidateModuleCache } from "../../supabase/functions/api/src/middleware/requireModule.ts";
 import {
@@ -30,9 +31,10 @@ import {
   permissionResult,
 } from "./_helpers/permissionMock.ts";
 
-const mockGetDb           = vi.mocked(getDb);
-const mockCrearRegistro   = vi.mocked(HistorialService.crearRegistro);
-const mockExportar        = vi.mocked(HistorialService.exportarHistorial);
+const mockGetDb             = vi.mocked(getDb);
+const mockCrearRegistro     = vi.mocked(HistorialService.crearRegistro);
+const mockExportar          = vi.mocked(HistorialService.exportarHistorial);
+const mockObtenerPorId      = vi.mocked(HistorialService.obtenerEventoPorId);
 
 const TENANT_ID = "tenant-1";
 const VALID_JWT = makeJwt({ sub: "user-1", app_metadata: { tenant_id: TENANT_ID } });
@@ -53,6 +55,20 @@ function req(method: string, path: string, body?: unknown) {
       "Content-Type": "application/json",
     },
     body: body != null ? JSON.stringify(body) : undefined,
+  });
+}
+
+function buildAppHistorial() {
+  const app = new Hono();
+  app.onError(errorHandler);
+  app.route("/historial", historialRouter);
+  return app;
+}
+
+function reqHistorial(method: string, path: string) {
+  return buildAppHistorial().request(`http://localhost${path}`, {
+    method,
+    headers: { Authorization: `Bearer ${VALID_JWT}` },
   });
 }
 
@@ -121,5 +137,39 @@ describe("historialMascotaRouter — permisos", () => {
 
     expect(res.status).toBe(200);
     expect(mockExportar).toHaveBeenCalled();
+  });
+});
+
+describe("historialRouter — GET /:id", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    invalidateModuleCache(TENANT_ID, "historial_clinico");
+  });
+
+  it("id malformado → 422 VALIDATION_ERROR (no 500), y no llega al Service", async () => {
+    mockDbSequence(mockGetDb, [
+      tenantActiveResult(),
+      moduleEnabledResult(true),
+      permissionResult(["view_medical_history"]),
+    ]);
+    const res  = await reqHistorial("GET", "/historial/no-es-un-uuid");
+    const body = await res.json();
+
+    expect(res.status).toBe(422);
+    expect(body.error.code).toBe("VALIDATION_ERROR");
+    expect(mockObtenerPorId).not.toHaveBeenCalled();
+  });
+
+  it("id con formato UUID válido → 200, delega en el Service", async () => {
+    mockDbSequence(mockGetDb, [
+      tenantActiveResult(),
+      moduleEnabledResult(true),
+      permissionResult(["view_medical_history"]),
+    ]);
+    const eventoId = "44444444-4444-4444-8444-444444444444";
+    const res = await reqHistorial("GET", `/historial/${eventoId}`);
+
+    expect(res.status).toBe(200);
+    expect(mockObtenerPorId).toHaveBeenCalledWith(eventoId, TENANT_ID);
   });
 });

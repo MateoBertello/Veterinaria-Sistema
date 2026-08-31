@@ -32,7 +32,8 @@ supabase start
 
 # 2. Aplicar migraciones + seed global de catálogos.
 #    `supabase db reset` reaplica TODAS las migraciones desde cero, incluido
-#    20260614000004_seed_global.sql (permisos, especies, razas, tipos_vacuna).
+#    20260614000004_seed_global.sql (permisos) + on_tenant_created, que siembra
+#    el catálogo clínico (especies, razas, tipos_vacuna) de cada tenant.
 #    Ese seed corre como migración: NO hay que invocarlo aparte.
 supabase db reset
 
@@ -77,7 +78,7 @@ Es **idempotente**: corrércelo dos veces no duplica ni rompe.
    correcto y la fila correspondiente en `usuarios` (y en `doctores` para el
    veterinario).
 3. **Datos demo**: 2 clientes con sus mascotas, usando los catálogos globales
-   (`especies`/`razas`) ya sembrados por la migración.
+   (`especies`/`razas`) que `on_tenant_created` ya sembró para ese tenant.
 
 ## Credenciales que deja el seed
 
@@ -97,10 +98,15 @@ Tenant: **Veterinaria Demo** · plan **premium** (los 3 módulos visibles).
 
 El Super Admin de plataforma **no es un usuario de tenant**: es un usuario de
 Supabase Auth con `app_metadata.platform_role = 'super_admin'`, sin fila en
-`usuarios` y sin `tenant_id`. Por eso **no entra por `POST /auth/login`** (ese
-endpoint busca por username en `usuarios`): su sesión sale directo de Supabase
-Auth. `node scripts/crear-super-admin.mjs` hace las dos cosas — lo provisiona
-(idempotente) e imprime el `access_token` con la línea para abrir la consola:
+`usuarios` y sin `tenant_id`. Por eso **no entra por `POST /auth/login`** — ese
+endpoint resuelve el identificador contra `usuarios` y ahí no está —, sino por su
+propio login de plataforma.
+
+Son dos pasos separados: **el script crea la cuenta, la aplicación la usa.**
+
+**1. Provisionar la cuenta** (idempotente: re-correrlo repara password,
+confirmación y el claim). Es la única forma de escribir `platform_role`, porque
+requiere la `service_role` key:
 
 ```bash
 # DEV local: toma SUPABASE_URL / SERVICE_ROLE / ANON del .env (acepta las TEST_*)
@@ -108,9 +114,84 @@ SUPER_ADMIN_EMAIL=super@leo.local SUPER_ADMIN_PASSWORD='Super1234!' \
   node scripts/crear-super-admin.mjs
 ```
 
-El front lee el JWT de `localStorage.sb-token`: pegando la línea que imprime el
-script y recargando, `/admin/tenants` abre. El token vence (1 h por defecto) —
-volvé a correr el script para renovarlo.
+Con `SUPABASE_ANON_KEY` presente, el script además verifica que la cuenta puede
+iniciar sesión y que su JWT trae el claim. No imprime ningún token.
+
+**2. Entrar por la aplicación**: `/admin/login`, con el email y la contraseña de
+la cuenta. Va contra `POST /api/v1/admin/auth/login`, que valida las credenciales
+en Supabase Auth y solo devuelve sesión si el JWT acredita
+`platform_role = 'super_admin'`; cualquier otro fracaso responde el mismo
+`401 Credenciales inválidas`, sin decir cuál falló.
+
+La sesión de plataforma vive en `localStorage` bajo sus propias claves
+(`sb-platform-token` / `sb-platform-refresh-token`), aparte de la de la clínica
+(`sb-token`), y **se renueva sola** con su refresh token contra
+`/admin/auth/refresh`. No hay que volver a correr el script para seguir
+trabajando.
+
+> **Nota para sesiones viejas.** Antes de que existiera `/admin/login`, la forma
+> de entrar era pegar a mano el `access_token` que imprimía el script en
+> `localStorage.sb-token`. Eso ya no se usa y conviene limpiarlo: esa sesión no
+> tenía refresh token (moría a la hora exacta) y compartía clave con la de la
+> clínica, así que cualquier 401 de la API del tenant la borraba.
+
+### Ver y dar de baja Super Admins
+
+El acceso de plataforma **es** el claim `app_metadata.platform_role='super_admin'`,
+y el dashboard de Supabase no muestra `app_metadata` en Authentication → Users.
+Para no tener que abrir usuario por usuario está `scripts/super-admins.mjs`:
+
+```bash
+node scripts/super-admins.mjs list                  # quiénes tienen acceso hoy
+node scripts/super-admins.mjs revoke viejo@leo.vet  # saca el claim, deja la cuenta
+node scripts/super-admins.mjs delete viejo@leo.vet  # borra la cuenta de Auth
+```
+
+**`revoke` es lo que se quiere casi siempre.** Deja el usuario de Auth en pie, así
+que un id que aparezca en `registros_auditoria.user_id` sigue siendo resoluble, y
+devolver el acceso es re-correr `crear-super-admin.mjs`. `delete` es para una
+cuenta que no debería existir (un email de prueba, uno mal escrito). Ninguno de
+los dos toca la auditoría: `registros_auditoria.user_id` no tiene FK a
+`auth.users`, así que los registros históricos quedan intactos — que es
+exactamente lo que se espera de un log append-only (RN-S3).
+
+Los dos se niegan a dejar la plataforma **sin ningún** Super Admin: no hay camino
+de recuperación por la aplicación (`platform_role` solo se escribe con la
+service_role key), así que quedarse sin ninguno significa perder la consola hasta
+volver a correr un script con esa llave. Se puede forzar con `--force`.
+
+#### Olvidé la contraseña del Super Admin en producción
+
+**No hace falta crear otro.** `crear-super-admin.mjs` es idempotente: con un email
+que ya existe hace `updateUserById` y re-setea password, confirmación y claim,
+conservando el resto de `app_metadata`.
+
+```bash
+export SUPABASE_URL="https://<ref>.supabase.co"
+export SUPABASE_SERVICE_ROLE_KEY="<service_role key>"
+export SUPABASE_ANON_KEY="<anon key>"          # opcional: verifica el login end-to-end
+export SUPER_ADMIN_EMAIL="super@leo.vet"       # el MISMO email de siempre
+export SUPER_ADMIN_PASSWORD="<password nueva>"
+node scripts/crear-super-admin.mjs
+```
+
+Con `SUPABASE_ANON_KEY` presente el script inicia sesión y comprueba que el JWT
+trae el claim antes de terminar, así que si imprime `✓ Verificado` la cuenta
+funciona. No imprime ningún token.
+
+Si en cambio querés **reemplazar la identidad** (el email es de una persona que se
+fue, o está mal escrito), el orden importa — nunca des de baja la vieja antes de
+comprobar la nueva:
+
+```bash
+# 1. Crear la nueva y verificar que entra
+SUPER_ADMIN_EMAIL=nuevo@leo.vet SUPER_ADMIN_PASSWORD='…' node scripts/crear-super-admin.mjs
+# 2. Entrar de verdad por /admin/login con la nueva  ← no saltear este paso
+# 3. Recién ahí, sacarle el acceso a la vieja
+node scripts/super-admins.mjs revoke viejo@leo.vet
+# 4. Confirmar cómo quedó
+node scripts/super-admins.mjs list
+```
 
 ## Errores comunes (troubleshooting)
 

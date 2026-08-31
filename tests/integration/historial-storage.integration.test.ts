@@ -30,6 +30,7 @@ import {
   SERVICE_ROLE_KEY,
   describeIntegration,
 } from "./_env.ts";
+import { crearUsuarioAuth, limpiarTenant, catalogoDelTenant } from "./_teardown.ts";
 
 // deno-lint-ignore no-explicit-any
 globalThis.WebSocket = class FakeWebSocket {} as any;
@@ -74,24 +75,14 @@ function skipIfNoCredentials(): boolean {
 }
 
 async function createUser(email: string, tenantId: string): Promise<{ id: string; jwt: string }> {
-  const adminHeaders = {
-    "Content-Type": "application/json",
-    "Authorization": `Bearer ${SERVICE_ROLE_KEY}`,
-    "apikey": SERVICE_ROLE_KEY,
-  };
-  const res = await fetch(`${SUPABASE_URL}/auth/v1/admin/users`, {
-    method: "POST",
-    headers: adminHeaders,
-    body: JSON.stringify({ email, password: "Password123!", email_confirm: true, app_metadata: { tenant_id: tenantId } }),
-  });
-  const data = await res.json() as { id?: string };
+  const id = await crearUsuarioAuth(email, { tenant_id: tenantId }, "Password123!");
   const signIn = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=password`, {
     method: "POST",
     headers: { "Content-Type": "application/json", "apikey": ANON_KEY },
     body: JSON.stringify({ email, password: "Password123!" }),
   });
   const token = await signIn.json() as { access_token?: string };
-  return { id: data.id ?? "", jwt: token.access_token ?? "" };
+  return { id, jwt: token.access_token ?? "" };
 }
 
 // ─── Setup ────────────────────────────────────────────────────────────────────
@@ -142,9 +133,10 @@ beforeAll(async () => {
     id: userBId, tenant_id: tenantBId, username: "hc-userb", email: "hc-userb@test.com", full_name: "Usuario B", rol_id: rolB?.id,
   });
 
-  // Especie global (catálogo seeded)
-  const { data: especie } = await serviceDb.from("especies").select("id").limit(1).single();
-  const especieId = especie?.id;
+  // Catálogo del tenant A (por tenant desde
+  // 20260827000001_catalogos_por_tenant.sql; las mascotas de esta suite son
+  // todas de A, así que alcanza con el suyo).
+  const { especieId } = await catalogoDelTenant(serviceDb, tenantAId);
 
   // Cliente + mascotas de A
   const { data: cli } = await serviceDb.from("clientes")
@@ -175,20 +167,8 @@ afterAll(async () => {
     await serviceDb.storage.from(BUCKET).remove(createdObjects);
   }
 
-  // Borrar historial primero: professional_id es ON DELETE RESTRICT, así el
-  // cascade del tenant no choca con la FK a usuarios. adjuntos_medicos cae por cascade.
-  if (tenantAId) await serviceDb.from("historial_clinico").delete().eq("tenant_id", tenantAId);
-
-  // Los tenants ANTES que las cuentas de Auth: `usuarios.id` referencia a
-  // `auth.users` con ON DELETE CASCADE (migración 20260725000005), así que
-  // borrar la cuenta primero arrastra la fila espejo y choca con las FK que
-  // apuntan al usuario, dejando la cuenta sin borrar.
-  if (tenantAId) await serviceDb.from("tenants").delete().eq("id", tenantAId);
-  if (tenantBId) await serviceDb.from("tenants").delete().eq("id", tenantBId);
-
-  const adminHeaders = { "Authorization": `Bearer ${SERVICE_ROLE_KEY}`, "apikey": SERVICE_ROLE_KEY };
-  if (userAId) await fetch(`${SUPABASE_URL}/auth/v1/admin/users/${userAId}`, { method: "DELETE", headers: adminHeaders });
-  if (userBId) await fetch(`${SUPABASE_URL}/auth/v1/admin/users/${userBId}`, { method: "DELETE", headers: adminHeaders });
+  await limpiarTenant(serviceDb, tenantAId);
+  await limpiarTenant(serviceDb, tenantBId);
 }, 30_000);
 
 // ─── 1. Tenant A registra evento + sube adjunto (Service real) ───────────────

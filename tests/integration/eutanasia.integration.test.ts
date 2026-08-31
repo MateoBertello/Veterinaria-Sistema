@@ -37,6 +37,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import app from "../../supabase/functions/api/src/main.ts";
 import { SUPABASE_URL, SUPABASE_ANON_KEY, SERVICE_ROLE_KEY, describeIntegration } from "./_env.ts";
+import { crearUsuarioAuth, limpiarTenant, catalogoDelTenant } from "./_teardown.ts";
 
 function skipIfNoCredentials(): boolean {
   if (!SUPABASE_URL || !SERVICE_ROLE_KEY || !SUPABASE_ANON_KEY) {
@@ -46,12 +47,6 @@ function skipIfNoCredentials(): boolean {
   return false;
 }
 
-const adminHeaders = () => ({
-  "Content-Type":  "application/json",
-  "Authorization": `Bearer ${SERVICE_ROLE_KEY}`,
-  "apikey":        SERVICE_ROLE_KEY,
-});
-
 async function signIn(email: string, password: string): Promise<string> {
   const res = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=password`, {
     method:  "POST",
@@ -60,16 +55,6 @@ async function signIn(email: string, password: string): Promise<string> {
   });
   const data = await res.json() as { access_token?: string };
   return data.access_token ?? "";
-}
-
-async function createAuthUser(email: string, appMetadata: Record<string, unknown>): Promise<string> {
-  const res = await fetch(`${SUPABASE_URL}/auth/v1/admin/users`, {
-    method:  "POST",
-    headers: adminHeaders(),
-    body:    JSON.stringify({ email, password: "TestPass123!", email_confirm: true, app_metadata: appMetadata }),
-  });
-  const user = await res.json() as { id?: string };
-  return user.id ?? "";
 }
 
 async function callApp(path: string, opts: { method?: string; jwt?: string; body?: unknown } = {}) {
@@ -98,7 +83,7 @@ async function provisionTenant(serviceDb: SupabaseClient, sufijo: string) {
   await serviceDb.rpc("on_tenant_created", { p_tenant_id: tenantId });
 
   const email  = `admin-eutanasia-${sufijo}@test.com`;
-  const userId = await createAuthUser(email, { tenant_id: tenantId });
+  const userId = await crearUsuarioAuth(email, { tenant_id: tenantId });
   const { data: rolAdmin } = await serviceDb
     .from("roles").select("id").eq("tenant_id", tenantId).eq("name", "admin").single();
   await serviceDb.from("usuarios").insert({
@@ -127,33 +112,18 @@ beforeAll(async () => {
 
   serviceDb = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, { auth: { persistSession: false } });
 
-  const { data: especie } = await serviceDb.from("especies").select("id").limit(1).single();
-  especieId = especie?.id ?? "";
-  const { data: tv } = await serviceDb.from("tipos_vacuna").select("id").limit(1).single();
-  tipoVacunaId = tv?.id ?? "";
-
   tenantA = await provisionTenant(serviceDb, "EA");
   tenantB = await provisionTenant(serviceDb, "EB");
+
+  // El catálogo es del tenant desde 20260827000001_catalogos_por_tenant.sql, así
+  // que se pide DESPUÉS de crear el tenant y para el tenant correcto: todos los
+  // helpers de esta suite siembran sobre A.
+  ({ especieId, tipoVacunaId } = await catalogoDelTenant(serviceDb, tenantA.tenantId));
 }, 60_000);
 
 afterAll(async () => {
   if (!serviceDb) return;
-  for (const tid of [tenantA.tenantId, tenantB.tenantId]) {
-    if (!tid) continue;
-    // ORDEN IMPORTANTE: primero el tenant, después las cuentas de Auth.
-    // Desde que `usuarios.id` referencia a `auth.users` con ON DELETE CASCADE
-    // (migración 20260725000005), borrar la cuenta arrastra la fila espejo — y
-    // eso lo frena cualquier FK que apunte al usuario, como
-    // `historial_clinico.professional_id`. Borrando primero el tenant, su
-    // cascade se lleva todo lo dependiente y la cuenta sale limpia. Al revés,
-    // el DELETE de Auth falla en silencio y deja cuentas huérfanas que hacen
-    // fallar la corrida SIGUIENTE (el email ya existe).
-    const { data: usuarios } = await serviceDb.from("usuarios").select("id").eq("tenant_id", tid);
-    await serviceDb.from("tenants").delete().eq("id", tid);
-    for (const u of (usuarios ?? []) as { id: string }[]) {
-      await fetch(`${SUPABASE_URL}/auth/v1/admin/users/${u.id}`, { method: "DELETE", headers: adminHeaders() });
-    }
-  }
+  for (const tid of [tenantA.tenantId, tenantB.tenantId]) await limpiarTenant(serviceDb, tid);
 });
 
 // ─── Helpers de datos ──────────────────────────────────────────────────────────

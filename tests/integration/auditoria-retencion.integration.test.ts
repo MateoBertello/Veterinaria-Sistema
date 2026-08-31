@@ -25,6 +25,7 @@
 import { it, expect, beforeAll, afterAll } from "vitest";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { SUPABASE_URL, SUPABASE_ANON_KEY, SERVICE_ROLE_KEY, describeIntegration } from "./_env.ts";
+import { limpiarTenant } from "./_teardown.ts";
 
 globalThis.WebSocket = class FakeWebSocket {} as never;
 
@@ -91,8 +92,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   if (!serviceDb) return;
-  // El ON DELETE CASCADE de tenants arrastra los asientos que sobrevivieron.
-  for (const id of tenantIds) await serviceDb.from("tenants").delete().eq("id", id);
+  for (const id of tenantIds) await limpiarTenant(serviceDb, id);
 });
 
 describeIntegration("RN-AUD4: retención de auditoría (purga programada)", () => {

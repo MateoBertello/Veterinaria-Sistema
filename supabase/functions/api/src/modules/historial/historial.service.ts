@@ -4,6 +4,7 @@
 import { DomainError, ErrorCode } from "../../shared/errors.ts";
 import { recordAudit } from "../../shared/audit.ts";
 import { getServiceDb } from "../../shared/db.ts";
+import { assertProfesionalAsignable } from "../../shared/profesional.ts";
 import { neutralizeFormula } from "../../shared/sanitize.ts";
 import {
   CanalEmailResend,
@@ -16,6 +17,7 @@ import {
   type CrearEventoClinicoDto,
   type RegistrarEutanasiaDto,
 } from "./historial.schemas.ts";
+import { VacunacionService } from "../vacunacion/vacunacion.service.ts";
 
 // ─── DTOs públicos ────────────────────────────────────────────────────────────
 
@@ -83,6 +85,9 @@ export interface EventoCreado {
   clientNameAtTime: string;
   attachmentsCount: number;
   emailSent:        boolean;
+  // RN-EC13: id de la dosis programada en plan_vacunacion si el evento vino con
+  // proximaDosis; null si no se pidió (o el evento no es 'Vacunación').
+  planVacunacionId: string | null;
 }
 
 /**
@@ -99,6 +104,11 @@ export interface AdjuntoFirmado {
   fileName: string;
   fileType: string;
   fileSize: number;
+}
+
+/** Signed URL de un adjunto identificado (para el lote de un evento; ver `generarSignedUrlsAdjuntosEvento`). */
+export interface AdjuntoFirmadoLote extends AdjuntoFirmado {
+  id: string;
 }
 
 export interface HistorialExport {
@@ -457,8 +467,8 @@ export class HistorialService {
       .select(
         `id, name, estado,
          cliente:clientes!client_id(full_name),
-         especie:especies!especie_id(name),
-         raza:razas!raza_id(name)`,
+         especie:especies!mascotas_especie_tenant_fkey(name),
+         raza:razas!mascotas_raza_tenant_fkey(name)`,
       )
       .eq("id", petId)
       .eq("tenant_id", tenantId)
@@ -566,6 +576,27 @@ export class HistorialService {
       throw new DomainError(ErrorCode.FORBIDDEN, 403, "El profesional no pertenece a este tenant");
     }
 
+    // RN-HOR8: un profesional dado de baja no firma eventos clínicos NUEVOS.
+    // Lo que ya firmó queda intacto: el historial es inmutable, esta guarda
+    // sólo mira hacia adelante.
+    await assertProfesionalAsignable(db, ctx.tenantId, data.professionalId);
+
+    // RN-EC13: si se pidió programar la próxima dosis, se valida y crea ANTES
+    // del evento — vía VacunacionService.programarDosis, que aplica RN-PV2
+    // (fecha futura), RN-PV3 (catálogo) y RN-PV11 (especie de la mascota). Si
+    // cualquiera de esas guardas rechaza la dosis, no se crea nada (ni la dosis
+    // ni el evento): mejor que quede un evento de Vacunación sin ningún enlace
+    // real al catálogo, sea el estado imposible en vez del normal.
+    let planVacunacionId: string | null = null;
+    if (data.eventType === "Vacunación" && data.proximaDosis) {
+      const dosis = await VacunacionService.programarDosis(
+        petId,
+        { tipoVacunaId: data.proximaDosis.tipoVacunaId, fechaEstimada: data.proximaDosis.fechaEstimada },
+        ctx,
+      );
+      planVacunacionId = dosis.id;
+    }
+
     const payload = {
       tenant_id:           ctx.tenantId,
       pet_id:              petId,
@@ -599,6 +630,23 @@ export class HistorialService {
 
     // deno-lint-ignore no-explicit-any
     const created = row as any;
+
+    // RN-EC13: enlaza la dosis ya creada con el evento que la originó (columna
+    // `evento_origen_id`, no disponible hasta tener el id del evento).
+    if (planVacunacionId) {
+      const { error: linkError } = await db
+        .from("plan_vacunacion")
+        .update({ evento_origen_id: created.id })
+        .eq("id", planVacunacionId)
+        .eq("tenant_id", ctx.tenantId);
+
+      if (linkError) {
+        throw new DomainError(
+          ErrorCode.INTERNAL_ERROR, 500,
+          "El evento y la dosis se crearon, pero no se pudo enlazarlos",
+        );
+      }
+    }
 
     // RN-EC8: auditoría CREATE en módulo medical_records.
     await recordAudit(db as never, {
@@ -662,6 +710,7 @@ export class HistorialService {
       clientNameAtTime,
       attachmentsCount: 0,
       emailSent,
+      planVacunacionId,
     };
   }
 
@@ -702,6 +751,11 @@ export class HistorialService {
     }
 
     const db = getServiceDb();
+
+    // RN-HOR8: un profesional dado de baja no firma la eutanasia. Se valida
+    // ANTES del RPC, igual que RN-EC10: no se inicia la transacción
+    // irreversible para después abortarla.
+    await assertProfesionalAsignable(db, ctx.tenantId, data.professionalId);
 
     // RN-EC11: transacción atómica única. p_tenant_id SIEMPRE del JWT (regla 1).
     // RN-S3: el asiento de auditoría se hace DENTRO del RPC (atómico con la
@@ -902,6 +956,65 @@ export class HistorialService {
   }
 
   /**
+   * Genera signed URLs para TODOS los adjuntos de un evento en una sola petición
+   * (vista previa inline de imágenes en la línea de tiempo). Evita el request
+   * waterfall de pedir una signed URL por adjunto: una consulta a la tabla +
+   * una llamada por lote a Storage (`createSignedUrls`).
+   * Aislamiento: filtra por tenant_id (regla de aislamiento explícito, no hay RLS
+   * en este camino porque usa getServiceDb()). Si el evento no tiene adjuntos o
+   * pertenece a otro tenant, devuelve un arreglo vacío (no hay nada que filtrar
+   * de más: la lista de adjuntos del evento ya la validó `obtenerEventoPorId`).
+   */
+  static async generarSignedUrlsAdjuntosEvento(
+    eventoId: string,
+    ctx:      CallerContext,
+  ): Promise<AdjuntoFirmadoLote[]> {
+    const db = getServiceDb();
+
+    const { data: adjuntos, error } = await db
+      .from("adjuntos_medicos")
+      .select("id, storage_path, file_name, file_type, file_size")
+      .eq("medical_record_id", eventoId)
+      .eq("tenant_id", ctx.tenantId)
+      .eq("deleted", false);
+
+    if (error) {
+      throw new DomainError(ErrorCode.INTERNAL_ERROR, 500, "Error al consultar los adjuntos");
+    }
+
+    // deno-lint-ignore no-explicit-any
+    const rows = (adjuntos ?? []) as any[];
+    if (rows.length === 0) return [];
+
+    const { data: signed, error: signError } = await db.storage
+      .from(BUCKET_ADJUNTOS)
+      .createSignedUrls(rows.map((r) => r.storage_path), SIGNED_URL_TTL);
+
+    if (signError || !signed) {
+      throw new DomainError(
+        ErrorCode.INTERNAL_ERROR, 500,
+        `No se pudieron generar las URLs de los adjuntos: ${signError?.message ?? ""}`,
+      );
+    }
+
+    // Best-effort por adjunto: si una URL puntual falla firmar, se omite en vez
+    // de tirar abajo el lote completo (las demás igual se muestran).
+    const resultado: AdjuntoFirmadoLote[] = [];
+    for (let i = 0; i < rows.length; i++) {
+      const s = signed[i];
+      if (!s || s.error || !s.signedUrl) continue;
+      resultado.push({
+        id:       rows[i].id,
+        url:      s.signedUrl,
+        fileName: rows[i].file_name,
+        fileType: rows[i].file_type,
+        fileSize: rows[i].file_size,
+      });
+    }
+    return resultado;
+  }
+
+  /**
    * Exportar historial clínico como PDF o XLSX (RN-EX1..EX5).
    * RN-EX1: lanza EMPTY_HISTORY si no hay registros.
    * RN-EX2/EX3: genera PDF con maquetado o XLSX con columnas fijas.
@@ -919,7 +1032,7 @@ export class HistorialService {
     const { data: mascota } = await db
       .from("mascotas")
       .select(
-        "id, name, especie:especies!especie_id(name), raza:razas!raza_id(name), cliente:clientes!client_id(full_name)",
+        "id, name, especie:especies!mascotas_especie_tenant_fkey(name), raza:razas!mascotas_raza_tenant_fkey(name), cliente:clientes!client_id(full_name)",
       )
       .eq("id", petId)
       .eq("tenant_id", ctx.tenantId)

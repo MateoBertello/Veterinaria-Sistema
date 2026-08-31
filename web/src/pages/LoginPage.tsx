@@ -19,12 +19,23 @@ import { Button } from "../components/ui/button.tsx";
 import { Input } from "../components/ui/input.tsx";
 import { Label } from "../components/ui/label.tsx";
 import { useAuth } from "../auth/AuthContext.tsx";
-import { getPlatformSession } from "../lib/platform.ts";
 import { ApiError, type LoginInput } from "../types/index.ts";
 
 type FormValues = LoginInput;
 
 const VACIO: FormValues = { username: "", password: "" };
+
+/**
+ * `true` si el error parece venir del storage del navegador (DOMException de
+ * `localStorage`, ej. `QuotaExceededError`/`SecurityError` en modo privado con
+ * storage bloqueado). `session.ts` ya envuelve sus accesos y no debería dejar
+ * pasar ninguno, pero este es el resguardo de segunda línea: si algo se
+ * escapa, el usuario recibe un mensaje accionable en vez de "error inesperado".
+ */
+function esErrorDeStorage(err: unknown): boolean {
+  if (typeof DOMException !== "undefined" && err instanceof DOMException) return true;
+  return err instanceof Error && /localstorage|quota|storage/i.test(err.message);
+}
 
 /** Traduce el error del envelope a un mensaje genérico (RN-AUT1: nunca revela si falló el usuario o la contraseña). */
 function mensajeDeError(err: unknown): string {
@@ -44,6 +55,16 @@ function mensajeDeError(err: unknown): string {
     if (err.code === "NETWORK_ERROR") {
       return "No se pudo conectar con el servidor. Intentá de nuevo.";
     }
+    // El servidor respondió pero no con el envelope esperado (ej. un hosting
+    // estático mal configurado que devuelve el propio index.html con HTTP 200
+    // para cualquier ruta, incluida /api/*). `err.message` ya trae el
+    // diagnóstico según el status (client.ts, mensajeFueraDeContrato).
+    if (err.code === "INVALID_RESPONSE") {
+      return `${err.message} Si el problema persiste, contactá al soporte técnico.`;
+    }
+  }
+  if (esErrorDeStorage(err)) {
+    return "Este navegador bloqueó el almacenamiento local (modo privado o configuración de privacidad). Podés seguir usando la aplicación, pero vas a tener que volver a iniciar sesión si cerrás o recargás la pestaña.";
   }
   return "Ocurrió un error inesperado. Intentá de nuevo.";
 }
@@ -58,13 +79,6 @@ export function LoginPage() {
     handleSubmit,
     formState: { errors, isSubmitting },
   } = useForm<FormValues>({ defaultValues: VACIO });
-
-  // Sesión de PLATAFORMA activa (claim super_admin): su lugar es la consola, no
-  // el shell del tenant. "Cerrar sesión" en la consola limpia el token y devuelve
-  // a este formulario.
-  if (getPlatformSession()) {
-    return <Navigate to="/admin/tenants" replace />;
-  }
 
   // Ya autenticado: nada que hacer en /login → al destino previo o al panel de inicio.
   if (status === "authenticated") {

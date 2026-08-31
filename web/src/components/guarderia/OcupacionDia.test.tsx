@@ -89,7 +89,7 @@ describe("OcupacionDia", () => {
 
   it("estado vacío cuando no hay mascotas ese día", async () => {
     renderOcupacion();
-    expect(await screen.findByText(/No hay mascotas en la guardería/)).toBeInTheDocument();
+    expect(await screen.findByText(/No hay huéspedes en la guardería/)).toBeInTheDocument();
   });
 
   it("muestra Check-in solo en Reservada", async () => {

@@ -74,8 +74,21 @@ const filaRpc = {
 };
 
 /**
- * Mock de DB con dos caminos:
+ * Fila que devuelve la lectura previa de `actualizar` (pre-relleno de los campos
+ * que el body no envía). Es el default del mock: la mayoría de los tests de
+ * modificación mandan el DTO completo y no dependen de estos valores.
+ */
+const estadiaVigenteBase = {
+  check_in_date:  filaRpc.check_in_date,
+  check_out_date: filaRpc.check_out_date,
+  reason:         filaRpc.reason,
+  notes:          filaRpc.notes,
+};
+
+/**
+ * Mock de DB con tres caminos:
  *  - `.rpc(name, params).single()` → { data: rpcData, error: rpcError }
+ *  - `.from().select().eq().eq().single()` → { data: estadiaVigente, error: estadiaVigenteError }
  *  - query builder thenable (`.from().select().eq().in().lte().gte()`) → select result
  */
 function buildDb(opts: {
@@ -83,6 +96,8 @@ function buildDb(opts: {
   rpcError?:    { message: string } | null;
   selectData?:  unknown[];
   selectError?: { message: string } | null;
+  estadiaVigente?:      Record<string, unknown> | null;
+  estadiaVigenteError?: { message: string } | null;
 } = {}) {
   const selectResult = { data: opts.selectData ?? [], error: opts.selectError ?? null };
 
@@ -93,7 +108,10 @@ function buildDb(opts: {
   }
   // Thenable: permite `await db.from(...)...gte(...)`.
   chain.then = (resolve: (v: unknown) => unknown) => resolve(selectResult);
-  chain.single = vi.fn().mockResolvedValue(selectResult);
+  chain.single = vi.fn().mockResolvedValue({
+    data:  opts.estadiaVigente === undefined ? estadiaVigenteBase : opts.estadiaVigente,
+    error: opts.estadiaVigenteError ?? null,
+  });
 
   chain.rpc = vi.fn().mockReturnValue({
     single: vi.fn().mockResolvedValue({
@@ -325,6 +343,77 @@ describe("EstadiaService.actualizar", () => {
       }),
     );
   });
+  // ── Pre-relleno de campos no enviados (antes vivía en el controller) ────────
+  // La lectura de la estadía vigente es una consulta de negocio: pertenece al
+  // Service, que es la única capa que toca la base (regla 3 del CLAUDE.md).
+
+  it("RN-ME1: pre-rellena con los valores vigentes los campos que el body no envía", async () => {
+    const db = buildDb({
+      rpcData: filaRpcModificada,
+      estadiaVigente: {
+        check_in_date:  ymd(10),
+        check_out_date: ymd(12),
+        reason:         "Vacaciones del dueño",
+        notes:          "Trae su alimento",
+      },
+    });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    await EstadiaService.actualizar(ESTADIA_ID, { reason: "Viaje extendido" }, ctx);
+
+    expect(db.rpc).toHaveBeenCalledWith("modificar_estadia_con_cupo", {
+      p_tenant_id:  TENANT_ID,
+      p_estadia_id: ESTADIA_ID,
+      p_check_in:   ymd(10),
+      p_check_out:  ymd(12),
+      p_reason:     "Viaje extendido",
+      p_notes:      "Trae su alimento",
+    });
+  });
+
+  it("RN-ME1: `notes: null` explícito borra la nota; no se pisa con la vigente", async () => {
+    const db = buildDb({
+      rpcData: filaRpcModificada,
+      estadiaVigente: {
+        check_in_date:  ymd(10),
+        check_out_date: ymd(12),
+        reason:         "Vacaciones del dueño",
+        notes:          "Trae su alimento",
+      },
+    });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    await EstadiaService.actualizar(ESTADIA_ID, { notes: null }, ctx);
+
+    expect(db.rpc).toHaveBeenCalledWith(
+      "modificar_estadia_con_cupo",
+      expect.objectContaining({ p_notes: null }),
+    );
+  });
+
+  it("RN-ME1: estadía inexistente o de otro tenant → STAY_NOT_FOUND (404) sin llegar al RPC", async () => {
+    const db = buildDb({ estadiaVigente: null, estadiaVigenteError: { message: "not found" } });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    await expect(
+      EstadiaService.actualizar(ESTADIA_ID, { reason: "Viaje extendido" }, ctx),
+    ).rejects.toMatchObject({ code: ErrorCode.STAY_NOT_FOUND, statusCode: 404 });
+
+    expect(db.rpc).not.toHaveBeenCalled();
+    expect(mockRecordAudit).not.toHaveBeenCalled();
+  });
+
+  it("aislamiento: la lectura previa filtra por id Y por tenant_id", async () => {
+    const db = buildDb({ rpcData: filaRpcModificada });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    await EstadiaService.actualizar(ESTADIA_ID, { reason: "Viaje extendido" }, ctx);
+
+    expect(db.from).toHaveBeenCalledWith("estadias");
+    expect(db.eq).toHaveBeenCalledWith("id", ESTADIA_ID);
+    expect(db.eq).toHaveBeenCalledWith("tenant_id", TENANT_ID);
+  });
+
 });
 
 // ─── cancelar ─────────────────────────────────────────────────────────────────

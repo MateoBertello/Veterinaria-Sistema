@@ -59,13 +59,21 @@ interface Props {
   onOpenChange: (open: boolean) => void;
   /** Usuario a editar; si es undefined/null, es alta. */
   usuario?: Usuario | null;
+  /**
+   * RN-SEC8: el usuario que se está editando es el propio usuario logueado. El
+   * selector de rol queda deshabilitado con la explicación a la vista — el
+   * backend lo rechaza con SELF_PRIVILEGE_CHANGE y un control que existe y
+   * falla al usarlo es peor que uno que no está. El resto del formulario
+   * (nombre, usuario, email, teléfono) sigue editable.
+   */
+  esUnoMismo?: boolean;
   roles: Rol[];
   onSaved: (usuario: Usuario) => void;
   crear: (input: CrearUsuarioInput) => Promise<Usuario>;
   editar: (id: string, input: EditarUsuarioInput) => Promise<Usuario>;
 }
 
-export function UsuarioFormSheet({ open, onOpenChange, usuario, roles, onSaved, crear, editar }: Props) {
+export function UsuarioFormSheet({ open, onOpenChange, usuario, esUnoMismo = false, roles, onSaved, crear, editar }: Props) {
   const esEdicion = Boolean(usuario);
   const [showPassword, setShowPassword] = useState(false);
 
@@ -311,11 +319,12 @@ export function UsuarioFormSheet({ open, onOpenChange, usuario, roles, onSaved, 
               name="roleId"
               rules={{ required: "El rol es requerido" }}
               render={({ field }) => (
-                <Select value={field.value} onValueChange={field.onChange}>
+                <Select value={field.value} onValueChange={field.onChange} disabled={esUnoMismo}>
                   <SelectTrigger
                     id="roleId"
+                    disabled={esUnoMismo}
                     aria-invalid={Boolean(errRole)}
-                    aria-describedby={errRole ? "roleId-error" : undefined}
+                    aria-describedby={errRole ? "roleId-error" : "roleId-hint"}
                   >
                     <SelectValue placeholder="Seleccionar rol…" />
                   </SelectTrigger>
@@ -327,8 +336,10 @@ export function UsuarioFormSheet({ open, onOpenChange, usuario, roles, onSaved, 
                 </Select>
               )}
             />
-            <p className="text-sm text-muted-foreground">
-              El rol determina los permisos de acceso al sistema.
+            <p id="roleId-hint" className="text-sm text-muted-foreground">
+              {esUnoMismo
+                ? "No podés cambiar tu propio rol: pedíselo a otro administrador."
+                : "El rol determina los permisos de acceso al sistema."}
             </p>
             {errRole ? (
               <p id="roleId-error" role="alert" className="text-sm text-destructive">{errRole}</p>

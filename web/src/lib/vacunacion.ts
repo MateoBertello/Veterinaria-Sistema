@@ -1,4 +1,4 @@
-import type { TipoVacuna } from "../api/catalogos.ts";
+import type { TipoVacunaAplicable } from "../types/index.ts";
 import { esFechaISO, formatFechaISO, hoyISO, sumarMeses } from "./fechas.ts";
 
 /**
@@ -8,7 +8,7 @@ import { esFechaISO, formatFechaISO, hoyISO, sumarMeses } from "./fechas.ts";
  */
 export interface RefuerzoSugerido {
   tipoVacunaId:   string;
-  /** `meses_refuerzo_sugerido` del catálogo global. */
+  /** `mesesRefuerzoSugerido` del catálogo de la clínica. */
   meses:          number;
   /** Fecha teórica del refuerzo: fechaAplicada + meses. */
   fechaCalculada: string;
@@ -19,7 +19,7 @@ export interface RefuerzoSugerido {
 
 /**
  * RN-PV10: al aplicar una dosis, el sistema propone el refuerzo siguiente según
- * el `meses_refuerzo_sugerido` del catálogo. Devuelve `null` cuando no hay nada
+ * el `mesesRefuerzoSugerido` del catálogo. Devuelve `null` cuando no hay nada
  * que sugerir (tipo de vacuna sin refuerzo definido o fuera del catálogo), y en
  * ese caso el flujo termina como siempre, sin diálogo extra.
  *
@@ -28,11 +28,11 @@ export interface RefuerzoSugerido {
  * por RN-PV2, y el mensaje aclara cuándo correspondía el refuerzo.
  */
 export function calcularRefuerzoSugerido(
-  tipo:          TipoVacuna | undefined,
+  tipo:          TipoVacunaAplicable | undefined,
   fechaAplicada: string,
   hoy:           string = hoyISO(),
 ): RefuerzoSugerido | null {
-  const meses = tipo?.meses_refuerzo_sugerido ?? null;
+  const meses = tipo?.mesesRefuerzoSugerido ?? null;
   if (!tipo || meses === null || meses <= 0) return null;
   if (!esFechaISO(fechaAplicada)) return null;
 

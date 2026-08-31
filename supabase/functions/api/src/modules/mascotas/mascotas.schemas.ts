@@ -24,6 +24,12 @@ export const CrearMascotaSchema = z.object({
 });
 
 // RN-MA4: birthDate inmutable; cambio de dueño (clientId) es otro caso de uso → ambos se omiten.
+// especieId (RN-MA11, también inmutable) NO se omite acá a propósito: si se
+// omitiera, Zod descartaría en silencio cualquier intento de cambio, que es
+// justo el comportamiento que RN-MA11 quiere evitar (un cambio que la UI cree
+// haber hecho y el backend descartó sin avisar). Por eso sigue en el schema
+// —para que el Service vea el valor y pueda rechazarlo explícitamente— pero el
+// Service nunca lo escribe en el UPDATE.
 export const EditarMascotaSchema = CrearMascotaSchema
   .omit({ birthDate: true, clientId: true })
   .partial();

@@ -21,10 +21,14 @@ import {
   SelectValue,
 } from "../ui/select.tsx";
 import { Textarea } from "../ui/textarea.tsx";
-import { listarTiposVacuna, type TipoVacuna } from "../../api/catalogos.ts";
-import { programarDosis } from "../../api/vacunacion.ts";
+import { listarTiposVacunaAplicables, programarDosis } from "../../api/vacunacion.ts";
 import { hoyISO } from "../../lib/fechas.ts";
-import { ApiError, ErrorCode, type DosisVacunacion } from "../../types/index.ts";
+import {
+  ApiError,
+  ErrorCode,
+  type DosisVacunacion,
+  type TipoVacunaAplicable,
+} from "../../types/index.ts";
 
 interface FormValues {
   tipoVacunaId:  string;
@@ -43,8 +47,13 @@ interface Props {
   onOpenChange: (open: boolean) => void;
   petId:        string;
   onSaved:      (dosis: DosisVacunacion) => void;
-  /** Catálogo global ya cargado por el padre; si no viene, el diálogo lo pide al abrirse. */
-  tiposVacuna?:  TipoVacuna[];
+  /**
+   * Vacunas APLICABLES A ESTA MASCOTA, ya cargadas por el padre; si no vienen,
+   * el diálogo las pide al abrirse. No es el catálogo entero: la lista sale de
+   * `GET /mascotas/:petId/tipos-vacuna-aplicables` (RN-PV11), que resuelve la
+   * especie del animal en el backend.
+   */
+  tiposVacuna?:  TipoVacunaAplicable[];
   /** Valores con los que abrir el formulario (p. ej. el refuerzo sugerido, RN-PV10). */
   initialValues?: ProgramarDosisInitialValues;
   /**
@@ -74,7 +83,8 @@ export function ProgramarDosisDialog({
     formState: { errors, isSubmitting },
   } = useForm<FormValues>({ defaultValues: { tipoVacunaId: "", fechaEstimada: hoy, notas: "" } });
 
-  const [tipos, setTipos] = useState<TipoVacuna[]>([]);
+  const [tipos, setTipos] = useState<TipoVacunaAplicable[]>([]);
+  const [sinAplicables, setSinAplicables] = useState(false);
 
   // Solo al abrirse: pre-cargar es un valor inicial, no un valor controlado — si
   // el efecto corriera en cada render pisaría lo que el veterinario esté editando.
@@ -85,15 +95,23 @@ export function ProgramarDosisDialog({
       fechaEstimada: initialValues?.fechaEstimada ?? hoy,
       notas:         initialValues?.notas         ?? "",
     });
+    setSinAplicables(false);
     if (tiposVacuna && tiposVacuna.length > 0) {
       setTipos(tiposVacuna);
       return;
     }
-    listarTiposVacuna()
-      .then(setTipos)
+    // Las vacunas se piden PARA ESTA MASCOTA: el backend resuelve su especie y
+    // devuelve solo las que le corresponden. Pedir el catálogo entero era el bug
+    // que hacía que al programar una dosis para un perro el combo ofreciera las
+    // de gato.
+    listarTiposVacunaAplicables(petId)
+      .then((items) => {
+        setTipos(items);
+        setSinAplicables(items.length === 0);
+      })
       .catch(() => setTipos([]));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, reset]);
+  }, [open, petId, reset]);
 
   async function onSubmit(values: FormValues) {
     try {
@@ -111,8 +129,17 @@ export function ProgramarDosisDialog({
         setError("fechaEstimada", { type: "server", message: err.message });
         return;
       }
-      if (err instanceof ApiError && err.code === ErrorCode.VACCINE_TYPE_NOT_FOUND) {
-        // RN-PV3: tipoVacunaId debe existir en el catálogo global.
+      if (
+        err instanceof ApiError &&
+        (err.code === ErrorCode.VACCINE_TYPE_NOT_FOUND ||
+         err.code === ErrorCode.VACCINE_NOT_APPLICABLE_TO_SPECIES)
+      ) {
+        // RN-PV3 (no está en el catálogo) y RN-PV11 (está, pero no aplica a la
+        // especie): los dos son problemas del campo "tipo de vacuna", así que el
+        // mensaje va ahí y no en un toast que obligue a adivinar qué rechazó el
+        // servidor. Que RN-PV11 pueda llegar acá con el combo ya filtrado no es
+        // redundante: alguien pudo desasociar la especie mientras el diálogo
+        // estaba abierto.
         setError("tipoVacunaId", { type: "server", message: err.message });
         return;
       }
@@ -164,6 +191,11 @@ export function ProgramarDosisDialog({
             />
             {errors.tipoVacunaId ? (
               <p role="alert" className="text-sm text-destructive">{errors.tipoVacunaId.message}</p>
+            ) : sinAplicables ? (
+              <p role="alert" className="text-sm text-muted-foreground">
+                No hay vacunas asociadas a la especie de esta mascota. Asocialas
+                desde Catálogos clínicos → Tipos de vacuna.
+              </p>
             ) : null}
           </div>
 

@@ -15,13 +15,10 @@ vi.mock("../api/historial-clinico.ts", () => ({
 }));
 
 vi.mock("../api/vacunacion.ts", () => ({
-  listarPlanVacunacion: vi.fn(),
-  programarDosis:       vi.fn(),
-  marcarDosisAplicada:  vi.fn(),
-}));
-
-vi.mock("../api/catalogos.ts", () => ({
-  listarTiposVacuna: vi.fn(),
+  listarPlanVacunacion:        vi.fn(),
+  listarTiposVacunaAplicables: vi.fn(),
+  programarDosis:              vi.fn(),
+  marcarDosisAplicada:         vi.fn(),
 }));
 
 vi.mock("../api/doctores.ts", () => ({
@@ -34,8 +31,12 @@ vi.mock("sonner", () => ({
 
 import { HistorialClinicoPage } from "./HistorialClinicoPage.tsx";
 import { exportarHistorial, listarHistorial, resumenClinico } from "../api/historial-clinico.ts";
-import { listarPlanVacunacion, marcarDosisAplicada, programarDosis } from "../api/vacunacion.ts";
-import { listarTiposVacuna } from "../api/catalogos.ts";
+import {
+  listarPlanVacunacion,
+  listarTiposVacunaAplicables,
+  marcarDosisAplicada,
+  programarDosis,
+} from "../api/vacunacion.ts";
 import { listarDoctores } from "../api/doctores.ts";
 
 const mockListar = vi.mocked(listarHistorial);
@@ -44,7 +45,7 @@ const mockExportar = vi.mocked(exportarHistorial);
 const mockListarDosis = vi.mocked(listarPlanVacunacion);
 const mockProgramar = vi.mocked(programarDosis);
 const mockMarcarAplicada = vi.mocked(marcarDosisAplicada);
-const mockTiposVacuna = vi.mocked(listarTiposVacuna);
+const mockTiposVacuna = vi.mocked(listarTiposVacunaAplicables);
 const mockDoctores = vi.mocked(listarDoctores);
 
 function makeResumen(over: Partial<ResumenClinico> = {}): ResumenClinico {
@@ -87,9 +88,11 @@ function renderPage(state?: { from?: string }) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // Ya vienen filtradas por la especie de la mascota (RN-PV11): la página no
+  // recibe el catálogo entero, sino la respuesta del endpoint de aplicables.
   mockTiposVacuna.mockResolvedValue([
-    { id: "t1", nombre: "Antirrábica", especie_aplicable: null, meses_refuerzo_sugerido: 12 },
-    { id: "t2", nombre: "Triple Felina", especie_aplicable: "Gato", meses_refuerzo_sugerido: null },
+    { id: "t1", nombre: "Antirrábica",  mesesRefuerzoSugerido: 12 },
+    { id: "t2", nombre: "Triple Felina", mesesRefuerzoSugerido: null },
   ]);
 });
 

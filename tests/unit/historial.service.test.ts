@@ -9,13 +9,22 @@ vi.mock("../../supabase/functions/api/src/shared/audit.ts", () => ({
   recordAudit: vi.fn().mockResolvedValue(undefined),
 }));
 
+// RN-EC13: crearRegistro delega en VacunacionService.programarDosis para
+// validar/crear la próxima dosis; se mockea entero (no se re-testean acá las
+// guardas RN-PV2/PV3/PV4/PV11, ya cubiertas en vacunacion.service.test.ts).
+vi.mock("../../supabase/functions/api/src/modules/vacunacion/vacunacion.service.ts", () => ({
+  VacunacionService: { programarDosis: vi.fn() },
+}));
+
 import { getServiceDb } from "../../supabase/functions/api/src/shared/db.ts";
 import { recordAudit } from "../../supabase/functions/api/src/shared/audit.ts";
 import { HistorialService } from "../../supabase/functions/api/src/modules/historial/historial.service.ts";
-import { ErrorCode } from "../../supabase/functions/api/src/shared/errors.ts";
+import { VacunacionService } from "../../supabase/functions/api/src/modules/vacunacion/vacunacion.service.ts";
+import { DomainError, ErrorCode } from "../../supabase/functions/api/src/shared/errors.ts";
 
-const mockGetServiceDb = vi.mocked(getServiceDb);
-const mockRecordAudit  = vi.mocked(recordAudit);
+const mockGetServiceDb   = vi.mocked(getServiceDb);
+const mockRecordAudit    = vi.mocked(recordAudit);
+const mockProgramarDosis = vi.mocked(VacunacionService.programarDosis);
 
 const TENANT_ID  = "11111111-1111-4111-8111-111111111111";
 const PET_ID     = "22222222-2222-4222-8222-222222222222";
@@ -23,14 +32,28 @@ const EVENT_ID   = "33333333-3333-4333-8333-333333333333";
 const CLIENT_A   = "44444444-4444-4444-8444-444444444444";
 const CLIENT_B   = "55555555-5555-4555-8555-555555555555";
 const PROF_ID    = "66666666-6666-4666-8666-666666666666";
+const TIPO_VACUNA_ID = "77777777-7777-4777-8777-777777777777";
+
+/**
+ * RN-HOR8: antes de firmar un registro nuevo, el Service resuelve el perfil
+ * profesional (`doctores` por `user_id`) para comprobar que no está dado de
+ * baja. Esta entrada es esa consulta con el perfil disponible — el camino feliz
+ * de todos los tests que llegan a escribir.
+ */
+const perfilDoctorDisponible = { data: { id: "88888888-8888-4888-8888-888888888888", available: true }, error: null };
 
 // ─── Mock builder ─────────────────────────────────────────────────────────────
 
 type MockOpts = {
-  singleResults?:   Array<{ data: unknown; error: unknown }>;
-  rangeResult?:     { data: unknown[]; error: unknown; count: number };
-  uploadResult?:    { data: unknown; error: unknown };
-  signedUrlResult?: { data: unknown; error: unknown };
+  singleResults?:    Array<{ data: unknown; error: unknown }>;
+  rangeResult?:      { data: unknown[]; error: unknown; count: number };
+  uploadResult?:     { data: unknown; error: unknown };
+  signedUrlResult?:  { data: unknown; error: unknown };
+  // Resultado de una query awaited directamente (sin .single()/.maybeSingle()/
+  // .range()), p. ej. `await db.from(...).select(...).eq(...)`. La query es
+  // "thenable"; el runtime resuelve vía builder.then.
+  listResult?:       { data: unknown[]; error: unknown };
+  signedUrlsResult?: { data: unknown; error: unknown };
 };
 
 function buildMockDb(opts: MockOpts = {}) {
@@ -51,17 +74,25 @@ function buildMockDb(opts: MockOpts = {}) {
   builder["range"]       = vi.fn().mockResolvedValue(
     opts.rangeResult ?? { data: [], error: null, count: 0 },
   );
+  builder["then"] = (
+    resolve: (v: unknown) => unknown,
+    reject?: (e: unknown) => unknown,
+  ) => Promise.resolve(opts.listResult ?? { data: [], error: null }).then(resolve, reject);
 
   // Supabase Storage stub
   const storageUpload        = vi.fn().mockResolvedValue(opts.uploadResult ?? { data: { path: "x" }, error: null });
   const storageCreateSigned  = vi.fn().mockResolvedValue(
     opts.signedUrlResult ?? { data: { signedUrl: "https://signed.example/x" }, error: null },
   );
+  const storageCreateSignedUrls = vi.fn().mockResolvedValue(
+    opts.signedUrlsResult ?? { data: [], error: null },
+  );
   const storageRemove        = vi.fn().mockResolvedValue({ data: [], error: null });
   const storageFrom          = vi.fn(() => ({
-    upload:        storageUpload,
-    createSignedUrl: storageCreateSigned,
-    remove:        storageRemove,
+    upload:            storageUpload,
+    createSignedUrl:   storageCreateSigned,
+    createSignedUrls:  storageCreateSignedUrls,
+    remove:            storageRemove,
   }));
 
   const db = {
@@ -71,6 +102,7 @@ function buildMockDb(opts: MockOpts = {}) {
     builder,
     storageUpload,
     storageCreateSigned,
+    storageCreateSignedUrls,
     storageRemove,
     storageFrom,
   };
@@ -377,11 +409,46 @@ describe("crearRegistro", () => {
     expect(db.builder["insert"]).not.toHaveBeenCalled();
   });
 
+  it("RN-HOR8: profesional con perfil de doctor dado de baja → DOCTOR_INACTIVE (no persiste)", async () => {
+    const db = buildMockDb({
+      singleResults: [
+        { data: mascotaViva, error: null },
+        { data: { id: PROF_ID }, error: null },                    // usuario del tenant, OK
+        { data: { id: "88888888-8888-4888-8888-888888888888", available: false }, error: null },
+      ],
+    });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    await expect(
+      HistorialService.crearRegistro(PET_ID, dtoBase() as never, CTX),
+    ).rejects.toMatchObject({ code: ErrorCode.DOCTOR_INACTIVE, statusCode: 422 });
+
+    // Corta antes del insert: el historial ya firmado por ese profesional no se
+    // toca, pero tampoco se le agregan registros nuevos.
+    expect(db.builder["insert"]).not.toHaveBeenCalled();
+  });
+
+  it("RN-HOR8: un usuario del tenant sin perfil de doctor sigue pudiendo firmar (alcance acotado)", async () => {
+    const db = buildMockDb({
+      singleResults: [
+        { data: mascotaViva, error: null },
+        { data: { id: PROF_ID }, error: null },
+        { data: null, error: null },                               // sin fila en `doctores`
+        { data: { id: EVENT_ID, date: "2026-06-04", event_type: "Consulta" }, error: null },
+      ],
+    });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    const evento = await HistorialService.crearRegistro(PET_ID, dtoBase() as never, CTX);
+    expect(evento.id).toBe(EVENT_ID);
+  });
+
   it("RN-EC5: persiste clientIdAtTime/clientNameAtTime del dueño vigente", async () => {
     const db = buildMockDb({
       singleResults: [
         { data: mascotaViva, error: null },
         { data: { id: PROF_ID }, error: null },
+        perfilDoctorDisponible,
         { data: { id: EVENT_ID, date: "2026-06-04", event_type: "Consulta" }, error: null },
       ],
     });
@@ -406,6 +473,7 @@ describe("crearRegistro", () => {
       singleResults: [
         { data: mascotaViva, error: null },
         { data: { id: PROF_ID }, error: null },
+        perfilDoctorDisponible,
         { data: { id: EVENT_ID, date: "2026-06-04", event_type: "Consulta" }, error: null },
       ],
     });
@@ -439,6 +507,7 @@ describe("crearRegistro", () => {
       singleResults: [
         { data: mascotaViva, error: null },
         { data: { id: PROF_ID }, error: null },
+        perfilDoctorDisponible,
         { data: { id: EVENT_ID, date: "2026-06-04", event_type: "Consulta" }, error: null },
       ],
     });
@@ -461,6 +530,7 @@ describe("crearRegistro", () => {
       singleResults: [
         { data: { ...mascotaViva, cliente: { full_name: "Juan Pérez", email: null } }, error: null },
         { data: { id: PROF_ID }, error: null },
+        perfilDoctorDisponible,
         { data: { id: EVENT_ID, date: "2026-06-04", event_type: "Consulta" }, error: null },
       ],
     });
@@ -480,6 +550,7 @@ describe("crearRegistro", () => {
       singleResults: [
         { data: mascotaViva, error: null },
         { data: { id: PROF_ID }, error: null },
+        perfilDoctorDisponible,
         { data: { id: EVENT_ID, date: "2026-06-04", event_type: "Consulta" }, error: null },
       ],
     });
@@ -500,6 +571,7 @@ describe("crearRegistro", () => {
       singleResults: [
         { data: mascotaViva, error: null },
         { data: { id: PROF_ID }, error: null },
+        perfilDoctorDisponible,
         { data: { id: EVENT_ID, date: "2026-06-04", event_type: "Consulta" }, error: null },
       ],
     });
@@ -512,6 +584,126 @@ describe("crearRegistro", () => {
 
     expect(canalEmail.enviar).not.toHaveBeenCalled();
     expect(evento.emailSent).toBe(false);
+  });
+});
+
+// ─── crearRegistro — RN-EC13 (proximaDosis: el puente al catálogo de vacunas) ──
+// Antes de este puente, `eventType: 'Vacunación'` con solo `description` de
+// texto libre era un segundo camino para asentar "se vacunó" que NUNCA pasaba
+// por RN-PV3/RN-PV11 (catálogo / especie aplicable). Sigue siendo válido
+// registrar así una Vacunación sin dosis asociada (ver docs/Addendum v1.1 y
+// docs/PLAN_ETAPAS.md: 'proximaDosis' es explícitamente OPCIONAL) — lo que
+// cambia es que, si el usuario SÍ pide programar la próxima dosis, esa dosis
+// pasa por las mismas guardas que el resto del Plan de Vacunación.
+
+describe("crearRegistro — RN-EC13 (proximaDosis)", () => {
+  it("RN-EC13: proximaDosis con eventType distinto de 'Vacunación' → VALIDATION_ERROR", async () => {
+    mockGetServiceDb.mockReturnValue(buildMockDb() as never);
+
+    await expect(
+      HistorialService.crearRegistro(
+        PET_ID,
+        dtoBase({
+          eventType:    "Consulta",
+          proximaDosis: { tipoVacunaId: TIPO_VACUNA_ID, fechaEstimada: "2026-08-01" },
+        }) as never,
+        CTX,
+      ),
+    ).rejects.toMatchObject({ code: ErrorCode.VALIDATION_ERROR, statusCode: 422 });
+
+    expect(mockProgramarDosis).not.toHaveBeenCalled();
+  });
+
+  it("RN-EC13: 'Vacunación' SIN proximaDosis sigue siendo un registro libre válido (no se toca el catálogo)", async () => {
+    const db = buildMockDb({
+      singleResults: [
+        { data: mascotaViva, error: null },
+        { data: { id: PROF_ID }, error: null },
+        perfilDoctorDisponible,
+        { data: { id: EVENT_ID, date: "2026-06-04", event_type: "Vacunación" }, error: null },
+      ],
+    });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    const evento = await HistorialService.crearRegistro(
+      PET_ID, dtoBase({ eventType: "Vacunación" }) as never, CTX,
+    );
+
+    expect(mockProgramarDosis).not.toHaveBeenCalled();
+    expect(evento.planVacunacionId).toBeNull();
+  });
+
+  it("RN-EC13: proximaDosis que no aplica a la especie → VACCINE_NOT_APPLICABLE_TO_SPECIES, y NO se crea el evento", async () => {
+    const db = buildMockDb({
+      singleResults: [
+        { data: mascotaViva, error: null },
+        { data: { id: PROF_ID }, error: null },
+        perfilDoctorDisponible,
+      ],
+    });
+    mockGetServiceDb.mockReturnValue(db as never);
+    mockProgramarDosis.mockRejectedValue(
+      new DomainError(ErrorCode.VACCINE_NOT_APPLICABLE_TO_SPECIES, 422, "La vacuna no aplica a la especie de la mascota"),
+    );
+
+    await expect(
+      HistorialService.crearRegistro(
+        PET_ID,
+        dtoBase({
+          eventType:    "Vacunación",
+          proximaDosis: { tipoVacunaId: TIPO_VACUNA_ID, fechaEstimada: "2026-08-01" },
+        }) as never,
+        CTX,
+      ),
+    ).rejects.toMatchObject({ code: ErrorCode.VACCINE_NOT_APPLICABLE_TO_SPECIES, statusCode: 422 });
+
+    // La validación corta ANTES del insert del evento clínico: nada se persiste.
+    expect(db.builder["insert"]).not.toHaveBeenCalled();
+  });
+
+  it("RN-EC13: proximaDosis válida programa la dosis (RN-PV2/PV3/PV11 vía VacunacionService) y enlaza evento_origen_id", async () => {
+    const db = buildMockDb({
+      singleResults: [
+        { data: mascotaViva, error: null },
+        { data: { id: PROF_ID }, error: null },
+        perfilDoctorDisponible,
+        { data: { id: EVENT_ID, date: "2026-06-04", event_type: "Vacunación" }, error: null },
+      ],
+    });
+    mockGetServiceDb.mockReturnValue(db as never);
+    mockProgramarDosis.mockResolvedValue({
+      id:                 "dosis-1",
+      petId:              PET_ID,
+      tipoVacunaId:       TIPO_VACUNA_ID,
+      tipoVacunaNombre:   "Antirrábica",
+      eventoOrigenId:     null,
+      eventoAplicacionId: null,
+      fechaEstimada:      "2026-08-01",
+      estado:             "Pendiente",
+      estadoVisual:       "Proxima",
+      notas:              null,
+      createdAt:          "2026-06-04T00:00:00.000Z",
+    } as never);
+
+    const evento = await HistorialService.crearRegistro(
+      PET_ID,
+      dtoBase({
+        eventType:    "Vacunación",
+        proximaDosis: { tipoVacunaId: TIPO_VACUNA_ID, fechaEstimada: "2026-08-01" },
+      }) as never,
+      CTX,
+    );
+
+    // Se valida/crea la dosis ANTES de tener el id del evento (todavía no hay
+    // eventoOrigenId disponible en ese momento).
+    expect(mockProgramarDosis).toHaveBeenCalledWith(
+      PET_ID,
+      { tipoVacunaId: TIPO_VACUNA_ID, fechaEstimada: "2026-08-01" },
+      CTX,
+    );
+    // Y el evento recién creado se enlaza a la dosis con un UPDATE puntual.
+    expect(db.builder["update"]).toHaveBeenCalledWith({ evento_origen_id: EVENT_ID });
+    expect(evento.planVacunacionId).toBe("dosis-1");
   });
 });
 
@@ -596,6 +788,84 @@ describe("generarSignedUrlAdjunto", () => {
   });
 });
 
+// ─── generarSignedUrlsAdjuntosEvento (vista previa inline, un lote por evento) ──
+
+describe("generarSignedUrlsAdjuntosEvento", () => {
+  it("evento sin adjuntos → arreglo vacío, sin llamar a Storage", async () => {
+    const db = buildMockDb({ listResult: { data: [], error: null } });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    const firmados = await HistorialService.generarSignedUrlsAdjuntosEvento(EVENT_ID, CTX);
+
+    expect(firmados).toEqual([]);
+    expect(db.storageCreateSignedUrls).not.toHaveBeenCalled();
+  });
+
+  it("un evento con 2 adjuntos firma las 2 rutas en UNA sola llamada por lote a Storage", async () => {
+    const db = buildMockDb({
+      listResult: {
+        data: [
+          { id: "adj-1", storage_path: `${TENANT_ID}/${EVENT_ID}/a.jpg`, file_name: "a.jpg", file_type: "image/jpeg", file_size: 10 },
+          { id: "adj-2", storage_path: `${TENANT_ID}/${EVENT_ID}/b.png`, file_name: "b.png", file_type: "image/png", file_size: 20 },
+        ],
+        error: null,
+      },
+      signedUrlsResult: {
+        data: [
+          { path: `${TENANT_ID}/${EVENT_ID}/a.jpg`, signedUrl: "https://signed.example/a.jpg", error: null },
+          { path: `${TENANT_ID}/${EVENT_ID}/b.png`, signedUrl: "https://signed.example/b.png", error: null },
+        ],
+        error: null,
+      },
+    });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    const firmados = await HistorialService.generarSignedUrlsAdjuntosEvento(EVENT_ID, CTX);
+
+    expect(db.storageCreateSignedUrls).toHaveBeenCalledTimes(1);
+    expect(firmados).toEqual([
+      { id: "adj-1", url: "https://signed.example/a.jpg", fileName: "a.jpg", fileType: "image/jpeg", fileSize: 10 },
+      { id: "adj-2", url: "https://signed.example/b.png", fileName: "b.png", fileType: "image/png", fileSize: 20 },
+    ]);
+  });
+
+  it("si un adjunto puntual falla al firmar, se omite del lote sin romper los demás (best-effort)", async () => {
+    const db = buildMockDb({
+      listResult: {
+        data: [
+          { id: "adj-1", storage_path: `${TENANT_ID}/${EVENT_ID}/a.jpg`, file_name: "a.jpg", file_type: "image/jpeg", file_size: 10 },
+          { id: "adj-2", storage_path: `${TENANT_ID}/${EVENT_ID}/b.png`, file_name: "b.png", file_type: "image/png", file_size: 20 },
+        ],
+        error: null,
+      },
+      signedUrlsResult: {
+        data: [
+          { path: `${TENANT_ID}/${EVENT_ID}/a.jpg`, signedUrl: null, error: "Object not found" },
+          { path: `${TENANT_ID}/${EVENT_ID}/b.png`, signedUrl: "https://signed.example/b.png", error: null },
+        ],
+        error: null,
+      },
+    });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    const firmados = await HistorialService.generarSignedUrlsAdjuntosEvento(EVENT_ID, CTX);
+
+    expect(firmados).toEqual([
+      { id: "adj-2", url: "https://signed.example/b.png", fileName: "b.png", fileType: "image/png", fileSize: 20 },
+    ]);
+  });
+
+  it("filtra por tenant_id: la lista de adjuntos de otro tenant no se firma (aislamiento explícito)", async () => {
+    const db = buildMockDb({ listResult: { data: [], error: null } });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    await HistorialService.generarSignedUrlsAdjuntosEvento(EVENT_ID, CTX);
+
+    expect(db.builder.eq).toHaveBeenCalledWith("tenant_id", TENANT_ID);
+    expect(db.builder.eq).toHaveBeenCalledWith("deleted", false);
+  });
+});
+
 // ─── registrarEutanasia (RN-EC10, RN-EC11, RN-EC12, RN-PV4) ─────────────────────
 // La ÚNICA operación irreversible del sistema (CLAUDE.md regla 8). Estos tests
 // verifican el contrato del Service; la atomicidad real (rollback en la DB) y el
@@ -666,7 +936,7 @@ describe("registrarEutanasia", () => {
     // El RPC lanza PET_DECEASED (p. ej. mascota ya fallecida). El Service NO debe
     // hacer escrituras por partes: delega TODO en el único rpc('registrar_eutanasia').
     const db = buildMockDb({
-      singleResults: [{ data: null, error: { message: "PET_DECEASED" } }],
+      singleResults: [perfilDoctorDisponible, { data: null, error: { message: "PET_DECEASED" } }],
     });
     mockGetServiceDb.mockReturnValue(db as never);
 
@@ -688,7 +958,7 @@ describe("registrarEutanasia", () => {
 
   it("RN-EC11: éxito ejecuta una única transacción y mapea { evento, mascota }", async () => {
     const db = buildMockDb({
-      singleResults: [{ data: eutanasiaRpcRow(), error: null }],
+      singleResults: [perfilDoctorDisponible, { data: eutanasiaRpcRow(), error: null }],
     });
     mockGetServiceDb.mockReturnValue(db as never);
 
@@ -721,7 +991,7 @@ describe("registrarEutanasia", () => {
     // junto con todo). El Service por tanto no debe llamar a recordAudit; sí pasa
     // p_user_id para que el asiento registre al usuario que ejecuta.
     const db = buildMockDb({
-      singleResults: [{ data: eutanasiaRpcRow(), error: null }],
+      singleResults: [perfilDoctorDisponible, { data: eutanasiaRpcRow(), error: null }],
     });
     mockGetServiceDb.mockReturnValue(db as never);
 
@@ -734,7 +1004,7 @@ describe("registrarEutanasia", () => {
 
   it("RN-PV4: cancelledDoses refleja las dosis pendientes canceladas por el RPC", async () => {
     const db = buildMockDb({
-      singleResults: [{ data: eutanasiaRpcRow({ cancelled_doses: 3 }), error: null }],
+      singleResults: [perfilDoctorDisponible, { data: eutanasiaRpcRow({ cancelled_doses: 3 }), error: null }],
     });
     mockGetServiceDb.mockReturnValue(db as never);
 
@@ -745,9 +1015,25 @@ describe("registrarEutanasia", () => {
     expect(result.cancelledDoses).toBe(3);
   });
 
+  it("RN-HOR8: profesional dado de baja → DOCTOR_INACTIVE sin abrir la transacción irreversible", async () => {
+    const db = buildMockDb({
+      singleResults: [
+        { data: { id: "88888888-8888-4888-8888-888888888888", available: false }, error: null },
+      ],
+    });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    await expect(
+      HistorialService.registrarEutanasia(PET_ID, eutanasiaDto({ euthanasiaConfirmed: true }) as never, CTX),
+    ).rejects.toMatchObject({ code: ErrorCode.DOCTOR_INACTIVE, statusCode: 422 });
+
+    // Mismo criterio que RN-EC10: la operación irreversible ni se inicia.
+    expect(db.rpc).not.toHaveBeenCalled();
+  });
+
   it("registrarEutanasia: RPC MASCOTA_NOT_FOUND → 404", async () => {
     const db = buildMockDb({
-      singleResults: [{ data: null, error: { message: "MASCOTA_NOT_FOUND" } }],
+      singleResults: [perfilDoctorDisponible, { data: null, error: { message: "MASCOTA_NOT_FOUND" } }],
     });
     mockGetServiceDb.mockReturnValue(db as never);
 
@@ -758,7 +1044,7 @@ describe("registrarEutanasia", () => {
 
   it("registrarEutanasia: RPC FORBIDDEN (profesional de otro tenant) → 403", async () => {
     const db = buildMockDb({
-      singleResults: [{ data: null, error: { message: "FORBIDDEN" } }],
+      singleResults: [perfilDoctorDisponible, { data: null, error: { message: "FORBIDDEN" } }],
     });
     mockGetServiceDb.mockReturnValue(db as never);
 

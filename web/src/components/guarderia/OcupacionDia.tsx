@@ -5,6 +5,7 @@ import { AlertTriangle, ChevronLeft, ChevronRight } from "lucide-react";
 import { toast } from "sonner";
 import {
   Table,
+  TableScrollContainer,
   TableBody,
   TableCell,
   TableHead,
@@ -223,13 +224,13 @@ export function OcupacionDia({ fecha, onFecha }: Props) {
         </div>
       ) : null}
 
-      <div className="rounded-lg border">
-        <Table>
-          <TableHeader>
+      <TableScrollContainer aria-label="Estadías del día en guardería">
+        <Table containerClassName="overflow-visible">
+          <TableHeader className="sticky top-0 z-10">
             <TableRow className="bg-orange-50 hover:bg-orange-50">
-              <TableHead>Mascota</TableHead>
+              <TableHead>Huésped</TableHead>
               <TableHead className="hidden md:table-cell">Dieta</TableHead>
-              <TableHead>Dueño</TableHead>
+              <TableHead>Tutor</TableHead>
               <TableHead>Estado</TableHead>
               <TableHead className="text-right">Acciones</TableHead>
             </TableRow>
@@ -249,7 +250,7 @@ export function OcupacionDia({ fecha, onFecha }: Props) {
             ) : estadias.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={COLUMNAS} className="py-10 text-center text-sm text-muted-foreground">
-                  No hay mascotas en la guardería el {formatFechaLarga(fecha)}.
+                  No hay huéspedes en la guardería el {formatFechaLarga(fecha)}.
                 </TableCell>
               </TableRow>
             ) : (
@@ -262,16 +263,16 @@ export function OcupacionDia({ fecha, onFecha }: Props) {
                     className={`border-l-4 ${pend ? "border-l-amber-500 bg-amber-50/50" : rowAccent(e.status)}`}
                     aria-label={`Estadía de ${e.petName}, estado ${estadoLabel(e.status)}${pend ? ", pendiente de acción" : ""}`}
                   >
-                    <TableCell>
+                    <TableCell className="whitespace-normal">
                       <div className="flex flex-col">
                         <span className="font-medium">{e.petName}</span>
                         <span className="text-xs text-muted-foreground">{e.petTamano}</span>
                       </div>
                     </TableCell>
-                    <TableCell className="hidden md:table-cell text-sm text-muted-foreground">
+                    <TableCell className="hidden whitespace-normal md:table-cell text-sm text-muted-foreground">
                       {e.petDieta ?? SIN_DIETA}
                     </TableCell>
-                    <TableCell>{e.clientName}</TableCell>
+                    <TableCell className="whitespace-normal">{e.clientName}</TableCell>
                     <TableCell>
                       <div className="flex flex-col items-start gap-1">
                         <Badge className={badgeClass(e.status)}>{estadoLabel(e.status)}</Badge>
@@ -326,7 +327,7 @@ export function OcupacionDia({ fecha, onFecha }: Props) {
             )}
           </TableBody>
         </Table>
-      </div>
+      </TableScrollContainer>
 
       <CancelarEstadiaAlert
         open={cancelandoId !== null}

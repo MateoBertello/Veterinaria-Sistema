@@ -274,27 +274,51 @@ export class EstadiaService {
    */
   static async actualizar(
     id:  string,
-    dto: Required<Pick<ModificarEstadiaDto, "checkInDate" | "checkOutDate" | "reason">> & { notes: string | null },
+    dto: ModificarEstadiaDto,
     ctx: CallerContext,
   ): Promise<EstadiaPublica> {
-    // Defensa en profundidad: misma validación de rango que en crear (RN-ME2/GU1).
-    if (dto.checkOutDate < dto.checkInDate) {
-      throw new DomainError(ErrorCode.INVALID_RANGE, 422, "La fecha de egreso debe ser posterior o igual a la de ingreso");
-    }
-    if (dto.checkInDate < today()) {
-      throw new DomainError(ErrorCode.PAST_DATE, 422, "La fecha de ingreso no puede ser anterior a hoy");
+    const db = getServiceDb();
+
+    // El RPC de modificación reemplaza los cuatro campos, así que los que el body
+    // no envía se completan con los valores vigentes. La lectura es de negocio y
+    // vive acá, no en el controller (regla 3: el Service es la única capa que
+    // toca la base). Filtra por tenant_id además de por id: en el camino de la
+    // API la conexión es service role y no hay RLS que imponga el aislamiento.
+    const { data: vigente, error: fetchErr } = await db
+      .from("estadias")
+      .select("check_in_date, check_out_date, reason, notes")
+      .eq("id", id)
+      .eq("tenant_id", ctx.tenantId)
+      .single();
+
+    if (fetchErr || !vigente) {
+      throw new DomainError(ErrorCode.STAY_NOT_FOUND, 404, "Estadía no encontrada");
     }
 
-    const db = getServiceDb();
+    const v = vigente as unknown as Record<string, unknown>;
+    const checkInDate  = dto.checkInDate  ?? (v["check_in_date"]  as string);
+    const checkOutDate = dto.checkOutDate ?? (v["check_out_date"] as string);
+    const reason       = dto.reason       ?? (v["reason"]         as string);
+    // `notes: null` es un borrado explícito; solo `undefined` hereda la vigente.
+    const notes = dto.notes !== undefined ? dto.notes : ((v["notes"] as string | null) ?? null);
+
+    // Defensa en profundidad: misma validación de rango que en crear (RN-ME2/GU1).
+    // Corre sobre los valores efectivos, ya combinados con los vigentes.
+    if (checkOutDate < checkInDate) {
+      throw new DomainError(ErrorCode.INVALID_RANGE, 422, "La fecha de egreso debe ser posterior o igual a la de ingreso");
+    }
+    if (checkInDate < today()) {
+      throw new DomainError(ErrorCode.PAST_DATE, 422, "La fecha de ingreso no puede ser anterior a hoy");
+    }
 
     const { data: row, error } = await db
       .rpc("modificar_estadia_con_cupo", {
         p_tenant_id:  ctx.tenantId,
         p_estadia_id: id,
-        p_check_in:   dto.checkInDate,
-        p_check_out:  dto.checkOutDate,
-        p_reason:     dto.reason,
-        p_notes:      dto.notes ?? null,
+        p_check_in:   checkInDate,
+        p_check_out:  checkOutDate,
+        p_reason:     reason,
+        p_notes:      notes,
       })
       .single();
 

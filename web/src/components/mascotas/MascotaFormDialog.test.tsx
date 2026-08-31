@@ -80,13 +80,13 @@ describe("MascotaFormDialog — creación", () => {
     expect(crear).not.toHaveBeenCalled();
   });
 
-  it("muestra error si no se selecciona dueño (clientId)", async () => {
+  it("muestra error si no se selecciona tutor (clientId)", async () => {
     setup();
 
     await userEvent.type(screen.getByLabelText(/Nombre \*/i), "Pelusa");
     await userEvent.click(screen.getByRole("button", { name: /Registrar/i }));
 
-    expect(await screen.findByText("El dueño es requerido")).toBeInTheDocument();
+    expect(await screen.findByText("El tutor es requerido")).toBeInTheDocument();
   });
 
   it("birthDate habilitado en modo creación", () => {
@@ -100,6 +100,12 @@ describe("MascotaFormDialog — creación", () => {
     const input = screen.getByLabelText(/Fecha de nacimiento/i) as HTMLInputElement;
     const hoy   = new Date().toISOString().slice(0, 10);
     expect(input.max).toBe(hoy);
+  });
+
+  it("RN-MA11: especie habilitada en modo creación", async () => {
+    setup();
+    const trigger = screen.getByLabelText(/Especie/i);
+    await waitFor(() => expect(trigger).not.toBeDisabled());
   });
 });
 
@@ -115,7 +121,14 @@ describe("MascotaFormDialog — edición", () => {
     expect(input).toBeDisabled();
   });
 
-  it("muestra el nombre del dueño actual como campo deshabilitado", () => {
+  it("RN-MA11: especie deshabilitada en edición, con texto explicativo", () => {
+    setup({ mascota: makeMascota() });
+    const trigger = screen.getByLabelText(/Especie/i);
+    expect(trigger).toBeDisabled();
+    expect(screen.getByText(/La especie no se puede modificar una vez creada/i)).toBeInTheDocument();
+  });
+
+  it("muestra el nombre del tutor actual como campo deshabilitado", () => {
     setup({ mascota: makeMascota() });
     const dueno = screen.getByDisplayValue("María García") as HTMLInputElement;
     expect(dueno).toBeDisabled();

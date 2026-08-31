@@ -10,7 +10,7 @@ import {
 import { setUnauthorizedHandler } from "../api/client.ts";
 import { fetchMe, login as loginRequest, logoutRequest } from "../api/auth.ts";
 import { clearToken, getToken, setSession } from "../lib/session.ts";
-import { isSuperAdmin } from "../lib/platform.ts";
+import { invalidarCacheCatalogos } from "../api/catalogos.ts";
 import type { AuthUser, LoginInput } from "../types/index.ts";
 
 type AuthStatus = "loading" | "authenticated" | "anonymous";
@@ -31,28 +31,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
 
   // Estado anónimo: limpia token y usuario. Reutilizado por logout y por el
-  // handler de 401 (token vencido) que registra el cliente HTTP.
+  // handler de 401 (token vencido) que registra el cliente HTTP. Solo toca la
+  // sesión de TENANT: la de plataforma vive en otras claves y tiene su propio
+  // handler (`PlatformAuthProvider`), así que un 401 de esta API ya no puede
+  // desloguear al Super Admin de la consola.
   const goAnonymous = useCallback(() => {
     clearToken();
+    // El catálogo cacheado es el de ESTE tenant: si sobreviviera al cierre de
+    // sesión, la próxima clínica que entre en esta misma pestaña vería especies
+    // y razas de la anterior antes de que llegue su primera lectura.
+    invalidarCacheCatalogos();
     setUser(null);
     setStatus("anonymous");
   }, []);
 
   // Bootstrap: si hay token, rehidrata el perfil con /auth/me (y de paso valida
   // que el token siga vigente; si venció → 401 → anónimo). Sin token → anónimo.
+  // No hace falta descartar acá el token del Super Admin: desde que cada sesión
+  // tiene sus propias claves, en `sb-token` solo puede haber un token de tenant.
   useEffect(() => {
     let activo = true;
 
     if (!getToken()) {
-      setStatus("anonymous");
-      return;
-    }
-
-    // Token de PLATAFORMA (Super Admin): no tiene tenant_id, así que /auth/me lo
-    // rechazaría con 401 y el handler de sesión expirada borraría un token que
-    // sí es válido para /admin/*. No hay perfil de tenant que rehidratar: queda
-    // anónimo para el shell del tenant, y `RequireSuperAdmin` lee el claim.
-    if (isSuperAdmin()) {
       setStatus("anonymous");
       return;
     }

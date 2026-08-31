@@ -9,6 +9,7 @@ import { RequirePermission } from "./auth/RequirePermission.tsx";
 import { RequireSuperAdmin } from "./auth/RequireSuperAdmin.tsx";
 import { AdminShell } from "./components/admin/AdminShell.tsx";
 import { SidebarNav } from "./components/shell/SidebarNav.tsx";
+import { PlatformLoginPage } from "./pages/admin/PlatformLoginPage.tsx";
 import { TenantsPage } from "./pages/admin/TenantsPage.tsx";
 import { TenantDetallePage } from "./pages/admin/TenantDetallePage.tsx";
 import { LoginPage } from "./pages/LoginPage.tsx";
@@ -18,6 +19,7 @@ import { MascotasPage } from "./pages/MascotasPage.tsx";
 import { HistorialClinicoIndexPage } from "./pages/HistorialClinicoIndexPage.tsx";
 import { HistorialClinicoPage } from "./pages/HistorialClinicoPage.tsx";
 import { ServiciosPage } from "./pages/ServiciosPage.tsx";
+import { CatalogosPage } from "./pages/CatalogosPage.tsx";
 import { ConfiguracionPage } from "./pages/ConfiguracionPage.tsx";
 import { DoctoresPage } from "./pages/DoctoresPage.tsx";
 import { HorariosPage } from "./pages/HorariosPage.tsx";
@@ -117,7 +119,9 @@ function Navigation() {
 
   return (
     <>
-      <aside className="hidden w-60 shrink-0 flex-col border-r bg-sidebar md:flex">
+      {/* Sticky con alto de viewport: el sidebar no se va con el scroll del
+          listado (el `<nav>` de SidebarNav tiene su propio overflow). */}
+      <aside className="sticky top-0 hidden h-screen w-60 shrink-0 flex-col self-start border-r bg-sidebar md:flex">
         <SidebarNav items={items} user={user} onLogout={onLogout} />
       </aside>
       <MobileNav items={items} user={user} onLogout={onLogout} />
@@ -150,6 +154,12 @@ export function App() {
     <Routes>
       <Route path="/login" element={<LoginPage />} />
 
+      {/* Login de plataforma: FUERA del RequireSuperAdmin (es donde se cae sin
+          sesión, así que no puede exigirla) y fuera del ProtectedRoute del
+          tenant. React Router prioriza este path estático sobre el `*` de la
+          consola, así que no compite con las rutas de abajo. */}
+      <Route path="/admin/login" element={<PlatformLoginPage />} />
+
       {/* Consola de plataforma: shell propio y guard propio (claim super_admin del
           JWT). Fuera del ProtectedRoute del tenant: el Super Admin no tiene
           sesión de tenant, y este panel NO pasa por requireModule. */}
@@ -179,17 +189,60 @@ export function App() {
         <Route path="/mascotas" element={<MascotasPage />} />
         <Route path="/historial" element={<HistorialClinicoIndexPage />} />
         <Route path="/historial/:mascotaId" element={<HistorialClinicoPage />} />
-        <Route path="/servicios" element={<ServiciosPage />} />
-        <Route path="/doctores" element={<DoctoresPage />} />
-        <Route path="/horarios" element={<HorariosPage />} />
+        <Route
+          path="/servicios"
+          element={
+            <RequirePermission permission="manage_services">
+              <ServiciosPage />
+            </RequirePermission>
+          }
+        />
+        <Route
+          path="/doctores"
+          element={
+            <RequirePermission permission="manage_users">
+              <DoctoresPage />
+            </RequirePermission>
+          }
+        />
+        <Route
+          path="/horarios"
+          element={
+            <RequirePermission permission="manage_schedules">
+              <HorariosPage />
+            </RequirePermission>
+          }
+        />
         <Route path="/turnos" element={<TurnosPage />} />
         <Route path="/turnos/nuevo" element={<AgendarTurnoPage />} />
         <Route path="/turnos/:id/editar" element={<AgendarTurnoPage />} />
         <Route path="/guarderia" element={<OcupacionGuarderiaPage />} />
         <Route path="/guarderia/nuevo" element={<RegistrarEstadiaPage />} />
         <Route path="/guarderia/:id/editar" element={<RegistrarEstadiaPage />} />
-        <Route path="/configuracion" element={<ConfiguracionPage />} />
-        <Route path="/usuarios" element={<UsuariosPage />} />
+        <Route
+          path="/catalogos"
+          element={
+            <RequirePermission permission="manage_catalogs">
+              <CatalogosPage />
+            </RequirePermission>
+          }
+        />
+        <Route
+          path="/configuracion"
+          element={
+            <RequirePermission permission="manage_tenant_settings">
+              <ConfiguracionPage />
+            </RequirePermission>
+          }
+        />
+        <Route
+          path="/usuarios"
+          element={
+            <RequirePermission permission="manage_users">
+              <UsuariosPage />
+            </RequirePermission>
+          }
+        />
         <Route
           path="/auditoria"
           element={

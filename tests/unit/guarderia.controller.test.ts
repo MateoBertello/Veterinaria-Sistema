@@ -20,7 +20,7 @@ vi.mock("../../supabase/functions/api/src/shared/db.ts", () => ({
 }));
 
 import { EstadiaService } from "../../supabase/functions/api/src/modules/guarderia/guarderia.service.ts";
-import { getDb } from "../../supabase/functions/api/src/shared/db.ts";
+import { getDb, getServiceDb } from "../../supabase/functions/api/src/shared/db.ts";
 import { guarderiaRouter } from "../../supabase/functions/api/src/modules/guarderia/guarderia.controller.ts";
 import { errorHandler } from "../../supabase/functions/api/src/middleware/errorHandler.ts";
 import { invalidateModuleCache } from "../../supabase/functions/api/src/middleware/requireModule.ts";
@@ -33,6 +33,7 @@ import {
 } from "./_helpers/permissionMock.ts";
 
 const mockGetDb    = vi.mocked(getDb);
+const mockGetServiceDb = vi.mocked(getServiceDb);
 const mockCrear    = vi.mocked(EstadiaService.crear);
 const mockCheckin  = vi.mocked(EstadiaService.checkin);
 const mockActualizar = vi.mocked(EstadiaService.actualizar);
@@ -105,6 +106,50 @@ describe("guarderiaRouter — permisos", () => {
 
     expect(res.status).toBe(403);
     expect(body.error.code).toBe("FORBIDDEN");
+    expect(mockActualizar).not.toHaveBeenCalled();
+  });
+});
+
+// ─── El controller no toca la base (regla 3: Controller → Service → DB) ───────
+// PUT /estadias/:id pre-rellenaba acá los campos ausentes del body abriendo un
+// cliente service_role: era la única lectura de negocio fuera de un Service.
+// Ahora delega el DTO parcial tal cual y el pre-relleno vive en EstadiaService.
+
+describe("PUT /estadias/:id — el pre-relleno es del Service, no del controller", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    invalidateModuleCache(TENANT_ID, "guarderia");
+  });
+
+  it("no abre un cliente service_role: getServiceDb no se llama", async () => {
+    mockDbSequence(mockGetDb, [tenantActiveResult(), moduleEnabledResult(true), permissionResult(["manage_daycare"])]);
+
+    const res = await req("PUT", "/estadias/11111111-1111-4111-8111-111111111111", { reason: "Nuevo motivo" });
+
+    expect(res.status).toBe(200);
+    expect(mockGetServiceDb).not.toHaveBeenCalled();
+  });
+
+  it("delega el body parcial tal cual, sin completarlo", async () => {
+    mockDbSequence(mockGetDb, [tenantActiveResult(), moduleEnabledResult(true), permissionResult(["manage_daycare"])]);
+
+    await req("PUT", "/estadias/11111111-1111-4111-8111-111111111111", { reason: "Nuevo motivo" });
+
+    expect(mockActualizar).toHaveBeenCalledWith(
+      "11111111-1111-4111-8111-111111111111",
+      { reason: "Nuevo motivo" },
+      expect.objectContaining({ tenantId: TENANT_ID }),
+    );
+  });
+
+  it("ID no UUID → 422 VALIDATION_ERROR antes de delegar", async () => {
+    mockDbSequence(mockGetDb, [tenantActiveResult(), moduleEnabledResult(true), permissionResult(["manage_daycare"])]);
+
+    const res  = await req("PUT", "/estadias/no-es-uuid", { reason: "Nuevo motivo" });
+    const body = await res.json();
+
+    expect(res.status).toBe(422);
+    expect(body.error.code).toBe("VALIDATION_ERROR");
     expect(mockActualizar).not.toHaveBeenCalled();
   });
 });

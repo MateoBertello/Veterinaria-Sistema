@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { TooltipProvider } from "../components/ui/tooltip.tsx";
-import { ApiError, type Rol, type Usuario } from "../types/index.ts";
+import { ApiError, type AuthUser, type Rol, type Usuario } from "../types/index.ts";
 
 vi.mock("../api/usuarios.ts", () => ({
   listarUsuarios: vi.fn(),
@@ -12,6 +12,24 @@ vi.mock("../api/usuarios.ts", () => ({
 }));
 
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
+
+/**
+ * Sesión del usuario logueado. RN-SEC8 depende de comparar cada fila contra
+ * `user.id`, así que los tests la mueven para cubrir "es mi fila" y "es la de
+ * otro". Por defecto la sesión es de OTRO usuario ("u-yo"), para que el resto
+ * de los tests vea la pantalla sin restricciones.
+ */
+const mockAuth: { user: AuthUser | null } = {
+  user: {
+    id: "u-yo",
+    username: "yo",
+    fullName: "Admin Leo",
+    roleName: "Administrador",
+    permissions: ["manage_users"],
+  },
+};
+
+vi.mock("../auth/AuthContext.tsx", () => ({ useAuth: () => mockAuth }));
 
 import { UsuariosPage } from "./UsuariosPage.tsx";
 import { listarUsuarios, listarRoles } from "../api/usuarios.ts";
@@ -49,6 +67,13 @@ function renderPage() {
 beforeEach(() => {
   vi.clearAllMocks();
   mockRoles.mockResolvedValue(roles);
+  mockAuth.user = {
+    id: "u-yo",
+    username: "yo",
+    fullName: "Admin Leo",
+    roleName: "Administrador",
+    permissions: ["manage_users"],
+  };
 });
 
 describe("UsuariosPage", () => {
@@ -64,6 +89,33 @@ describe("UsuariosPage", () => {
     expect(screen.getByText("Ana Pérez")).toBeInTheDocument();
     expect(screen.getByText("Administrador")).toBeInTheDocument();
     expect(screen.getByText("Activo")).toBeInTheDocument();
+  });
+
+  // ── RN-SEC8: los campos de privilegio de la propia fila quedan bloqueados ──
+  // El backend rechaza el auto-cambio con SELF_PRIVILEGE_CHANGE; la pantalla no
+  // ofrece el control en vez de dejar que falle al apretarlo.
+
+  it("RN-SEC8: el botón de activar/desactivar está deshabilitado sobre la propia fila", async () => {
+    mockAuth.user = { ...mockAuth.user!, id: "u1" };   // la fila es la mía
+    mockListar.mockResolvedValue({
+      items: [makeUsuario({ id: "u1" })],
+      meta: { page: 1, limit: 20, total: 1 },
+    });
+
+    renderPage();
+
+    expect(await screen.findByRole("button", { name: "Desactivar ana" })).toBeDisabled();
+  });
+
+  it("RN-SEC8: sobre la fila de OTRO usuario el botón sigue habilitado", async () => {
+    mockListar.mockResolvedValue({
+      items: [makeUsuario({ id: "u1" })],           // la sesión es "u-yo"
+      meta: { page: 1, limit: 20, total: 1 },
+    });
+
+    renderPage();
+
+    expect(await screen.findByRole("button", { name: "Desactivar ana" })).toBeEnabled();
   });
 
   it("muestra el estado vacío cuando no hay usuarios", async () => {

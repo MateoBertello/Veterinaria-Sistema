@@ -30,6 +30,7 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import app from "../../supabase/functions/api/src/main.ts";
 import { NotificacionService } from "../../supabase/functions/api/src/modules/notificaciones/notificaciones.service.ts";
 import { SUPABASE_URL, SUPABASE_ANON_KEY, SERVICE_ROLE_KEY, describeIntegration } from "./_env.ts";
+import { crearUsuarioAuth, limpiarTenant, catalogoDelTenant } from "./_teardown.ts";
 
 // Reloj fijo: hace deterministas la ventana y las fechas sembradas, sin depender del reloj de CI.
 const NOW = new Date("2026-06-30T12:00:00Z"); // dateStr → "2026-06-30"
@@ -47,12 +48,6 @@ function skipIfNoCredentials(): boolean {
   return false;
 }
 
-const adminHeaders = () => ({
-  "Content-Type":  "application/json",
-  "Authorization": `Bearer ${SERVICE_ROLE_KEY}`,
-  "apikey":        SERVICE_ROLE_KEY,
-});
-
 async function signIn(email: string, password: string): Promise<string> {
   const res = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=password`, {
     method:  "POST",
@@ -61,16 +56,6 @@ async function signIn(email: string, password: string): Promise<string> {
   });
   const data = await res.json() as { access_token?: string };
   return data.access_token ?? "";
-}
-
-async function createAuthUser(email: string, appMetadata: Record<string, unknown>): Promise<string> {
-  const res = await fetch(`${SUPABASE_URL}/auth/v1/admin/users`, {
-    method:  "POST",
-    headers: adminHeaders(),
-    body:    JSON.stringify({ email, password: "TestPass123!", email_confirm: true, app_metadata: appMetadata }),
-  });
-  const user = await res.json() as { id?: string };
-  return user.id ?? "";
 }
 
 async function callApp(path: string, opts: { method?: string; jwt?: string; body?: unknown } = {}) {
@@ -102,7 +87,7 @@ async function provisionTenant(sufijo: string, diasAvisoVacuna: number) {
   await serviceDb.from("configuracion_tenant").update({ dias_aviso_vacuna: diasAvisoVacuna }).eq("tenant_id", tenantId);
 
   const email  = `admin-avisos-${sufijo}@test.com`;
-  const userId = await createAuthUser(email, { tenant_id: tenantId });
+  const userId = await crearUsuarioAuth(email, { tenant_id: tenantId });
   const { data: rolAdmin } = await serviceDb
     .from("roles").select("id").eq("tenant_id", tenantId).eq("name", "admin").single();
   await serviceDb.from("usuarios").insert({
@@ -117,25 +102,24 @@ async function provisionTenant(sufijo: string, diasAvisoVacuna: number) {
     .select("id")
     .single();
 
-  return { tenantId, jwt, userId, clienteId: cliente?.id as string };
+  // Catálogo clínico DE ESTA CLÍNICA: por tenant desde
+  // 20260827000001_catalogos_por_tenant.sql, y las FKs compuestas rechazan el de
+  // otra. Cada fixture lleva el suyo.
+  const catalogo = await catalogoDelTenant(serviceDb, tenantId);
+
+  return { tenantId, jwt, userId, clienteId: cliente?.id as string, ...catalogo };
 }
 
 // ─── Estado global ──────────────────────────────────────────────────────────
 
 let serviceDb: SupabaseClient;
-let tenantA = { tenantId: "", jwt: "", userId: "", clienteId: "" }; // dias_aviso_vacuna = 7
-let tenantB = { tenantId: "", jwt: "", userId: "", clienteId: "" }; // dias_aviso_vacuna = 30
-let especieId    = "";
-let tipoVacunaId = "";
+const tenantVacio = { tenantId: "", jwt: "", userId: "", clienteId: "", especieId: "", razaId: "", tipoVacunaId: "" };
+let tenantA = { ...tenantVacio }; // dias_aviso_vacuna = 7
+let tenantB = { ...tenantVacio }; // dias_aviso_vacuna = 30
 
 beforeAll(async () => {
   if (skipIfNoCredentials()) return;
   serviceDb = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, { auth: { persistSession: false } });
-
-  const { data: esp } = await serviceDb.from("especies").select("id").limit(1).single();
-  especieId = esp?.id ?? "";
-  const { data: tv } = await serviceDb.from("tipos_vacuna").select("id").eq("active", true).limit(1).single();
-  tipoVacunaId = tv?.id ?? "";
 
   tenantA = await provisionTenant("AA", 7);
   tenantB = await provisionTenant("AB", 30);
@@ -143,39 +127,24 @@ beforeAll(async () => {
 
 afterAll(async () => {
   if (!serviceDb) return;
-  for (const tid of [tenantA.tenantId, tenantB.tenantId]) {
-    if (!tid) continue;
-    // ORDEN IMPORTANTE: primero el tenant, después las cuentas de Auth.
-    // Desde que `usuarios.id` referencia a `auth.users` con ON DELETE CASCADE
-    // (migración 20260725000005), borrar la cuenta arrastra la fila espejo — y
-    // eso lo frena cualquier FK que apunte al usuario, como
-    // `historial_clinico.professional_id`. Borrando primero el tenant, su
-    // cascade se lleva todo lo dependiente y la cuenta sale limpia. Al revés,
-    // el DELETE de Auth falla en silencio y deja cuentas huérfanas que hacen
-    // fallar la corrida SIGUIENTE (el email ya existe).
-    const { data: usuarios } = await serviceDb.from("usuarios").select("id").eq("tenant_id", tid);
-    await serviceDb.from("tenants").delete().eq("id", tid);
-    for (const u of (usuarios ?? []) as { id: string }[]) {
-      await fetch(`${SUPABASE_URL}/auth/v1/admin/users/${u.id}`, { method: "DELETE", headers: adminHeaders() });
-    } // cascade → plan_vacunacion, notificaciones
-  }
+  for (const tid of [tenantA.tenantId, tenantB.tenantId]) await limpiarTenant(serviceDb, tid);
 });
 
 // ─── Helpers de datos ──────────────────────────────────────────────────────────
 
-async function crearMascota(jwt: string, clienteId: string, name: string): Promise<string> {
+async function crearMascota(t: typeof tenantA, name: string): Promise<string> {
   const res = await callApp("/mascotas", {
-    method: "POST", jwt,
-    body: { name, clientId: clienteId, especieId, sex: "Macho", tamano: "Mediano" },
+    method: "POST", jwt: t.jwt,
+    body: { name, clientId: t.clienteId, especieId: t.especieId, sex: "Macho", tamano: "Mediano" },
   });
   const body = await res.json() as { data: { id: string } };
   return body.data.id;
 }
 
-async function seedDosis(tenantId: string, petId: string, fechaEstimada: string): Promise<string> {
+async function seedDosis(t: typeof tenantA, petId: string, fechaEstimada: string): Promise<string> {
   const { data } = await serviceDb
     .from("plan_vacunacion")
-    .insert({ tenant_id: tenantId, pet_id: petId, tipo_vacuna_id: tipoVacunaId, fecha_estimada: fechaEstimada, estado: "Pendiente" })
+    .insert({ tenant_id: t.tenantId, pet_id: petId, tipo_vacuna_id: t.tipoVacunaId, fecha_estimada: fechaEstimada, estado: "Pendiente" })
     .select("id")
     .single();
   return data?.id as string;
@@ -204,8 +173,8 @@ describeIntegration("Avisos vacunación: RN-PV6 idempotencia real por UNIQUE (bl
   it("dos corridas del procesador → el aviso sale UNA sola vez (2ª INSERT rechazado por UNIQUE)", async () => {
     if (skipIfNoCredentials() || !tenantA.jwt) return;
 
-    const petId   = await crearMascota(tenantA.jwt, tenantA.clienteId, "AvisoIdem");
-    const dosisId = await seedDosis(tenantA.tenantId, petId, addDays(NOW, 3)); // dentro de ventana 7
+    const petId   = await crearMascota(tenantA, "AvisoIdem");
+    const dosisId = await seedDosis(tenantA, petId, addDays(NOW, 3)); // dentro de ventana 7
     const canal   = fakeCanalEmail();
 
     const r1 = await NotificacionService.procesarAvisosVacunacion(
@@ -235,10 +204,10 @@ describeIntegration("Avisos vacunación: RN-PV7 ventana por-tenant (bloqueante)"
   it("dosis a +10 días → tenant ventana 7 NO avisa; tenant ventana 30 SÍ avisa", async () => {
     if (skipIfNoCredentials() || !tenantA.jwt || !tenantB.jwt) return;
 
-    const petA = await crearMascota(tenantA.jwt, tenantA.clienteId, "VentanaA");
-    const petB = await crearMascota(tenantB.jwt, tenantB.clienteId, "VentanaB");
-    const dosisA = await seedDosis(tenantA.tenantId, petA, addDays(NOW, 10)); // 10 > 7
-    const dosisB = await seedDosis(tenantB.tenantId, petB, addDays(NOW, 10)); // 10 ≤ 30
+    const petA = await crearMascota(tenantA, "VentanaA");
+    const petB = await crearMascota(tenantB, "VentanaB");
+    const dosisA = await seedDosis(tenantA, petA, addDays(NOW, 10)); // 10 > 7
+    const dosisB = await seedDosis(tenantB, petB, addDays(NOW, 10)); // 10 ≤ 30
 
     const canalA = fakeCanalEmail();
     await NotificacionService.procesarAvisosVacunacion(
@@ -267,8 +236,8 @@ describeIntegration("Avisos vacunación: aislamiento entre tenants (bloqueante)"
   it("el procesador de B no procesa ni notifica una dosis de A", async () => {
     if (skipIfNoCredentials() || !tenantA.jwt || !tenantB.jwt) return;
 
-    const petA   = await crearMascota(tenantA.jwt, tenantA.clienteId, "AislamientoA");
-    const dosisA = await seedDosis(tenantA.tenantId, petA, addDays(NOW, 3)); // dentro de cualquier ventana
+    const petA   = await crearMascota(tenantA, "AislamientoA");
+    const dosisA = await seedDosis(tenantA, petA, addDays(NOW, 3)); // dentro de cualquier ventana
 
     const canalB = fakeCanalEmail();
     const rB = await NotificacionService.procesarAvisosVacunacion(

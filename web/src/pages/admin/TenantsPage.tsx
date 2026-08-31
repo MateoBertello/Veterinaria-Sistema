@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { Building2, Pencil, Plus, Power, Search, SquareArrowOutUpRight } from "lucide-react";
 import {
   Table,
+  TableScrollContainer,
   TableBody,
   TableCell,
   TableHead,
@@ -175,9 +176,9 @@ export function TenantsPage() {
       </div>
 
       {/* Tabla */}
-      <div className="rounded-lg border">
-        <Table>
-          <TableHeader>
+      <TableScrollContainer aria-label="Listado de clínicas">
+        <Table containerClassName="overflow-visible">
+          <TableHeader className="sticky top-0 z-10">
             <TableRow className="bg-orange-50 hover:bg-orange-50">
               <TableHead>Clínica</TableHead>
               <TableHead className="hidden md:table-cell">Email de contacto</TableHead>
@@ -210,7 +211,7 @@ export function TenantsPage() {
             ) : (
               tenants.map((t) => (
                 <TableRow key={t.id} className={t.activo ? undefined : "opacity-70"}>
-                  <TableCell>
+                  <TableCell className="whitespace-normal">
                     <Link
                       to={`/admin/tenants/${t.id}`}
                       className="font-medium text-orange-800 underline-offset-4 hover:underline"
@@ -219,7 +220,7 @@ export function TenantsPage() {
                     </Link>
                     <p className="text-xs text-muted-foreground">{t.cuitRut}</p>
                   </TableCell>
-                  <TableCell className="hidden md:table-cell text-muted-foreground">
+                  <TableCell className="hidden whitespace-normal md:table-cell text-muted-foreground">
                     {t.emailContacto}
                   </TableCell>
                   <TableCell>
@@ -284,7 +285,7 @@ export function TenantsPage() {
             )}
           </TableBody>
         </Table>
-      </div>
+      </TableScrollContainer>
 
       {/* Paginación */}
       {!loading && !error && tenants.length > 0 ? (

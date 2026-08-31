@@ -4,6 +4,7 @@ import { ChevronLeft, ChevronRight, PencilLine } from "lucide-react";
 import { toast } from "sonner";
 import {
   Table,
+  TableScrollContainer,
   TableBody,
   TableCell,
   TableHead,
@@ -169,9 +170,9 @@ export function AgendaDia({ fecha, onFecha }: Props) {
         </p>
       ) : null}
 
-      <div className="rounded-lg border">
-        <Table>
-          <TableHeader>
+      <TableScrollContainer aria-label="Turnos del día">
+        <Table containerClassName="overflow-visible">
+          <TableHeader className="sticky top-0 z-10">
             <TableRow className="bg-orange-50 hover:bg-orange-50">
               <TableHead>Hora</TableHead>
               <TableHead>Servicio</TableHead>
@@ -207,8 +208,8 @@ export function AgendaDia({ fecha, onFecha }: Props) {
                   <TableRow
                     key={t.id}
                     tabIndex={0}
-                    aria-label={`Turno de ${t.mascota?.name ?? "sin mascota"} a las ${t.startTime}, estado ${t.status}`}
-                    className={`cursor-pointer border-l-4 ${ESTADO_ROW_ACCENT[t.status]} focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-orange-500`}
+                    aria-label={`Turno de ${t.mascota?.name ?? "sin mascota"} a las ${t.startTime}, estado ${t.status}${t.vencido ? ", vencido sin cerrar" : ""}`}
+                    className={`cursor-pointer border-l-4 ${t.vencido ? "border-l-red-500" : ESTADO_ROW_ACCENT[t.status]} focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-orange-500`}
                     onClick={() => setDetalleId(t.id)}
                     onKeyDown={(e) => {
                       if (e.key === "Enter" || e.key === " ") {
@@ -220,7 +221,7 @@ export function AgendaDia({ fecha, onFecha }: Props) {
                     <TableCell className="font-medium">
                       {t.startTime} – {t.endTime}
                     </TableCell>
-                    <TableCell>
+                    <TableCell className="whitespace-normal">
                       <div className="flex flex-col">
                         <span>{t.servicio?.nombre ?? "—"}</span>
                         {t.servicio ? (
@@ -230,10 +231,10 @@ export function AgendaDia({ fecha, onFecha }: Props) {
                         ) : null}
                       </div>
                     </TableCell>
-                    <TableCell className="hidden md:table-cell">
+                    <TableCell className="hidden whitespace-normal md:table-cell">
                       {t.doctor?.name ?? "—"}
                     </TableCell>
-                    <TableCell>
+                    <TableCell className="whitespace-normal">
                       <div className="flex flex-col">
                         <span className="font-medium">{t.mascota?.name ?? "—"}</span>
                         <span className="text-xs text-muted-foreground">
@@ -242,7 +243,12 @@ export function AgendaDia({ fecha, onFecha }: Props) {
                       </div>
                     </TableCell>
                     <TableCell>
-                      <Badge className={ESTADO_BADGE_CLASS[t.status]}>{t.status}</Badge>
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <Badge className={ESTADO_BADGE_CLASS[t.status]}>{t.status}</Badge>
+                        {t.vencido ? (
+                          <Badge className="bg-red-100 text-red-800 hover:bg-red-100">Vencido</Badge>
+                        ) : null}
+                      </div>
                     </TableCell>
                     <TableCell onClick={(e) => e.stopPropagation()}>
                       <div className="flex items-center justify-end gap-2">
@@ -274,7 +280,7 @@ export function AgendaDia({ fecha, onFecha }: Props) {
             )}
           </TableBody>
         </Table>
-      </div>
+      </TableScrollContainer>
 
       <TurnoDetalleDialog
         turnoId={detalleId}

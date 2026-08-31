@@ -204,14 +204,14 @@ export function MascotaFormDialog({ open, onOpenChange, mascota, onSaved, crear,
 
           {/* Cliente / Dueño */}
           <div className="grid gap-1.5">
-            <Label htmlFor="clientId">Dueño *</Label>
+            <Label htmlFor="clientId">Tutor *</Label>
             {esEdicion ? (
-              <Input id="clientId" value={mascota?.ownerName ?? ""} disabled readOnly aria-label="Dueño" />
+              <Input id="clientId" value={mascota?.ownerName ?? ""} disabled readOnly aria-label="Tutor" />
             ) : (
               <Controller
                 control={control}
                 name="clientId"
-                rules={{ required: "El dueño es requerido" }}
+                rules={{ required: "El tutor es requerido" }}
                 render={({ field }) => (
                   <ClienteCombobox
                     value={field.value}
@@ -237,14 +237,18 @@ export function MascotaFormDialog({ open, onOpenChange, mascota, onSaved, crear,
                 render={({ field }) => (
                   <Select
                     value={field.value}
-                    disabled={loadingCats}
+                    disabled={loadingCats || esEdicion}
                     onValueChange={(val) => {
                       field.onChange(val);
                       setValue("razaId", RAZA_NONE);
                       loadRazas(val);
                     }}
                   >
-                    <SelectTrigger id="especieId" aria-invalid={Boolean(errors.especieId)}>
+                    <SelectTrigger
+                      id="especieId"
+                      aria-invalid={Boolean(errors.especieId)}
+                      aria-describedby={esEdicion ? "especieId-hint" : undefined}
+                    >
                       <SelectValue placeholder={loadingCats ? "Cargando..." : "Seleccionar..."} />
                     </SelectTrigger>
                     <SelectContent>
@@ -255,6 +259,12 @@ export function MascotaFormDialog({ open, onOpenChange, mascota, onSaved, crear,
                   </Select>
                 )}
               />
+              {esEdicion ? (
+                <p id="especieId-hint" className="text-xs text-muted-foreground">
+                  La especie no se puede modificar una vez creada (RN-MA11): de ella dependen la raza y las
+                  vacunas aplicables de la mascota.
+                </p>
+              ) : null}
               {errors.especieId ? (
                 <p role="alert" className="text-sm text-destructive">{errors.especieId.message}</p>
               ) : null}
@@ -373,7 +383,7 @@ export function MascotaFormDialog({ open, onOpenChange, mascota, onSaved, crear,
           </div>
 
           <TextField
-            control={control} errors={errors} name="color" label="Color"
+            control={control} errors={errors} name="color" label="Pelaje"
             rules={{ maxLength: { value: 60, message: "Máximo 60 caracteres" } }}
           />
 
@@ -440,7 +450,7 @@ function ClienteCombobox({
           aria-invalid={invalid}
           className={cn("w-full justify-between font-normal", !value && "text-muted-foreground")}
         >
-          {selected?.fullName ?? (value ? "Cargando..." : "Buscar dueño...")}
+          {selected?.fullName ?? (value ? "Cargando..." : "Buscar tutor...")}
           <ChevronsUpDown className="ml-2 size-4 shrink-0 opacity-50" aria-hidden />
         </Button>
       </PopoverTrigger>

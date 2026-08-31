@@ -80,7 +80,7 @@ describe("OcupacionMes", () => {
     render(<OcupacionMes fechaInicial={ANCHOR} onSelectDay={onSelect} />);
 
     // Día 15 de noviembre (dentro del mes).
-    const btn = await screen.findByRole("button", { name: /15 de noviembre de 2027/ });
+    const btn = await screen.findByRole("button", { name: /Ver el detalle del.*15 de noviembre de 2027/ });
     await userEvent.click(btn);
     expect(onSelect).toHaveBeenCalledWith("2027-11-15");
   });
@@ -89,7 +89,7 @@ describe("OcupacionMes", () => {
     const onSelect = vi.fn();
     render(<OcupacionMes fechaInicial={ANCHOR} onSelectDay={onSelect} />);
 
-    const btn = await screen.findByRole("button", { name: /15 de noviembre de 2027/ });
+    const btn = await screen.findByRole("button", { name: /Ver el detalle del.*15 de noviembre de 2027/ });
     btn.focus();
     expect(btn).toHaveFocus();
     await userEvent.keyboard("{Enter}");
@@ -105,5 +105,47 @@ describe("OcupacionMes", () => {
     mockRango.mockResolvedValue([]);
     await userEvent.click(screen.getByRole("button", { name: "Reintentar" }));
     await waitFor(() => expect(mockRango).toHaveBeenCalledTimes(2));
+  });
+
+  it("el popover de vista previa lista las mascotas alojadas ese día sin salir del mes", async () => {
+    mockRango.mockResolvedValue([
+      makeEstadia({ checkInDate: "2027-11-10", checkOutDate: "2027-11-12", petName: "Firulais", clientName: "Juan Pérez" }),
+    ]);
+    render(<OcupacionMes fechaInicial={ANCHOR} onSelectDay={() => {}} />);
+    await screen.findAllByText("1 estadía");
+
+    const preview = screen.getByRole("button", { name: /Vista previa del.*10 de noviembre de 2027: 1 estadía/ });
+    await userEvent.click(preview);
+
+    expect(await screen.findByText("Firulais")).toBeInTheDocument();
+    expect(screen.getByText("Juan Pérez")).toBeInTheDocument();
+    // El mes sigue visible: el popover complementa el drill-down, no lo reemplaza.
+    expect(screen.getByRole("button", { name: "Mes siguiente" })).toBeInTheDocument();
+  });
+
+  it("el popover se abre por teclado (Enter) sin disparar el drill-down del día", async () => {
+    const onSelect = vi.fn();
+    mockRango.mockResolvedValue([
+      makeEstadia({ checkInDate: "2027-11-10", checkOutDate: "2027-11-10", petName: "Firulais" }),
+    ]);
+    render(<OcupacionMes fechaInicial={ANCHOR} onSelectDay={onSelect} />);
+    await screen.findAllByText("1 estadía");
+
+    const preview = screen.getByRole("button", { name: /Vista previa del.*10 de noviembre de 2027/ });
+    preview.focus();
+    await userEvent.keyboard("{Enter}");
+
+    expect(await screen.findByText("Firulais")).toBeInTheDocument();
+    expect(onSelect).not.toHaveBeenCalled();
+  });
+
+  it("no ofrece vista previa en días sin estadías", async () => {
+    mockRango.mockResolvedValue([
+      makeEstadia({ checkInDate: "2027-11-10", checkOutDate: "2027-11-10" }),
+    ]);
+    render(<OcupacionMes fechaInicial={ANCHOR} onSelectDay={() => {}} />);
+    await screen.findAllByText("1 estadía");
+
+    expect(screen.queryByRole("button", { name: /Vista previa del.*11 de noviembre de 2027/ })).not.toBeInTheDocument();
   });
 });

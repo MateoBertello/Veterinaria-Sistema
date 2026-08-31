@@ -67,15 +67,25 @@ export const ErrorCode = {
   CUPO_GUARDERIA_AGOTADO: "CUPO_GUARDERIA_AGOTADO",
   INVALID_RANGE:       "INVALID_RANGE",
   SCHEDULE_OVERLAP:    "SCHEDULE_OVERLAP",
+  /** RN-HOR8: se intentó asignar trabajo nuevo a un profesional dado de baja. */
+  DOCTOR_INACTIVE:     "DOCTOR_INACTIVE",
   EMPTY_HISTORY:                    "EMPTY_HISTORY",
   HISTORIAL_NOT_FOUND:              "HISTORIAL_NOT_FOUND",
   EUTHANASIA_CONFIRMATION_REQUIRED: "EUTHANASIA_CONFIRMATION_REQUIRED",
   INVALID_FILE_TYPE:                "INVALID_FILE_TYPE",
   FILE_TOO_LARGE:                   "FILE_TOO_LARGE",
   VACCINE_TYPE_NOT_FOUND:           "VACCINE_TYPE_NOT_FOUND",
+  /** RN-PV11: la vacuna existe pero no aplica a la especie de la mascota. */
+  VACCINE_NOT_APPLICABLE_TO_SPECIES: "VACCINE_NOT_APPLICABLE_TO_SPECIES",
   VACCINE_PLAN_ALREADY_APPLIED:     "VACCINE_PLAN_ALREADY_APPLIED",
   DUPLICATE_USER:                   "DUPLICATE_USER",
   LAST_ADMIN:                       "LAST_ADMIN",
+  /** RN-SEC8: un usuario intentó cambiar su propio rol o su propio estado. */
+  SELF_PRIVILEGE_CHANGE:            "SELF_PRIVILEGE_CHANGE",
+  // Catálogos clínicos por clínica (especies, razas, tipos de vacuna).
+  CATALOG_NOT_FOUND:                "CATALOG_NOT_FOUND",
+  CATALOG_DUPLICATE:                "CATALOG_DUPLICATE",
+  CATALOG_IN_USE:                   "CATALOG_IN_USE",
   TENANT_DUPLICATE_TAXID:           "TENANT_DUPLICATE_TAXID",
   MODULE_UNKNOWN:                   "MODULE_UNKNOWN",
 } as const;
@@ -210,6 +220,12 @@ export interface TurnoServicio {
 export interface TurnoDoctor {
   id:   string;
   name: string;
+  /**
+   * RN-HOR8: `false` cuando el profesional fue dado de baja DESPUÉS de agendar
+   * el turno. La asignación se conserva y se sigue mostrando; lo que cambia es
+   * que el selector ya no lo ofrece para asignaciones nuevas.
+   */
+  available: boolean;
 }
 
 export interface TurnoMascota {
@@ -237,6 +253,8 @@ export interface Turno {
   mascota:             TurnoMascota | null;
   cliente:             TurnoCliente | null;
   accionesDisponibles: string[];
+  /** Turno vencido sin cerrar: fecha/hora ya pasada y estado todavía no terminal. */
+  vencido:             boolean;
 }
 
 export interface SlotDisponible {
@@ -511,6 +529,14 @@ export interface AdjuntoFirmado {
   fileSize: number;
 }
 
+/**
+ * Signed URL de un adjunto identificado (`GET /historial/:id/adjuntos-firmados`),
+ * TTL 5 min. Se pide una sola vez por evento abierto (no una por adjunto).
+ */
+export interface AdjuntoFirmadoLote extends AdjuntoFirmado {
+  id: string;
+}
+
 /** Cabecera de ficha clínica (`GET /mascotas/:petId/resumen-clinico`). */
 export interface ResumenClinico {
   id:          string;
@@ -532,6 +558,8 @@ export interface EventoCreado {
   clientNameAtTime: string;
   attachmentsCount: number;
   emailSent:        boolean;
+  /** RN-EC13: id de la dosis programada en el Plan de Vacunación si se pidió `proximaDosis`. */
+  planVacunacionId: string | null;
 }
 
 /** Body de `POST /mascotas/:petId/historial` (espejo de `CrearEventoClinicoSchema`). */
@@ -547,6 +575,8 @@ export interface CrearEventoClinicoInput {
   medication?:        string | null;
   notes?:             string | null;
   sendEmailToClient?: boolean;
+  /** RN-EC13: opcional, solo válido si eventType='Vacunación'. */
+  proximaDosis?:      { tipoVacunaId: string; fechaEstimada: string } | null;
 }
 
 /** Body de `POST /mascotas/:petId/eutanasia` (espejo de `RegistrarEutanasiaSchema`, RN-EC10). */
@@ -621,7 +651,7 @@ export interface MarcarAplicadaInput {
   notes?:         string;
 }
 
-// ─── Catálogos globales ─────────────────────────────────────────────────────
+// ─── Catálogos clínicos (por tenant) ────────────────────────────────────────
 
 export interface Especie {
   id:   string;
@@ -632,6 +662,85 @@ export interface Raza {
   id:         string;
   name:       string;
   especie_id: string;
+}
+
+// ─── Gestión del catálogo (envelope de /api/v1, camelCase) ──────────────────
+//
+// Los tipos de arriba son la forma CRUDA de PostgREST, que es como el frontend
+// LEE el catálogo para poblar los combos. Los de abajo son los del envelope de
+// la API, que es por donde pasa toda ESCRITURA: traen `active` porque la
+// pantalla de gestión necesita ver y alternar el estado (RN-CAT4, RN-CAT9).
+
+export interface EspecieCatalogo {
+  id:          string;
+  name:        string;
+  description: string | null;
+  active:      boolean;
+}
+
+export interface RazaCatalogo {
+  id:          string;
+  especieId:   string;
+  /** Nombre de la especie, embebido por el backend en la misma consulta. */
+  especieName: string | null;
+  name:        string;
+  description: string | null;
+  active:      boolean;
+}
+
+/** Especie tal como la muestra el catálogo de vacunas: id + nombre. */
+export interface EspecieAsociada {
+  id:   string;
+  name: string;
+}
+
+export interface TipoVacunaCatalogo {
+  id:                    string;
+  nombre:                string;
+  /**
+   * Especies a las que aplica (RN-CAT10). Reemplaza al `especieAplicable` de
+   * texto libre: la relación es N:M contra el catálogo de especies y la resuelve
+   * el backend embebida en el mismo listado.
+   */
+  especies:              EspecieAsociada[];
+  mesesRefuerzoSugerido: number | null;
+  active:                boolean;
+}
+
+/**
+ * Un tipo de vacuna que le corresponde a UNA mascota
+ * (`GET /mascotas/:petId/tipos-vacuna-aplicables`, RN-PV11).
+ *
+ * Distinto de `TipoVacunaCatalogo`: acá no hay `active` ni especies porque la
+ * lista ya viene filtrada por el backend. Qué vacuna aplica es regla de negocio,
+ * no algo que el frontend deba recalcular.
+ */
+export interface TipoVacunaAplicable {
+  id:                    string;
+  nombre:                string;
+  mesesRefuerzoSugerido: number | null;
+}
+
+export interface EspecieInput {
+  name:         string;
+  description?: string | null;
+}
+
+export interface RazaInput {
+  especieId:    string;
+  name:         string;
+  description?: string | null;
+}
+
+export interface TipoVacunaInput {
+  nombre:                 string;
+  /**
+   * Conjunto COMPLETO de especies a las que aplica (RN-CAT10): lo que no está
+   * acá deja de estar asociado. Obligatorio al crear; opcional al editar, donde
+   * omitirlo significa "no toques las especies".
+   */
+  especieIds?:            string[];
+  mesesRefuerzoSugerido?: number | null;
 }
 
 // ─── Autenticación / sesión ────────────────────────────────────────────────
@@ -662,6 +771,28 @@ export interface RefreshResult {
 export interface LoginInput {
   username: string;
   password: string;
+}
+
+// ─── Autenticación de plataforma (Super Admin) ──────────────────────────────
+
+/**
+ * Credenciales del Super Admin. Es EMAIL y no username a propósito: el Super
+ * Admin no tiene fila en `usuarios` (esa tabla exige tenant), así que no tiene
+ * nombre de usuario — existe solo en Supabase Auth, identificado por su email.
+ */
+export interface PlatformLoginInput {
+  email:    string;
+  password: string;
+}
+
+/** Respuesta de `POST /admin/auth/login`: par de tokens + identidad de plataforma. */
+export interface PlatformLoginResult {
+  token:        string;
+  refreshToken: string;
+  superAdmin: {
+    id:    string;
+    email: string | null;
+  };
 }
 
 // ─── Auditoría ──────────────────────────────────────────────────────────────

@@ -2,6 +2,12 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { DomainError, ErrorCode } from "../../shared/errors.ts";
 import { recordAudit } from "../../shared/audit.ts";
 import { getDb, getServiceDb } from "../../shared/db.ts";
+import {
+  bucketsDeIntento,
+  limpiarIntentos,
+  registrarIntento,
+  WINDOW_MINUTES,
+} from "../../shared/loginRateLimit.ts";
 import type {
   LoginDto,
   RecuperarPasswordDto,
@@ -10,76 +16,13 @@ import type {
   ResetPasswordDto,
 } from "./auth.schemas.ts";
 
-// ─── Rate Limiter (RN-AUT5) ──────────────────────────────────────────────────
-// El estado vive en la tabla `intentos_login`, NO en memoria del isolate: en
-// serverless el proceso se recicla constantemente y hay varias instancias en
-// paralelo, así que un Map de módulo se reiniciaba solo y no frenaba nada.
-// Ver la migración 20260725000004 para el detalle del diseño.
-
-const WINDOW_MINUTES = 15;
-
-/** Intentos permitidos contra UNA cuenta antes de bloquearla. */
-const MAX_POR_USUARIO = 5;
-
 /**
- * Intentos permitidos desde UNA IP. Deliberadamente holgado: una clínica entera
- * sale por una sola IP pública, así que un umbral bajo acá castiga al local
- * completo por las contraseñas mal tipeadas de cualquiera. Sirve para frenar el
- * barrido automatizado de muchas cuentas, no para proteger una cuenta puntual
- * —de eso se ocupa MAX_POR_USUARIO—.
+ * Tope de filas que trae la recuperación de usuario por email. No es una regla
+ * de negocio: es el corte para no traer una lista arbitraria si alguna vez el
+ * mismo email aparece en muchas clínicas. Con el esquema actual (UNIQUE
+ * (tenant_id, email)) el caso normal es 1.
  */
-const MAX_POR_IP = 50;
-
-/**
- * Buckets contra los que se cuenta un intento, con su techo respectivo.
- *
- * El bucket por IDENTIFICADOR es el que hace el trabajo: quien ataca una cuenta
- * concreta no puede escaparle, porque el identificador es justamente lo que
- * necesita mantener fijo. El bucket por IP es defensa secundaria y se asume
- * falsificable (llega de un header).
- */
-function bucketsDeIntento(ip: string, identificador: string): {
-  claves: string[];
-  maximos: number[];
-} {
-  return {
-    claves:  [`user:${identificador.trim().toLowerCase()}`, `ip:${ip}`],
-    maximos: [MAX_POR_USUARIO, MAX_POR_IP],
-  };
-}
-
-/** Suma el intento y devuelve `true` si quedó bloqueado. */
-async function registrarIntento(
-  db: ReturnType<typeof getServiceDb>,
-  buckets: { claves: string[]; maximos: number[] },
-): Promise<boolean> {
-  const { data, error } = await db.rpc("registrar_intento_login", {
-    p_claves:          buckets.claves,
-    p_maximos:         buckets.maximos,
-    p_ventana_minutos: WINDOW_MINUTES,
-  });
-
-  if (error) {
-    // Si el contador no está disponible no se bloquea el login: sin base de
-    // datos el login va a fallar igual unas líneas más abajo, y dejar a todo el
-    // mundo afuera por un problema del limitador es peor que el riesgo que cubre.
-    console.error("[rate-limit] No se pudo registrar el intento:", error.message);
-    return false;
-  }
-
-  return data === true;
-}
-
-/** Limpia los buckets tras un login exitoso. */
-async function limpiarIntentos(
-  db: ReturnType<typeof getServiceDb>,
-  buckets: { claves: string[] },
-): Promise<void> {
-  const { error } = await db.rpc("limpiar_intentos_login", { p_claves: buckets.claves });
-  if (error) {
-    console.error("[rate-limit] No se pudieron limpiar los intentos:", error.message);
-  }
-}
+const MAX_COINCIDENCIAS_RECUPERACION = 10;
 
 // ─── Rol y permisos del usuario ───────────────────────────────────────────────
 
@@ -437,20 +380,43 @@ export const AuthService = {
     // Buscar usuario por email — respuesta siempre genérica (RN-REC2).
     // Se compara contra `email_ci`: el usuario escribe su mail como se le
     // ocurre y GoTrue ya lo guarda normalizado.
-    const { data: usuario } = await serviceDb
+    //
+    // La búsqueda es deliberadamente CROSS-TENANT: quien pide recuperar su
+    // usuario no sabe (ni tiene por qué saber) a qué clínica pertenece, y el
+    // email es justamente el dato que no depende del tenant. Por eso acá no va
+    // un `.eq("tenant_id", ...)`: no hay tenant en el contexto, el endpoint es
+    // público.
+    //
+    // Lo que SÍ cambia es `.single()` → `.limit()`. La unicidad que da el
+    // esquema es UNIQUE (tenant_id, email): dos clínicas pueden tener filas con
+    // el mismo email en `usuarios`. Que hoy no pase lo sostiene GoTrue (email
+    // único global en auth.users), no la tabla — la misma confusión que produjo
+    // DT-19 en el login. Con `.single()`, dos filas devolvían error de
+    // PostgREST y el pedido se descartaba en silencio: el usuario legítimo se
+    // quedaba sin recuperar su cuenta y nadie se enteraba. Se resuelven todas
+    // las coincidencias en una sola consulta (sin N+1).
+    const { data: coincidencias } = await serviceDb
       .from("usuarios")
-      .select("id, username, email")
+      .select("id, tenant_id, username, email")
       .eq("email_ci", dto.email.trim().toLowerCase())
       .eq("active", true)
-      .single();
+      .limit(MAX_COINCIDENCIAS_RECUPERACION);
 
-    if (usuario) {
-      // PENDIENTE (requiere proveedor SMTP configurado): enviar el username al
-      // email. Hasta entonces NO se loguea ni el username ni el email — los
-      // logs de la Edge Function no son un canal de entrega y volcar ahí datos
-      // personales los expone a cualquiera con acceso al panel de Supabase.
-      // Se deja constancia solo del hecho, sin identificar a nadie.
-      console.info("[recuperarUsuario] Solicitud con email registrado; envío pendiente de proveedor SMTP");
+    const usuarios = (coincidencias ?? []) as Array<Record<string, unknown>>;
+
+    if (usuarios.length > 0) {
+      // PENDIENTE (requiere proveedor SMTP configurado): enviar el/los username
+      // al email. Si hay más de una coincidencia van todas en el MISMO mensaje
+      // al mismo destinatario: es el dueño de esa casilla en las dos clínicas,
+      // así que no hay filtración cruzada. Hasta entonces NO se loguea ni el
+      // username ni el email — los logs de la Edge Function no son un canal de
+      // entrega y volcar ahí datos personales los expone a cualquiera con
+      // acceso al panel de Supabase. Se deja constancia solo del hecho y de
+      // cuántas coincidencias hubo, sin identificar a nadie.
+      console.info(
+        `[recuperarUsuario] Solicitud con email registrado (${usuarios.length} coincidencia/s); ` +
+        "envío pendiente de proveedor SMTP",
+      );
     }
 
     // Auditoría (RN-REC4)

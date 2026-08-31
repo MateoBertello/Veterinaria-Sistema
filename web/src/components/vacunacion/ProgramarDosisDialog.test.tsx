@@ -9,19 +9,15 @@ vi.mock("sonner", () => ({
   toast: { success: (...a: unknown[]) => toastSuccess(...a), error: (...a: unknown[]) => toastError(...a) },
 }));
 
-vi.mock("../../api/catalogos.ts", () => ({
-  listarTiposVacuna: vi.fn(),
-}));
-
 vi.mock("../../api/vacunacion.ts", () => ({
+  listarTiposVacunaAplicables: vi.fn(),
   programarDosis: vi.fn(),
 }));
 
 import { ProgramarDosisDialog } from "./ProgramarDosisDialog.tsx";
-import { listarTiposVacuna } from "../../api/catalogos.ts";
-import { programarDosis } from "../../api/vacunacion.ts";
+import { listarTiposVacunaAplicables, programarDosis } from "../../api/vacunacion.ts";
 
-const mockTipos = vi.mocked(listarTiposVacuna);
+const mockTipos = vi.mocked(listarTiposVacunaAplicables);
 const mockProgramar = vi.mocked(programarDosis);
 
 function makeDosis(over: Partial<DosisVacunacion> = {}): DosisVacunacion {
@@ -46,8 +42,8 @@ function setup() {
 beforeEach(() => {
   vi.clearAllMocks();
   mockTipos.mockResolvedValue([
-    { id: "t1", nombre: "Antirrábica", especie_aplicable: null, meses_refuerzo_sugerido: 12 },
-    { id: "t2", nombre: "Quíntuple Canina", especie_aplicable: "Perro", meses_refuerzo_sugerido: 12 },
+    { id: "t1", nombre: "Antirrábica",      mesesRefuerzoSugerido: 12 },
+    { id: "t2", nombre: "Quíntuple Canina", mesesRefuerzoSugerido: 12 },
   ]);
 });
 
@@ -57,6 +53,61 @@ async function elegirTipoVacuna(nombre: string) {
 }
 
 describe("ProgramarDosisDialog", () => {
+  // ── BUG 1: el combo ofrecía TODAS las vacunas de la clínica ─────────────
+  //
+  // El diálogo llamaba a `listarTiposVacuna()` sin argumento, así que al
+  // programar una dosis para un perro se ofrecían también las de gato. Ahora se
+  // le pregunta al backend por ESTA mascota (RN-PV11) y él resuelve la especie.
+
+  it("RN-PV11: pide las vacunas aplicables A ESTA MASCOTA, no el catálogo entero", async () => {
+    setup();
+
+    await waitFor(() => expect(mockTipos).toHaveBeenCalledWith("pet1"));
+    // Una sola llamada, y siempre con el id de la mascota: no existe la forma
+    // sin argumento que traía el catálogo completo.
+    expect(mockTipos).toHaveBeenCalledTimes(1);
+  });
+
+  it("RN-PV11: el combo ofrece exactamente lo que devolvió el backend", async () => {
+    mockTipos.mockResolvedValue([{ id: "t1", nombre: "Antirrábica", mesesRefuerzoSugerido: 12 }]);
+    setup();
+
+    await userEvent.click(await screen.findByLabelText(/Tipo de vacuna \*/i));
+
+    expect(await screen.findByRole("option", { name: "Antirrábica" })).toBeInTheDocument();
+    // "Triple Felina" no está en la respuesta, así que no puede aparecer: el
+    // frontend no filtra ni completa la lista por su cuenta.
+    expect(screen.queryByRole("option", { name: /Triple Felina/i })).not.toBeInTheDocument();
+  });
+
+  it("RN-PV11: si la especie no tiene vacunas asociadas, lo dice en vez de mostrar un combo vacío", async () => {
+    mockTipos.mockResolvedValue([]);
+    setup();
+
+    expect(
+      await screen.findByText(/No hay vacunas asociadas a la especie de esta mascota/i),
+    ).toBeInTheDocument();
+  });
+
+  it("RN-PV11: un rechazo del server por especie aterriza en el campo del tipo de vacuna", async () => {
+    // El combo ya viene filtrado, pero alguien pudo desasociar la especie
+    // mientras el diálogo estaba abierto: el error tiene que ser accionable.
+    mockProgramar.mockRejectedValue(
+      new ApiError(
+        ErrorCode.VACCINE_NOT_APPLICABLE_TO_SPECIES,
+        422,
+        'La vacuna "Triple Felina" no está asociada a Perro.',
+      ),
+    );
+    setup();
+
+    await elegirTipoVacuna("Antirrábica");
+    await userEvent.click(screen.getByRole("button", { name: /Programar/i }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/no está asociada a Perro/i);
+    expect(toastError).not.toHaveBeenCalled();
+  });
+
   it("RN-PV3: tipo de vacuna vacío bloquea el envío", async () => {
     setup();
 
@@ -118,7 +169,7 @@ describe("ProgramarDosisDialog", () => {
           onOpenChange={onOpenChange}
           onSaved={onSaved}
           tiposVacuna={[
-            { id: "t1", nombre: "Antirrábica", especie_aplicable: null, meses_refuerzo_sugerido: 12 },
+            { id: "t1", nombre: "Antirrábica", mesesRefuerzoSugerido: 12 },
           ]}
           sugerencia="Refuerzo de Antirrábica sugerido según el catálogo (cada 12 meses). Podés ajustar la fecha antes de confirmar."
           initialValues={{ tipoVacunaId: "t1", fechaEstimada }}

@@ -57,6 +57,7 @@ function turno(status: Turno["status"], id: string): Turno {
     mascota: null,
     cliente: null,
     accionesDisponibles: [],
+    vencido: false,
   };
 }
 

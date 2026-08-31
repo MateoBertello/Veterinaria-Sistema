@@ -4,6 +4,7 @@ import { Download, Eye, History, Search, X } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card.tsx";
 import {
   Table,
+  TableScrollContainer,
   TableBody,
   TableCell,
   TableHead,
@@ -277,9 +278,9 @@ export function AuditoriaPage() {
         </CardContent>
       </Card>
 
-      <div className="rounded-lg border">
-        <Table>
-          <TableHeader>
+      <TableScrollContainer aria-label="Listado de registros de auditoría">
+        <Table containerClassName="overflow-visible">
+          <TableHeader className="sticky top-0 z-10">
             <TableRow className="bg-orange-50 hover:bg-orange-50">
               <TableHead>Fecha/Hora</TableHead>
               <TableHead>Usuario</TableHead>
@@ -315,7 +316,7 @@ export function AuditoriaPage() {
                   <TableCell className="whitespace-nowrap">
                     {new Date(r.timestamp).toLocaleString("es-AR")}
                   </TableCell>
-                  <TableCell className="whitespace-nowrap">{r.userName ?? "—"}</TableCell>
+                  <TableCell className="whitespace-normal">{r.userName ?? "—"}</TableCell>
                   <TableCell className="hidden md:table-cell">{auditModuleLabel(r.module)}</TableCell>
                   <TableCell>
                     <Badge variant={auditActionBadgeVariant(r.action)}>
@@ -345,7 +346,7 @@ export function AuditoriaPage() {
             )}
           </TableBody>
         </Table>
-      </div>
+      </TableScrollContainer>
 
       {!loading && !error && registros.length > 0 ? (
         <div className="flex items-center justify-between">

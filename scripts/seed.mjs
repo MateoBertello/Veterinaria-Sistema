@@ -7,7 +7,7 @@
  *   2. Un usuario por cada rol (admin/veterinario/recepcionista) con credenciales
  *      conocidas, creados vía Auth admin API con `app_metadata.tenant_id` correcto.
  *   3. Datos demo por tenant (clientes con mascotas) usando los catálogos globales
- *      (`especies`/`razas`) que ya siembra `seed_global.sql` como migración.
+ *      (`especies`/`razas`) que ya siembra `on_tenant_created` al crear el tenant.
  *
  * IDEMPOTENTE: correrlo dos veces no duplica ni rompe.
  *
@@ -91,6 +91,19 @@ const TENANT = {
 };
 
 const PASSWORD = "Demo1234!";
+
+/**
+ * Super Admin de PLATAFORMA para desarrollo. No pertenece a ningún tenant: es
+ * un usuario de Supabase Auth con `app_metadata.platform_role='super_admin'` y
+ * sin fila en `usuarios` (esa tabla exige `tenant_id NOT NULL`). Entra por
+ * `/admin/login`, que es su propio camino de autenticación.
+ *
+ * Se siembra acá para que el entorno de DEV quede completo con `npm run seed`
+ * —incluida la suite E2E, que da por sentado el seed—. Para provisionarlo en un
+ * entorno real está `scripts/crear-super-admin.mjs`, que pide las credenciales
+ * por variables de entorno en vez de traerlas fijas.
+ */
+const SUPER_ADMIN = { email: "super@leo.local", password: "Super1234!" };
 const USERS = [
   { email: "admin@demo.local",     username: "admin_demo",     fullName: "Admin Demo",          roleName: "admin" },
   { email: "vet@demo.local",       username: "vet_demo",       fullName: "Dr. Vet Demo",        roleName: "veterinario" },
@@ -172,6 +185,35 @@ async function findAuthUserByEmail(email) {
 }
 
 /** Crea (o reutiliza) un usuario de Auth + su fila en `usuarios`; veterinario → fila en `doctores`. */
+async function ensureSuperAdmin() {
+  const { data: created, error: createErr } = await db.auth.admin.createUser({
+    email: SUPER_ADMIN.email,
+    password: SUPER_ADMIN.password,
+    email_confirm: true,
+    app_metadata: { platform_role: "super_admin" },
+  });
+
+  if (!createErr) {
+    console.log(`✓ Super Admin de plataforma creado → ${created.user.id}`);
+    return;
+  }
+
+  if (!/already|registered|exists/i.test(createErr.message ?? "")) {
+    die(`createUser falló para ${SUPER_ADMIN.email}`, createErr);
+  }
+
+  const existing = await findAuthUserByEmail(SUPER_ADMIN.email);
+  if (!existing) die(`Auth dice que ${SUPER_ADMIN.email} ya existe pero no pude localizarlo`);
+
+  // Conserva el resto de app_metadata y (re)afirma el claim de plataforma.
+  await db.auth.admin.updateUserById(existing.id, {
+    password: SUPER_ADMIN.password,
+    email_confirm: true,
+    app_metadata: { ...(existing.app_metadata ?? {}), platform_role: "super_admin" },
+  });
+  console.log(`• Super Admin de plataforma ya existía — reuso ${existing.id} (password/claim re-seteados)`);
+}
+
 async function ensureUser(tenantId, spec) {
   // 1. Resolver rol_id del tenant.
   const { data: rol, error: rolErr } = await db
@@ -259,28 +301,41 @@ async function ensureUser(tenantId, spec) {
   }
 }
 
-/** Cachea ids de especie/raza por nombre. */
+/**
+ * Cachea ids de especie/raza por (tenant, nombre).
+ *
+ * El catálogo clínico es POR TENANT desde
+ * 20260827000001_catalogos_por_tenant.sql. Dos consecuencias para este script:
+ * la búsqueda lleva `.eq("tenant_id", ...)` —sin él, `.single()` sobre un nombre
+ * que se repite en varias clínicas devuelve error, no una fila— y la clave del
+ * cache incluye el tenant.
+ */
 const especieCache = new Map();
 const razaCache = new Map();
 
-async function especieIdPorNombre(nombre) {
-  if (especieCache.has(nombre)) return especieCache.get(nombre);
-  const { data, error } = await db.from("especies").select("id").eq("name", nombre).single();
-  if (error || !data) die(`Especie "${nombre}" no está en el catálogo global (¿corriste las migraciones?)`, error);
-  especieCache.set(nombre, data.id);
+async function especieIdPorNombre(tenantId, nombre) {
+  const key = `${tenantId}::${nombre}`;
+  if (especieCache.has(key)) return especieCache.get(key);
+  const { data, error } = await db
+    .from("especies").select("id")
+    .eq("tenant_id", tenantId).eq("name", nombre)
+    .single();
+  if (error || !data) die(`Especie "${nombre}" no está en el catálogo de este tenant (¿corriste las migraciones?)`, error);
+  especieCache.set(key, data.id);
   return data.id;
 }
 
-async function razaIdPorNombre(especieId, nombre) {
-  const key = `${especieId}::${nombre}`;
+async function razaIdPorNombre(tenantId, especieId, nombre) {
+  const key = `${tenantId}::${especieId}::${nombre}`;
   if (razaCache.has(key)) return razaCache.get(key);
   const { data, error } = await db
     .from("razas")
     .select("id")
+    .eq("tenant_id", tenantId)
     .eq("especie_id", especieId)
     .eq("name", nombre)
     .single();
-  if (error || !data) die(`Raza "${nombre}" no está en el catálogo global`, error);
+  if (error || !data) die(`Raza "${nombre}" no está en el catálogo de este tenant`, error);
   razaCache.set(key, data.id);
   return data.id;
 }
@@ -334,8 +389,8 @@ async function ensureDemoData(tenantId) {
         continue;
       }
 
-      const especieId = await especieIdPorNombre(m.especie);
-      const razaId = await razaIdPorNombre(especieId, m.raza);
+      const especieId = await especieIdPorNombre(tenantId, m.especie);
+      const razaId = await razaIdPorNombre(tenantId, especieId, m.raza);
       const { error: masInsErr } = await db.from("mascotas").insert({
         tenant_id: tenantId,
         name: m.name,
@@ -492,9 +547,12 @@ const DEMO_DOSIS_NOTAS = [
   "Refuerzo anual antirrábico canino",
 ];
 
-async function tipoVacunaIdPorNombre(nombre) {
-  const { data, error } = await db.from("tipos_vacuna").select("id").eq("nombre", nombre).single();
-  if (error || !data) die(`Tipo de vacuna "${nombre}" no está en el catálogo global`, error);
+async function tipoVacunaIdPorNombre(tenantId, nombre) {
+  const { data, error } = await db
+    .from("tipos_vacuna").select("id")
+    .eq("tenant_id", tenantId).eq("nombre", nombre)
+    .single();
+  if (error || !data) die(`Tipo de vacuna "${nombre}" no está en el catálogo de este tenant`, error);
   return data.id;
 }
 
@@ -603,8 +661,8 @@ async function ensureDemoOperativa(tenantId) {
   console.log(`✓ Historial demo: ${eventos.length} eventos (Firulais ×2, Michi ×1)`);
 
   // — Plan de vacunación —
-  const tripleFelina = await tipoVacunaIdPorNombre("Triple Felina");
-  const antirrabica  = await tipoVacunaIdPorNombre("Antirrábica");
+  const tripleFelina = await tipoVacunaIdPorNombre(tenantId, "Triple Felina");
+  const antirrabica  = await tipoVacunaIdPorNombre(tenantId, "Antirrábica");
   const dosis = [
     // Aplicada: linkea el evento 'Vacunación' de Michi (CHECK de la tabla).
     {
@@ -703,8 +761,8 @@ async function ensureLunaEutanasia(tenantId) {
     return;
   }
 
-  const especieId = await especieIdPorNombre("Perro");
-  const razaId = await razaIdPorNombre(especieId, "Mestizo");
+  const especieId = await especieIdPorNombre(tenantId, "Perro");
+  const razaId = await razaIdPorNombre(tenantId, especieId, "Mestizo");
   const { data: luna, error: insErr } = await db.from("mascotas").insert({
     tenant_id: tenantId, name: "Luna", client_id: ctx.carlos.id,
     especie_id: especieId, raza_id: razaId,
@@ -723,7 +781,7 @@ async function ensureLunaEutanasia(tenantId) {
   });
   if (evErr) die("No pude insertar la consulta previa de Luna", evErr);
 
-  const quintuple = await tipoVacunaIdPorNombre("Quíntuple Canina");
+  const quintuple = await tipoVacunaIdPorNombre(tenantId, "Quíntuple Canina");
   const { error: dosisErr } = await db.from("plan_vacunacion").insert({
     tenant_id: tenantId, pet_id: luna.id, tipo_vacuna_id: quintuple,
     fecha_estimada: fechaRel(30), estado: "Pendiente", created_by: ctx.vetId,
@@ -756,6 +814,7 @@ async function main() {
 
   console.log("\n— Usuarios —");
   for (const u of USERS) await ensureUser(tenantId, u);
+  await ensureSuperAdmin();
 
   console.log("\n— Datos demo —");
   await ensureDemoData(tenantId);
@@ -769,6 +828,9 @@ async function main() {
 
   console.log("\n✓ Seed completo. Credenciales (todas con password " + PASSWORD + "):");
   for (const u of USERS) console.log(`    ${u.roleName.padEnd(13)} ${u.email}`);
+  console.log(
+    `\n  Consola de plataforma (/admin/login): ${SUPER_ADMIN.email} / ${SUPER_ADMIN.password}`,
+  );
   console.log("");
 }
 

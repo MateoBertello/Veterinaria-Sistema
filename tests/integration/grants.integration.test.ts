@@ -4,7 +4,7 @@
  *
  * Verifica que la migración `20260706000001_revoke_anon_grants.sql` dejó a
  * `anon` sin privilegios sobre `public` (DML y SELECT), que `authenticated`
- * sigue pudiendo leer los catálogos globales sin regresión, y que
+ * sigue pudiendo leer los catálogos clínicos sin regresión, y que
  * `20260710000001_revoke_execute_funciones.sql` dejó las RPCs sensibles
  * (SECURITY DEFINER con p_tenant_id por parámetro) ejecutables SOLO por
  * service_role: ni `anon` ni `authenticated` pueden invocarlas por
@@ -18,6 +18,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { SUPABASE_URL, SUPABASE_ANON_KEY, SERVICE_ROLE_KEY, describeIntegration } from "./_env.ts";
+import { borrarUsuarioAuth, crearUsuarioAuth } from "./_teardown.ts";
 
 globalThis.WebSocket = class FakeWebSocket {} as any;
 
@@ -57,23 +58,7 @@ beforeAll(async () => {
     return;
   }
 
-  const adminHeaders = {
-    "Content-Type": "application/json",
-    "Authorization": `Bearer ${SERVICE_ROLE_KEY}`,
-    "apikey": SERVICE_ROLE_KEY,
-  };
-
-  const resUser = await fetch(`${SUPABASE_URL}/auth/v1/admin/users`, {
-    method: "POST",
-    headers: adminHeaders,
-    body: JSON.stringify({
-      email: "grants-dt5@test.com",
-      password: "Password123!",
-      email_confirm: true,
-    }),
-  });
-  const userData = (await resUser.json()) as { id?: string };
-  userId = userData.id ?? "";
+  userId = await crearUsuarioAuth("grants-dt5@test.com", {}, "Password123!");
 
   const signIn = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=password`, {
     method: "POST",
@@ -86,11 +71,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   if (!SUPABASE_URL || !SERVICE_ROLE_KEY) return;
-  const adminHeaders = {
-    "Authorization": `Bearer ${SERVICE_ROLE_KEY}`,
-    "apikey": SERVICE_ROLE_KEY,
-  };
-  if (userId) await fetch(`${SUPABASE_URL}/auth/v1/admin/users/${userId}`, { method: "DELETE", headers: adminHeaders });
+  await borrarUsuarioAuth(userId);
 });
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
@@ -103,7 +84,7 @@ describeIntegration("DT-5: anon sin privilegios sobre tablas de negocio", () => 
   });
 });
 
-describeIntegration("DT-5: anon sin SELECT sobre catálogos globales", () => {
+describeIntegration("DT-5: anon sin SELECT sobre los catálogos clínicos", () => {
   it("anon no puede leer especies (42501)", async () => {
     if (skipIfNoCredentials()) return;
     const { error } = await anonClient().from("especies").select("*");
@@ -161,20 +142,24 @@ describeIntegration("pre-deploy: EXECUTE de funciones acotado a service_role", (
 });
 
 describeIntegration("DT-5: catálogos siguen respondiendo para authenticated (sin regresión)", () => {
-  it("un usuario logueado sigue leyendo especies/razas/tipos_vacuna", async () => {
+  // Esta suite mide GRANTs, no RLS: lo que afirma es que `authenticated` NO
+  // perdió el SELECT sobre estas tablas (el error sería 42501, "permission
+  // denied"), que es la lectura por PostgREST directo de la que depende el
+  // frontend.
+  //
+  // Cuántas filas devuelve ya no se puede afirmar acá. Desde
+  // 20260827000001_catalogos_por_tenant.sql el catálogo es de cada clínica y su
+  // política RLS exige tenant + usuario activo; el usuario de esta suite es una
+  // cuenta de Auth suelta, sin tenant ni fila en `usuarios`, así que ve cero
+  // filas — y está bien que así sea. Que un usuario REAL de un tenant vea su
+  // catálogo completo lo cubre `rls.test.ts` (RLS-7).
+  it("un usuario logueado conserva el SELECT sobre especies/razas/tipos_vacuna (no 42501)", async () => {
     if (skipIfNoCredentials()) return;
     const db = userClient(jwt);
 
-    const { data: especies, error: errEspecies } = await db.from("especies").select("*");
-    expect(errEspecies).toBeNull();
-    expect((especies ?? []).length).toBeGreaterThan(0);
-
-    const { data: razas, error: errRazas } = await db.from("razas").select("*");
-    expect(errRazas).toBeNull();
-    expect((razas ?? []).length).toBeGreaterThan(0);
-
-    const { data: tiposVacuna, error: errTiposVacuna } = await db.from("tipos_vacuna").select("*");
-    expect(errTiposVacuna).toBeNull();
-    expect((tiposVacuna ?? []).length).toBeGreaterThan(0);
+    for (const tabla of ["especies", "razas", "tipos_vacuna"]) {
+      const { error } = await db.from(tabla).select("*");
+      expect(error, `${tabla} debería seguir siendo legible por authenticated`).toBeNull();
+    }
   });
 });

@@ -46,22 +46,33 @@ beforeEach(() => {
 });
 
 describe("RequirePermission", () => {
-  it("sin el permiso requerido, redirige a '/'", () => {
+  it("sin el permiso requerido, muestra la pantalla 'Sin acceso' en vez del contenido", () => {
     mockAuth.user = makeUser({ permissions: ["manage_users"] });
     renderApp();
-    expect(screen.getByText("Inicio")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Sin acceso" })).toBeInTheDocument();
     expect(screen.queryByText("Contenido de auditoría")).not.toBeInTheDocument();
+  });
+
+  it("sin el permiso requerido, NO redirige: se queda en la ruta pedida", () => {
+    mockAuth.user = makeUser({ permissions: ["manage_users"] });
+    renderApp();
+    // El redirect silencioso a "/" era indistinguible de un bug: la URL cambiaba
+    // sola y nadie explicaba por qué. Ahora la ruta se mantiene y se explica.
+    expect(screen.queryByText("Inicio")).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Volver al inicio" })).toBeInTheDocument();
   });
 
   it("sin usuario (no debería ocurrir tras ProtectedRoute, pero por defecto no autoriza)", () => {
     mockAuth.user = null;
     renderApp();
-    expect(screen.getByText("Inicio")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Sin acceso" })).toBeInTheDocument();
+    expect(screen.queryByText("Contenido de auditoría")).not.toBeInTheDocument();
   });
 
   it("con el permiso requerido, renderiza el contenido", () => {
     mockAuth.user = makeUser({ permissions: ["view_audit"] });
     renderApp();
     expect(screen.getByText("Contenido de auditoría")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Sin acceso" })).not.toBeInTheDocument();
   });
 });

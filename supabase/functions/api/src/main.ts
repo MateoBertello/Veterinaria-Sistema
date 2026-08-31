@@ -7,6 +7,7 @@ import { usuariosRouter } from "./modules/usuarios/usuarios.controller.ts";
 import { clientesRouter } from "./modules/clientes/clientes.controller.ts";
 import { mascotasRouter } from "./modules/mascotas/mascotas.controller.ts";
 import { tenantsRouter } from "./modules/admin/tenants.controller.ts";
+import { platformAuthRouter } from "./modules/admin/platformAuth.controller.ts";
 import { modulosRouter } from "./modules/modulos/modulos.controller.ts";
 import { serviciosRouter } from "./modules/servicios/servicios.controller.ts";
 import { configuracionRouter } from "./modules/configuracion/configuracion.controller.ts";
@@ -31,6 +32,11 @@ import {
   avisosVacunacionRouter,
 } from "./modules/vacunacion/vacunacion.controller.ts";
 import { dashboardRouter } from "./modules/dashboard/dashboard.controller.ts";
+import {
+  especiesRouter,
+  razasRouter,
+  tiposVacunaRouter,
+} from "./modules/catalogos/catalogos.controller.ts";
 
 const app = new Hono().basePath("/api/v1");
 
@@ -74,6 +80,15 @@ app.route("/servicios", serviciosRouter);
 // ─── Configuración de la Clínica (Transversal — Etapa 4) ───────────────────────
 app.route("/configuracion", configuracionRouter);
 
+// ─── Catálogos clínicos del tenant (Core transversal) ──────────────────────────
+// Cada clínica administra los suyos. Rutas del tenant, NO bajo /admin: dejaron
+// de ser globales en 20260827000001_catalogos_por_tenant.sql. La LECTURA para
+// los combos sigue yendo por PostgREST directo (excepción del CLAUDE.md); acá
+// vive todo lo que ESCRIBE, que es auditable y pasa por Controller → Service.
+app.route("/especies", especiesRouter);
+app.route("/razas", razasRouter);
+app.route("/tipos-vacuna", tiposVacunaRouter);
+
 // ─── Doctores + Horarios de Atención (Transversal — Etapa 4) ───────────────────
 // Doctores: ABM (listar/editar) bajo manage_users.
 // Horarios: franjas anidadas (/doctores/:id/horarios, /doctores/horarios/resumen)
@@ -114,6 +129,12 @@ app.route("/notificaciones/vacunas", avisosVacunacionRouter);
 app.route("/internal/notificaciones", cronNotificacionesRouter);
 
 // ─── Consola Super Admin (fuera de tenant) ──────────────────────────────────────
+// Autenticación de plataforma: login/refresh/logout del Super Admin. Va ANTES de
+// /admin/tenants por legibilidad (son prefijos distintos, el orden no decide el
+// match). Es el único camino que produce un token de plataforma: el Super Admin
+// no tiene fila en `usuarios`, así que /auth/login nunca pudo dárselo.
+app.route("/admin/auth", platformAuthRouter);
+
 // Montado en /api/v1/admin/tenants; el router NO repite el segmento /tenants.
 app.route("/admin/tenants", tenantsRouter);
 

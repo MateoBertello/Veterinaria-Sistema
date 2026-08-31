@@ -432,29 +432,107 @@ describeIntegration("RLS-6c: Aislamiento de horarios_doctor (Etapa 4)", () => {
   });
 });
 
-describeIntegration("RLS-7: Catálogos globales accesibles por ambos tenants", () => {
-  it("usuario A puede leer especies", async () => {
+// Hasta 20260827000001_catalogos_por_tenant.sql estos tres catálogos eran
+// globales y su política RLS era "cualquier autenticado los lee". Ahora son de
+// cada clínica: la lectura por PostgREST directo desde el frontend sigue siendo
+// la excepción documentada en el CLAUDE.md, pero está aislada por tenant como
+// cualquier tabla de negocio. `permisos` es el único que sigue siendo global.
+describeIntegration("RLS-7: Catálogos clínicos aislados por tenant", () => {
+  it("usuario A lee especies, y todas son de su tenant", async () => {
     if (skipIfNoCredentials()) return;
     const db = userClient(jwtA);
-    const { data, error } = await db.from("especies").select("id, name");
+    const { data, error } = await db.from("especies").select("id, name, tenant_id");
     expect(error).toBeNull();
     expect((data ?? []).length).toBeGreaterThan(0);
+    expect((data ?? []).every((e) => e.tenant_id === tenantAId)).toBe(true);
   });
 
-  it("usuario B puede leer tipos_vacuna", async () => {
+  it("usuario B lee tipos_vacuna, y todos son de su tenant", async () => {
     if (skipIfNoCredentials()) return;
     const db = userClient(jwtB);
-    const { data, error } = await db.from("tipos_vacuna").select("id, nombre");
+    const { data, error } = await db.from("tipos_vacuna").select("id, nombre, tenant_id");
     expect(error).toBeNull();
     expect((data ?? []).length).toBeGreaterThan(0);
+    expect((data ?? []).every((t) => t.tenant_id === tenantBId)).toBe(true);
   });
 
-  it("usuario A puede leer razas", async () => {
+  it("usuario A lee razas, y todas son de su tenant", async () => {
     if (skipIfNoCredentials()) return;
     const db = userClient(jwtA);
-    const { data, error } = await db.from("razas").select("id, name");
+    const { data, error } = await db.from("razas").select("id, name, tenant_id");
     expect(error).toBeNull();
     expect((data ?? []).length).toBeGreaterThan(0);
+    expect((data ?? []).every((r) => r.tenant_id === tenantAId)).toBe(true);
+  });
+
+  it("BLOQUEANTE: A no ve NADA del catálogo de B, ni pidiéndolo por id", async () => {
+    if (skipIfNoCredentials()) return;
+
+    // Ids reales del catálogo de B, leídos con service role (bypassea RLS).
+    const { data: espB } = await serviceDb
+      .from("especies").select("id").eq("tenant_id", tenantBId).limit(1).single();
+    const { data: tvB } = await serviceDb
+      .from("tipos_vacuna").select("id").eq("tenant_id", tenantBId).limit(1).single();
+
+    const db = userClient(jwtA);
+
+    const { data: verEspecie } = await db.from("especies").select("id").eq("id", espB?.id);
+    expect(verEspecie ?? []).toHaveLength(0);
+
+    const { data: verTipo } = await db.from("tipos_vacuna").select("id").eq("id", tvB?.id);
+    expect(verTipo ?? []).toHaveLength(0);
+
+    const { data: razasDeB } = await db.from("razas").select("id").eq("tenant_id", tenantBId);
+    expect(razasDeB ?? []).toHaveLength(0);
+  });
+
+  it("BLOQUEANTE: A no ve las asociaciones especie↔vacuna de B", async () => {
+    if (skipIfNoCredentials()) return;
+    const db = userClient(jwtA);
+
+    const { data, error } = await db.from("especie_tipo_vacuna").select("tenant_id");
+    expect(error).toBeNull();
+    expect(
+      (data ?? []).every((r: { tenant_id: string }) => r.tenant_id === tenantAId),
+      "A ve asociaciones de otra clínica",
+    ).toBe(true);
+
+    const { data: deB } = await db
+      .from("especie_tipo_vacuna").select("tenant_id").eq("tenant_id", tenantBId);
+    expect(deB ?? []).toHaveLength(0);
+  });
+
+  it("BLOQUEANTE: A no puede escribir la tabla de asociación por PostgREST", async () => {
+    // La escritura entra por la Edge Function con `service_role`. Si esto
+    // pasara, cualquiera podría habilitarse una vacuna para cualquier especie
+    // sin permiso `manage_catalogs` y sin dejar asiento de auditoría.
+    if (skipIfNoCredentials()) return;
+    const db = userClient(jwtA);
+
+    const { data: esp } = await serviceDb
+      .from("especies").select("id").eq("tenant_id", tenantAId).limit(1).single();
+    const { data: tv } = await serviceDb
+      .from("tipos_vacuna").select("id").eq("tenant_id", tenantAId).limit(1).single();
+
+    const { error } = await db.from("especie_tipo_vacuna").insert({
+      tenant_id:      tenantAId,
+      especie_id:     (esp as { id: string }).id,
+      tipo_vacuna_id: (tv  as { id: string }).id,
+    });
+    expect(error).not.toBeNull();
+  });
+
+  it("BLOQUEANTE: A no puede escribir en el catálogo (ni en el suyo) por PostgREST", async () => {
+    // El REVOKE de 20260725000003_hardening_authenticated_rls.sql sigue valiendo:
+    // `authenticated` no tiene INSERT/UPDATE/DELETE y las escrituras entran por
+    // la Edge Function. El catálogo dejó de ser global, pero no por eso se abre.
+    if (skipIfNoCredentials()) return;
+    const db = userClient(jwtA);
+
+    const { error } = await db
+      .from("especies")
+      .insert({ tenant_id: tenantAId, name: `Intrusa ${Date.now()}` });
+    expect(error).not.toBeNull();
   });
 
   it("usuario B puede leer permisos", async () => {
@@ -511,23 +589,38 @@ describeIntegration("RLS-9: Idempotencia de seed_global", () => {
     expect(despues).toBe(antes);
   });
 
-  it("ejecutar seed de especies dos veces no duplica filas", async () => {
+  // El catálogo semilla se mudó de `seed_global.sql` (una vez, global) a
+  // `seed_catalogos_tenant()` (una vez por clínica). La idempotencia importa
+  // igual: `on_tenant_created` la llama en cada alta, y el backfill de la
+  // migración la corrió sobre los tenants que ya existían.
+  it("ejecutar seed_catalogos_tenant dos veces no duplica el catálogo del tenant", async () => {
     if (skipIfNoCredentials()) return;
 
-    const { count: antes } = await serviceDb
-      .from("especies")
-      .select("*", { count: "exact", head: true });
+    const contar = async (tabla: string) => {
+      const { count } = await serviceDb
+        .from(tabla)
+        .select("*", { count: "exact", head: true })
+        .eq("tenant_id", tenantAId);
+      return count;
+    };
 
-    await serviceDb.from("especies").upsert(
-      [{ name: "Perro", description: "Canino doméstico" }],
-      { onConflict: "name", ignoreDuplicates: true },
-    );
+    const foto = async () => ({
+      especies:            await contar("especies"),
+      razas:               await contar("razas"),
+      tipos_vacuna:        await contar("tipos_vacuna"),
+      especie_tipo_vacuna: await contar("especie_tipo_vacuna"),
+    });
 
-    const { count: despues } = await serviceDb
-      .from("especies")
-      .select("*", { count: "exact", head: true });
+    const antes = await foto();
+    expect(antes.especies).toBeGreaterThan(0);
+    // La idempotencia del bloque de asociaciones descansa en un ON CONFLICT DO
+    // NOTHING contra la PK compuesta; se ejercita acá porque el backfill de la
+    // migración vuelve a llamar a esta misma función sobre tenants ya sembrados.
+    expect(antes.especie_tipo_vacuna).toBeGreaterThan(0);
 
-    expect(despues).toBe(antes);
+    await serviceDb.rpc("seed_catalogos_tenant", { p_tenant_id: tenantAId });
+
+    expect(await foto()).toEqual(antes);
   });
 });
 
@@ -557,10 +650,12 @@ describeIntegration("RLS-10: on_tenant_created — roles correctos", () => {
       .select("*", { count: "exact", head: true })
       .eq("rol_id", adminRol?.id ?? "");
 
-    expect(count).toBe(11);
+    // 12 desde 20260827000001_catalogos_por_tenant.sql, que suma manage_catalogs
+    // a los 11 de seed_global.sql. El admin recibe todos por regla general.
+    expect(count).toBe(12);
   });
 
-  it("el rol veterinario tiene exactamente 6 permisos, incluido manage_clients", async () => {
+  it("el rol veterinario tiene exactamente 7 permisos, incluidos manage_clients y manage_catalogs", async () => {
     if (skipIfNoCredentials()) return;
     const { data: vetRol } = await serviceDb
       .from("roles")
@@ -574,14 +669,18 @@ describeIntegration("RLS-10: on_tenant_created — roles correctos", () => {
       .select("permisos!inner(name)", { count: "exact" })
       .eq("rol_id", vetRol?.id ?? "");
 
-    expect(count).toBe(6);
+    expect(count).toBe(7);
     // El Documento Maestro lo lista como actor de la gestión de clientes; sin
     // este permiso no podía ni consultar la ficha del dueño de su paciente.
     const nombres = (permisos ?? []).map((rp: { permisos: { name: string } }) => rp.permisos.name);
     expect(nombres).toContain("manage_clients");
+    // Cargar una raza o un tipo de vacuna es tarea del trabajo diario, no de la
+    // configuración de la clínica: por eso `manage_catalogs` y no
+    // `manage_tenant_settings`.
+    expect(nombres).toContain("manage_catalogs");
   });
 
-  it("el rol recepcionista tiene exactamente 5 permisos", async () => {
+  it("el rol recepcionista tiene exactamente 6 permisos, incluido manage_catalogs", async () => {
     if (skipIfNoCredentials()) return;
     const { data: recepRol } = await serviceDb
       .from("roles")
@@ -595,7 +694,63 @@ describeIntegration("RLS-10: on_tenant_created — roles correctos", () => {
       .select("*", { count: "exact", head: true })
       .eq("rol_id", recepRol?.id ?? "");
 
-    expect(count).toBe(5);
+    expect(count).toBe(6);
+  });
+
+  // El catálogo clínico se aprovisiona junto con los roles y la configuración
+  // (20260827000001_catalogos_por_tenant.sql). Si esto falla, una clínica nueva
+  // nace sin ninguna especie y no puede registrar su primera mascota.
+  it("siembra el catálogo clínico del tenant (7 especies, 14 razas, 8 tipos de vacuna)", async () => {
+    if (skipIfNoCredentials()) return;
+
+    const contar = async (tabla: string) => {
+      const { count } = await serviceDb
+        .from(tabla)
+        .select("*", { count: "exact", head: true })
+        .eq("tenant_id", tenantAId);
+      return count;
+    };
+
+    expect(await contar("especies")).toBe(7);
+    expect(await contar("razas")).toBe(14);
+    expect(await contar("tipos_vacuna")).toBe(8);
+  });
+
+  /**
+   * El calendario sanitario tiene que venir armado, no solo la lista de vacunas.
+   * Sin la relación, una clínica nueva nace con ocho tipos de vacuna y CERO
+   * vacunas aplicables a cualquier mascota: el combo de programar dosis sale
+   * vacío desde el día uno y el bug se ve como "el sistema no tiene vacunas".
+   */
+  it("siembra la relación especie↔vacuna: la clínica nace con su calendario sanitario", async () => {
+    if (skipIfNoCredentials()) return;
+
+    const { count } = await serviceDb
+      .from("especie_tipo_vacuna")
+      .select("*", { count: "exact", head: true })
+      .eq("tenant_id", tenantAId);
+
+    expect(count).toBe(11);
+  });
+
+  it("la antirrábica del tenant nuevo aplica a perro y gato, y no a las aves", async () => {
+    if (skipIfNoCredentials()) return;
+
+    const { data } = await serviceDb
+      .from("especie_tipo_vacuna")
+      .select("especie:especies!especie_tipo_vacuna_especie_fkey(name), tipo:tipos_vacuna!especie_tipo_vacuna_tipo_fkey(nombre)")
+      .eq("tenant_id", tenantAId);
+
+    // El embed se pide por NOMBRE DE CONSTRAINT: las dos FKs son compuestas
+    // sobre (fk_id, tenant_id) y una pista por columna daría PGRST200.
+    const pares = ((data ?? []) as Array<{ especie: { name: string }; tipo: { nombre: string } }>)
+      .map((r) => `${r.tipo.nombre}→${r.especie.name}`);
+
+    expect(pares).toContain("Antirrábica→Perro");
+    expect(pares).toContain("Antirrábica→Gato");
+    expect(pares).not.toContain("Antirrábica→Ave");
+    expect(pares).toContain("Triple Felina→Gato");
+    expect(pares).not.toContain("Triple Felina→Perro");
   });
 });
 

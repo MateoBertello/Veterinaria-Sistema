@@ -108,6 +108,12 @@ describe("AuditoriaPage", () => {
     renderPage();
     await screen.findByText("Ana Pérez");
 
+    // La página arranca un debounce de búsqueda al montarse que, al vencer,
+    // hace `setPage(1)` incondicional. Si el click cae dentro de esa ventana, la
+    // paginación se deshace sola y el caso falla por timing en vez de por lo que
+    // mide. Bajo carga (suite completa) pasaba de verdad. Se lo deja vencer.
+    await new Promise((resolve) => setTimeout(resolve, 350));
+
     await userEvent.click(screen.getByRole("button", { name: /Siguiente/i }));
 
     await waitFor(() =>

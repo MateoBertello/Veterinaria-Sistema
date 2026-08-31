@@ -4,11 +4,15 @@ import * as React from "react";
 
 import { cn } from "./utils";
 
-function Table({ className, ...props }: React.ComponentProps<"table">) {
+function Table({
+  className,
+  containerClassName,
+  ...props
+}: React.ComponentProps<"table"> & { containerClassName?: string }) {
   return (
     <div
       data-slot="table-container"
-      className="relative w-full overflow-x-auto"
+      className={cn("relative w-full overflow-x-auto", containerClassName)}
     >
       <table
         data-slot="table"
@@ -16,6 +20,36 @@ function Table({ className, ...props }: React.ComponentProps<"table">) {
         {...props}
       />
     </div>
+  );
+}
+
+/**
+ * Contenedor de scroll para listados largos: altura máxima relativa al
+ * viewport con scroll interno (ambos ejes) y foco propio para que el scroll
+ * sea alcanzable por teclado (WCAG 2.1 AA). Pensado para envolver <Table> —
+ * pasale `containerClassName="overflow-visible"` a la Table interna para que
+ * el scroll horizontal lo controle este contenedor y no queden dos overflow-x
+ * anidados, y `sticky top-0 z-10` al <TableHeader> para fijar el encabezado.
+ *
+ * `aria-label` es obligatorio: el contenedor es un landmark (`role="region"`)
+ * y sin nombre accesible propio se anuncia sin decir de qué tabla se trata.
+ * Describí el contenido ("Listado de clientes"), no el mecanismo de scroll.
+ */
+function TableScrollContainer({
+  className,
+  ...props
+}: Omit<React.ComponentProps<"div">, "aria-label"> & { "aria-label": string }) {
+  return (
+    <div
+      data-slot="table-scroll-container"
+      tabIndex={0}
+      role="region"
+      className={cn(
+        "max-h-[65vh] overflow-auto rounded-lg border",
+        className,
+      )}
+      {...props}
+    />
   );
 }
 
@@ -106,6 +140,7 @@ function TableCaption({
 
 export {
   Table,
+  TableScrollContainer,
   TableHeader,
   TableBody,
   TableFooter,

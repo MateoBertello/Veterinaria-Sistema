@@ -14,6 +14,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import app from "../../supabase/functions/api/src/main.ts";
 import { SUPABASE_URL, SUPABASE_ANON_KEY, SERVICE_ROLE_KEY, describeIntegration } from "./_env.ts";
+import { crearUsuarioAuth, limpiarTenant, catalogoDelTenant } from "./_teardown.ts";
 
 function skipIfNoCredentials(): boolean {
   if (!SUPABASE_URL || !SERVICE_ROLE_KEY || !SUPABASE_ANON_KEY) {
@@ -23,12 +24,6 @@ function skipIfNoCredentials(): boolean {
   return false;
 }
 
-const adminHeaders = () => ({
-  "Content-Type":  "application/json",
-  "Authorization": `Bearer ${SERVICE_ROLE_KEY}`,
-  "apikey":        SERVICE_ROLE_KEY,
-});
-
 async function signIn(email: string, password: string): Promise<string> {
   const res = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=password`, {
     method:  "POST",
@@ -37,16 +32,6 @@ async function signIn(email: string, password: string): Promise<string> {
   });
   const data = await res.json() as { access_token?: string };
   return data.access_token ?? "";
-}
-
-async function createAuthUser(email: string, appMetadata: Record<string, unknown>): Promise<string> {
-  const res = await fetch(`${SUPABASE_URL}/auth/v1/admin/users`, {
-    method:  "POST",
-    headers: adminHeaders(),
-    body:    JSON.stringify({ email, password: "TestPass123!", email_confirm: true, app_metadata: appMetadata }),
-  });
-  const user = await res.json() as { id?: string };
-  return user.id ?? "";
 }
 
 async function callApp(path: string, opts: { method?: string; jwt?: string; body?: unknown } = {}) {
@@ -75,7 +60,7 @@ async function provisionTenant(serviceDb: SupabaseClient, sufijo: string) {
   await serviceDb.rpc("on_tenant_created", { p_tenant_id: tenantId });
 
   const email  = `admin-mascotas-${sufijo}@test.com`;
-  const userId = await createAuthUser(email, { tenant_id: tenantId });
+  const userId = await crearUsuarioAuth(email, { tenant_id: tenantId });
   const { data: rolAdmin } = await serviceDb
     .from("roles").select("id").eq("tenant_id", tenantId).eq("name", "admin").single();
   await serviceDb.from("usuarios").insert({
@@ -104,34 +89,20 @@ beforeAll(async () => {
 
   serviceDb = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, { auth: { persistSession: false } });
 
-  // Catálogos globales (sembrados en seed_global.sql).
-  const { data: especie } = await serviceDb.from("especies").select("id").limit(1).single();
-  especieId = especie?.id ?? "";
-  const { data: raza } = await serviceDb.from("razas").select("id").eq("especie_id", especieId).limit(1).single();
-  razaId = raza?.id ?? "";
-
   tenantA = await provisionTenant(serviceDb, "A");
   tenantB = await provisionTenant(serviceDb, "B");
+
+  // Catálogo clínico del tenant A. Dejó de ser global en
+  // 20260827000001_catalogos_por_tenant.sql: cada clínica nace con el suyo vía
+  // `on_tenant_created`, así que se pide DESPUÉS de crear el tenant y para el
+  // tenant correcto. Todas las altas de esta suite las hace A (incluida la del
+  // test de cliente cross-tenant, que usa el JWT de A contra un cliente de B).
+  ({ especieId, razaId } = await catalogoDelTenant(serviceDb, tenantA.tenantId));
 }, 60_000);
 
 afterAll(async () => {
   if (!serviceDb) return;
-  for (const tid of [tenantA.tenantId, tenantB.tenantId]) {
-    if (!tid) continue;
-    // ORDEN IMPORTANTE: primero el tenant, después las cuentas de Auth.
-    // Desde que `usuarios.id` referencia a `auth.users` con ON DELETE CASCADE
-    // (migración 20260725000005), borrar la cuenta arrastra la fila espejo — y
-    // eso lo frena cualquier FK que apunte al usuario, como
-    // `historial_clinico.professional_id`. Borrando primero el tenant, su
-    // cascade se lleva todo lo dependiente y la cuenta sale limpia. Al revés,
-    // el DELETE de Auth falla en silencio y deja cuentas huérfanas que hacen
-    // fallar la corrida SIGUIENTE (el email ya existe).
-    const { data: usuarios } = await serviceDb.from("usuarios").select("id").eq("tenant_id", tid);
-    await serviceDb.from("tenants").delete().eq("id", tid);
-    for (const u of (usuarios ?? []) as { id: string }[]) {
-      await fetch(`${SUPABASE_URL}/auth/v1/admin/users/${u.id}`, { method: "DELETE", headers: adminHeaders() });
-    }
-  }
+  for (const tid of [tenantA.tenantId, tenantB.tenantId]) await limpiarTenant(serviceDb, tid);
 });
 
 // ─── Alta y aislamiento ───────────────────────────────────────────────────────
@@ -342,20 +313,33 @@ describeIntegration("Marcar Mascota como Fallecida (RN-MF)", () => {
   });
 });
 
-// ─── Catálogos globales por PostgREST directo ──────────────────────────────────
+// ─── Catálogos por tenant, leídos por PostgREST directo ────────────────────────
 
-describeIntegration("Catálogos globales (PostgREST directo, sin endpoints Hono)", () => {
-  it("cualquier tenant autenticado lee especies y razas", async () => {
-    if (skipIfNoCredentials() || !tenantB.jwt) return;
+describeIntegration("Catálogos por tenant (PostgREST directo, sin endpoints Hono)", () => {
+  // La excepción del CLAUDE.md sigue en pie —el frontend lee estos catálogos por
+  // PostgREST directo, sin Controller ni Service— pero desde
+  // 20260827000001_catalogos_por_tenant.sql esa lectura está aislada por tenant
+  // vía RLS, en vez de abierta a cualquier autenticado.
+  it("cada tenant lee SU catálogo y no el del otro", async () => {
+    if (skipIfNoCredentials() || !tenantA.jwt || !tenantB.jwt) return;
 
-    const db = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+    const dbB = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
       global: { headers: { Authorization: `Bearer ${tenantB.jwt}` } },
       auth:   { persistSession: false },
     });
 
-    const { data: especies } = await db.from("especies").select("id, name");
-    const { data: razas }    = await db.from("razas").select("id, name").eq("especie_id", especieId);
-    expect((especies ?? []).length).toBeGreaterThan(0);
-    expect((razas ?? []).length).toBeGreaterThan(0);
+    // B ve un catálogo utilizable: el suyo, sembrado por on_tenant_created.
+    const { data: especiesB } = await dbB.from("especies").select("id, name, tenant_id");
+    const { data: razasB }    = await dbB.from("razas").select("id, name, tenant_id");
+    expect((especiesB ?? []).length).toBeGreaterThan(0);
+    expect((razasB ?? []).length).toBeGreaterThan(0);
+
+    // Y TODO lo que ve es suyo: ni una fila del catálogo de A.
+    expect((especiesB ?? []).every((e) => e.tenant_id === tenantB.tenantId)).toBe(true);
+    expect((razasB ?? []).every((r) => r.tenant_id === tenantB.tenantId)).toBe(true);
+
+    // Pedir explícitamente una especie de A por id no devuelve nada.
+    const { data: espDeA } = await dbB.from("especies").select("id").eq("id", especieId);
+    expect(espDeA ?? []).toHaveLength(0);
   });
 });

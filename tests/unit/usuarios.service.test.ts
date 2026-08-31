@@ -23,6 +23,7 @@ const CALLER_USER_ID  = "22222222-2222-2222-2222-222222222222";
 const NEW_USER_ID     = "33333333-3333-3333-3333-333333333333";
 const ADMIN_ROLE_ID   = "44444444-4444-4444-4444-444444444444";
 const VET_ROLE_ID     = "55555555-5555-5555-5555-555555555555";
+const RECEP_ROLE_ID   = "66666666-6666-6666-6666-666666666666";
 
 // ─── Helper para construir el mock de DB ──────────────────────────────────────
 
@@ -327,9 +328,14 @@ describe("RN-SEC6: Protección último admin activo", () => {
     });
     mockGetServiceDb.mockReturnValue(db as never);
 
+    // El objetivo es OTRO usuario, no quien ejecuta: desde RN-SEC8 nadie puede
+    // desactivarse a sí mismo, así que este guard sólo queda alcanzable cuando
+    // lo dispara un tercero (p. ej. un rol no-admin al que se le dio
+    // `manage_users`). Sigue siendo la red que impide dejar al tenant sin
+    // ningún administrador.
     await expect(
       UsuariosService.editar(
-        CALLER_USER_ID,
+        NEW_USER_ID,
         { active: false },
         callerContext,
       ),
@@ -363,6 +369,102 @@ describe("RN-SEC6: Protección último admin activo", () => {
       UsuariosService.editar(
         "other-admin-id",
         { active: false },
+        callerContext,
+      ),
+    ).resolves.not.toThrow();
+  });
+});
+
+// ─── RN-SEC8: nadie cambia sus propios campos de privilegio ───────────────────
+// LAST_ADMIN (RN-SEC6) protege al TENANT de quedarse sin administradores.
+// RN-SEC8 protege a QUIEN EJECUTA de una operación irreversible desde su propia
+// posición: sacarse el rol o el acceso y no poder devolvérselo.
+
+describe("RN-SEC8: auto-edición de campos de privilegio", () => {
+  const yoMismo = {
+    id:        CALLER_USER_ID,
+    tenant_id: TENANT_ID,
+    username:  "admin1",
+    email:     "admin@test.com",
+    full_name: "Admin Uno",
+    phone:     null,
+    active:    true,
+    rol_id:    ADMIN_ROLE_ID,
+  };
+
+  function dbConmigo() {
+    // adminCount alto a propósito: el tenant tiene admins de sobra, así que
+    // LAST_ADMIN no se dispara y lo que se prueba es exclusivamente RN-SEC8.
+    return buildMockDb({ usuarioExistente: yoMismo, adminCount: 5, rolName: "admin" });
+  }
+
+  it("RN-SEC8: cambiarse el propio rol → SELF_PRIVILEGE_CHANGE (409)", async () => {
+    const db = dbConmigo();
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    await expect(
+      UsuariosService.editar(CALLER_USER_ID, { roleId: VET_ROLE_ID }, callerContext),
+    ).rejects.toMatchObject({
+      code:       ErrorCode.SELF_PRIVILEGE_CHANGE,
+      statusCode: 409,
+    });
+
+    // Ni Auth ni la tabla se tocan: la validación corta antes de escribir.
+    expect(db.auth.admin.updateUserById as ReturnType<typeof vi.fn>).not.toHaveBeenCalled();
+    expect(mockRecordAudit).not.toHaveBeenCalled();
+  });
+
+  it("RN-SEC8: autodesactivarse → SELF_PRIVILEGE_CHANGE (409), aunque haya otros admins", async () => {
+    const db = dbConmigo();
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    await expect(
+      UsuariosService.editar(CALLER_USER_ID, { active: false }, callerContext),
+    ).rejects.toMatchObject({
+      code:       ErrorCode.SELF_PRIVILEGE_CHANGE,
+      statusCode: 409,
+    });
+
+    expect(mockRecordAudit).not.toHaveBeenCalled();
+  });
+
+  it("RN-SEC8: cambiar el rol de OTRO admin sigue permitido", async () => {
+    const otroAdmin = { ...yoMismo, id: NEW_USER_ID, username: "admin2", email: "admin2@test.com" };
+    // Rol destino sin perfil profesional asociado, para que el test no dependa
+    // del upsert de Doctor de RN-SEC5.
+    const db = buildMockDb({ usuarioExistente: otroAdmin, adminCount: 5, rolName: "recepcionista" });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    await expect(
+      UsuariosService.editar(NEW_USER_ID, { roleId: RECEP_ROLE_ID }, callerContext),
+    ).resolves.not.toThrow();
+  });
+
+  it("RN-SEC8: editar el propio nombre y teléfono sigue permitido (se bloquean campos, no la fila)", async () => {
+    const db = dbConmigo();
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    const usuario = await UsuariosService.editar(
+      CALLER_USER_ID,
+      { fullName: "Admin Uno Editado", phone: "+54 11 5555-5555" },
+      callerContext,
+    );
+
+    expect(usuario?.fullName).toBe("Admin Uno Editado");
+    expect(mockRecordAudit).toHaveBeenCalledOnce();
+  });
+
+  it("RN-SEC8: reenviar el MISMO rol y el MISMO estado no es un cambio de privilegio", async () => {
+    // El formulario de edición manda `roleId` siempre, cambie o no. Si la
+    // guarda mirara `!== undefined` en vez del valor actual, editarse el
+    // nombre desde la pantalla de usuarios quedaría bloqueado.
+    const db = dbConmigo();
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    await expect(
+      UsuariosService.editar(
+        CALLER_USER_ID,
+        { fullName: "Admin Uno", roleId: ADMIN_ROLE_ID, active: true },
         callerContext,
       ),
     ).resolves.not.toThrow();
@@ -634,6 +736,30 @@ describe("Desactivar un usuario lo desactiva TAMBIÉN en Supabase Auth", () => {
 });
 
 describe("El rol asignado tiene que ser del propio tenant", () => {
+  it("A3 — editar con un roleId de otra clínica → VALIDATION_ERROR y NO se escribe rol_id", async () => {
+    // `crear()` ya validaba que el rol fuera del tenant; `editar()` NO. El
+    // roleId viene del body, la FK de `usuarios.rol_id` apunta a `roles(id)` a
+    // secas y la consulta corre con service role (RLS bypasseada), así que el
+    // id de un rol de OTRA clínica se escribía sin chistar. Como los permisos
+    // se resuelven desde el rol, era un camino de escalada cross-tenant.
+    const db = buildMockDb({
+      usuarioExistente: {
+        id: NEW_USER_ID, tenant_id: TENANT_ID, username: "operador",
+        email: "op@test.com", full_name: "Operador", phone: null, active: true,
+        rol_id: ADMIN_ROLE_ID, created_at: "2026-01-01T00:00:00Z",
+      },
+      rolInexistente: true, // el rol no aparece filtrando por este tenant
+    });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    await expect(
+      UsuariosService.editar(NEW_USER_ID, { roleId: VET_ROLE_ID }, callerContext),
+    ).rejects.toMatchObject({ code: ErrorCode.VALIDATION_ERROR });
+
+    // Se valida ANTES de tocar Auth y antes del UPDATE: no queda un estado a medias.
+    expect(db.auth.admin.updateUserById).not.toHaveBeenCalled();
+  });
+
   it("roleId de otra clínica → VALIDATION_ERROR y NO se crea la cuenta en Auth", async () => {
     // La FK vieja apuntaba a `roles(id)` a secas: un rol ajeno entraba sin
     // error y dejaba un usuario que ni siquiera podía loguear.

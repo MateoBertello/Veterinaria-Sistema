@@ -15,6 +15,7 @@
 import { it, expect, beforeAll, afterAll } from "vitest";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { SUPABASE_URL, SERVICE_ROLE_KEY, describeIntegration } from "./_env.ts";
+import { limpiarTenant } from "./_teardown.ts";
 
 globalThis.WebSocket = class FakeWebSocket {} as never;
 
@@ -73,16 +74,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   if (!serviceDb || !tenantId) return;
-  // El ON DELETE CASCADE de tenants arrastra usuarios y doctores.
-  await serviceDb.from("tenants").delete().eq("id", tenantId);
-
-  // La cuenta de Auth vive fuera del tenant: se borra aparte.
-  if (usuarioId) {
-    await fetch(`${SUPABASE_URL}/auth/v1/admin/users/${usuarioId}`, {
-      method:  "DELETE",
-      headers: { "Authorization": `Bearer ${SERVICE_ROLE_KEY}`, "apikey": SERVICE_ROLE_KEY },
-    });
-  }
+  await limpiarTenant(serviceDb, tenantId);
 });
 
 describeIntegration("DT-1: UNIQUE(tenant_id, user_id) en doctores", () => {

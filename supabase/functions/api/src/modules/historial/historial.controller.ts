@@ -1,4 +1,5 @@
 import { Hono, type Context } from "hono";
+import { z } from "zod";
 import { HistorialService, type CallerContext } from "./historial.service.ts";
 import {
   ListarHistorialQuerySchema,
@@ -37,9 +38,26 @@ export const historialRouter = new Hono();
 historialRouter.use("/*", ...sharedMiddleware);
 
 historialRouter.get("/:id", async (c) => {
+  const idParsed = z.string().uuid().safeParse(c.req.param("id"));
+  if (!idParsed.success) {
+    throw new DomainError(ErrorCode.VALIDATION_ERROR, 422, "ID de evento clínico inválido");
+  }
+
   const { tenantId } = getTenantContext(c);
-  const evento = await HistorialService.obtenerEventoPorId(c.req.param("id"), tenantId);
+  const evento = await HistorialService.obtenerEventoPorId(idParsed.data, tenantId);
   return c.json(ok(evento), 200);
+});
+
+// GET /historial/:id/adjuntos-firmados — signed URLs de todos los adjuntos del
+// evento en una sola petición (vista previa inline; evita 1 request por adjunto).
+historialRouter.get("/:id/adjuntos-firmados", async (c) => {
+  const idParsed = z.string().uuid().safeParse(c.req.param("id"));
+  if (!idParsed.success) {
+    throw new DomainError(ErrorCode.VALIDATION_ERROR, 422, "ID de evento clínico inválido");
+  }
+
+  const firmados = await HistorialService.generarSignedUrlsAdjuntosEvento(idParsed.data, callerCtx(c));
+  return c.json(ok(firmados), 200);
 });
 
 // POST /historial/:id/adjuntos  (multipart/form-data, campo "file") — RN-EC4
