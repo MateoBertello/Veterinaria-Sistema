@@ -44,8 +44,8 @@ no arranque, esas cinco RN efectivamente no están en el alcance de ninguna tand
 
 | Estado al corte de la planificación | Cantidad |
 |---|:-:|
-| ✅ con test que pasa | 22 |
-| `PENDIENTE` | 63 |
+| ✅ con test que pasa | 24 |
+| `PENDIENTE` | 61 |
 | `N/A` — se activan en C7·T1 | 5 |
 
 ---
@@ -89,8 +89,8 @@ no arranque, esas cinco RN efectivamente no están en el alcance de ninguna tand
 | RN-MV8 | C2·T1 | ✅ | `tests/integration/stock.integration.test.ts` | `salida_venta` sin `venta_item_id` falla; `entrada_compra` con `venta_item_id` falla. |
 | RN-MV9 | C2·T4 | PENDIENTE | `tests/integration/compras.integration.test.ts` | La anulación genera movimientos nuevos y no borra los originales. |
 | RN-MV10 | C2·T5 | PENDIENTE | `tests/unit/stock-ledger-guardrail.test.ts` | Guardrail estático: ninguna ruta de aplicación escribe `existencias_lote`. |
-| RN-MV11 | C2·T2 | PENDIENTE | `tests/integration/stock.integration.test.ts` | Adulterar la caché con `service_role`, `verificar_existencias` lo reporta, `recalcular_existencias` la reconstruye. **Es el test que justifica la caché (D-02).** |
-| RN-MV12 | C2·T2 | PENDIENTE | `tests/integration/stock.integration.test.ts` | 200 movimientos variados, recalcular, comparar fila por fila: sin diferencias. |
+| RN-MV11 | C2·T2 | ✅ | `tests/integration/stock.integration.test.ts` | Adulterar la caché con `service_role`, `verificar_existencias` lo reporta, `recalcular_existencias` la reconstruye. **Es el test que justifica la caché (D-02).** |
+| RN-MV12 | C2·T2 | ✅ | `tests/integration/stock.integration.test.ts` | 200 movimientos variados, recalcular, comparar fila por fila: sin diferencias. |
 
 ## RN-LO — Lotes, vencimiento y FEFO (C2, C4)
 

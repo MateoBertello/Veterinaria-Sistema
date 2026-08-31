@@ -381,4 +381,305 @@ describeIntegration("C2·T1 — Libro mayor, lotes y existencias_lote (Base de d
     // 10 - 3 + 5 = 12
     expect(Number(ext?.cantidad)).toBe(12);
   });
+
+  it("RN-MV11: el desvío de la caché se detecta y se corrige", async () => {
+    const { data: l } = await serviceDb
+      .from("lotes")
+      .insert({
+        tenant_id: tenantAId,
+        producto_id: productoAId,
+        codigo_lote: `LOTE-MV11-${Date.now()}`,
+        costo_unitario_neto: 100,
+        costo_unitario_efectivo: 100,
+        origen: "compra",
+        usuario_id: usuarioAId,
+      })
+      .select("id")
+      .single();
+    const loteId = l!.id;
+
+    // 1. Tres movimientos: +10, -3, +5 = 12
+    await serviceDb.from("movimientos_stock").insert({
+      tenant_id: tenantAId,
+      operacion_id: crypto.randomUUID(),
+      tipo: "entrada_inicial",
+      producto_id: productoAId,
+      lote_id: loteId,
+      cantidad: 10,
+      usuario_id: usuarioAId,
+    });
+    await serviceDb.from("movimientos_stock").insert({
+      tenant_id: tenantAId,
+      operacion_id: crypto.randomUUID(),
+      tipo: "salida_venta",
+      venta_item_id: crypto.randomUUID(),
+      producto_id: productoAId,
+      lote_id: loteId,
+      cantidad: 3,
+      usuario_id: usuarioAId,
+    });
+    await serviceDb.from("movimientos_stock").insert({
+      tenant_id: tenantAId,
+      operacion_id: crypto.randomUUID(),
+      tipo: "entrada_inicial",
+      producto_id: productoAId,
+      lote_id: loteId,
+      cantidad: 5,
+      usuario_id: usuarioAId,
+    });
+
+    // verificar_existencias(tenantA) -> 0 filas
+    const { data: verif1, error: errV1 } = await serviceDb.rpc("verificar_existencias", {
+      p_tenant_id: tenantAId,
+    });
+    expect(errV1).toBeNull();
+    const desviosLote1 = (verif1 ?? []).filter((d: any) => d.lote_id === loteId);
+    expect(desviosLote1).toHaveLength(0);
+
+    // 2. Adulterar la caché a mano con service_role
+    await serviceDb.from("existencias_lote").update({ cantidad: 999 }).eq("lote_id", loteId);
+
+    // 3. verificar_existencias(tenantA) -> 1 fila con desvío
+    const { data: verif2, error: errV2 } = await serviceDb.rpc("verificar_existencias", {
+      p_tenant_id: tenantAId,
+    });
+    expect(errV2).toBeNull();
+    const desviosLote2 = (verif2 ?? []).filter((d: any) => d.lote_id === loteId);
+    expect(desviosLote2).toHaveLength(1);
+    expect(desviosLote2[0].lote_id).toBe(loteId);
+    expect(Number(desviosLote2[0].cantidad_cache)).toBe(999);
+    expect(Number(desviosLote2[0].cantidad_real)).toBe(12);
+    expect(Number(desviosLote2[0].diferencia)).toBe(987);
+
+    // 4. recalcular_existencias(tenantA)
+    const { error: errRecalc } = await serviceDb.rpc("recalcular_existencias", {
+      p_tenant_id: tenantAId,
+    });
+    expect(errRecalc).toBeNull();
+
+    // 5. verificar_existencias(tenantA) -> 0 filas
+    const { data: verif3, error: errV3 } = await serviceDb.rpc("verificar_existencias", {
+      p_tenant_id: tenantAId,
+    });
+    expect(errV3).toBeNull();
+    const desviosLote3 = (verif3 ?? []).filter((d: any) => d.lote_id === loteId);
+    expect(desviosLote3).toHaveLength(0);
+
+    const { data: extFinal } = await serviceDb
+      .from("existencias_lote")
+      .select("cantidad")
+      .eq("lote_id", loteId)
+      .single();
+    expect(Number(extFinal?.cantidad)).toBe(12);
+  });
+
+  it("RN-MV11: verificar_existencias no cruza tenants", async () => {
+    const fixtureB = await crearFixtureStock(serviceDb, "STOCKB_MV11");
+    try {
+      const { data: lB } = await serviceDb
+        .from("lotes")
+        .insert({
+          tenant_id: fixtureB.tenantId,
+          producto_id: fixtureB.productoId,
+          codigo_lote: `LOTE-B-${Date.now()}`,
+          costo_unitario_neto: 100,
+          costo_unitario_efectivo: 100,
+          origen: "compra",
+          usuario_id: fixtureB.usuarioId,
+        })
+        .select("id")
+        .single();
+      const loteBId = lB!.id;
+
+      await serviceDb.from("movimientos_stock").insert({
+        tenant_id: fixtureB.tenantId,
+        operacion_id: crypto.randomUUID(),
+        tipo: "entrada_inicial",
+        producto_id: fixtureB.productoId,
+        lote_id: loteBId,
+        cantidad: 10,
+        usuario_id: fixtureB.usuarioId,
+      });
+
+      // Adulterar B
+      await serviceDb.from("existencias_lote").update({ cantidad: 888 }).eq("lote_id", loteBId);
+
+      // verificar_existencias para tenantAId no debe ver el desvío de B
+      const { data: desviosA } = await serviceDb.rpc("verificar_existencias", {
+        p_tenant_id: tenantAId,
+      });
+      const desviosBEnA = (desviosA ?? []).filter((d: any) => d.lote_id === loteBId);
+      expect(desviosBEnA).toHaveLength(0);
+
+      // En cambio para fixtureB.tenantId sí aparece
+      const { data: desviosB } = await serviceDb.rpc("verificar_existencias", {
+        p_tenant_id: fixtureB.tenantId,
+      });
+      const desviosEnB = (desviosB ?? []).filter((d: any) => d.lote_id === loteBId);
+      expect(desviosEnB).toHaveLength(1);
+    } finally {
+      await serviceDb.from("movimientos_stock").delete().eq("tenant_id", fixtureB.tenantId);
+      await serviceDb.from("existencias_lote").delete().eq("tenant_id", fixtureB.tenantId);
+      await serviceDb.from("lotes").delete().eq("tenant_id", fixtureB.tenantId);
+      await serviceDb.from("productos").delete().eq("tenant_id", fixtureB.tenantId);
+      await serviceDb.from("usuarios").delete().eq("tenant_id", fixtureB.tenantId);
+      await serviceDb.from("tenants").delete().eq("id", fixtureB.tenantId);
+      await borrarUsuarioAuth(fixtureB.usuarioId);
+    }
+  });
+
+  it("RN-MV12: la caché es reconstruible", async () => {
+    // 2 productos en tenantAId
+    const { data: p1 } = await serviceDb.from("productos").insert({
+      tenant_id: tenantAId, codigo: `PROD-200-1-${Date.now()}`, nombre: "Prod 200 1", unidad_medida_id: unidadId,
+    }).select("id").single();
+    const { data: p2 } = await serviceDb.from("productos").insert({
+      tenant_id: tenantAId, codigo: `PROD-200-2-${Date.now()}`, nombre: "Prod 200 2", unidad_medida_id: unidadId,
+    }).select("id").single();
+
+    // 5 lotes: 3 en p1, 2 en p2
+    const lotesInfo: { id: string; productoId: string; stock: number }[] = [];
+    for (let i = 0; i < 5; i++) {
+      const prodId = i < 3 ? p1!.id : p2!.id;
+      const { data: l } = await serviceDb.from("lotes").insert({
+        tenant_id: tenantAId,
+        producto_id: prodId,
+        codigo_lote: `LOTE-200-${i}-${Date.now()}`,
+        costo_unitario_neto: 10 + i,
+        costo_unitario_efectivo: 10 + i,
+        origen: "compra",
+        usuario_id: usuarioAId,
+      }).select("id").single();
+      lotesInfo.push({ id: l!.id, productoId: prodId, stock: 0 });
+    }
+
+    // Inicializar cada lote con entrada de 100 (5 movimientos)
+    for (const item of lotesInfo) {
+      await serviceDb.from("movimientos_stock").insert({
+        tenant_id: tenantAId,
+        operacion_id: crypto.randomUUID(),
+        tipo: "entrada_inicial",
+        producto_id: item.productoId,
+        lote_id: item.id,
+        cantidad: 100,
+        usuario_id: usuarioAId,
+      });
+      item.stock = 100;
+    }
+
+    // 195 movimientos adicionales mezclando entradas y salidas
+    for (let i = 0; i < 195; i++) {
+      const lotIndex = i % lotesInfo.length;
+      const target = lotesInfo[lotIndex];
+      const isEntrada = i % 3 === 0 || target.stock < 20;
+
+      if (isEntrada) {
+        const cant = (i % 5) + 1;
+        await serviceDb.from("movimientos_stock").insert({
+          tenant_id: tenantAId,
+          operacion_id: crypto.randomUUID(),
+          tipo: "entrada_inicial",
+          producto_id: target.productoId,
+          lote_id: target.id,
+          cantidad: cant,
+          usuario_id: usuarioAId,
+        });
+        target.stock += cant;
+      } else {
+        const cant = (i % 3) + 1;
+        await serviceDb.from("movimientos_stock").insert({
+          tenant_id: tenantAId,
+          operacion_id: crypto.randomUUID(),
+          tipo: "salida_venta",
+          venta_item_id: crypto.randomUUID(),
+          producto_id: target.productoId,
+          lote_id: target.id,
+          cantidad: cant,
+          usuario_id: usuarioAId,
+        });
+        target.stock -= cant;
+      }
+    }
+
+    // Guardar estado actual de existencias_lote para estos 5 lotes
+    const loteIds = lotesInfo.map((l) => l.id);
+    const { data: extAntes } = await serviceDb
+      .from("existencias_lote")
+      .select("lote_id, producto_id, cantidad")
+      .in("lote_id", loteIds);
+
+    expect(extAntes).toHaveLength(5);
+    for (const row of extAntes ?? []) {
+      const target = lotesInfo.find((l) => l.id === row.lote_id);
+      expect(Number(row.cantidad)).toBe(target!.stock);
+    }
+
+    // Recalcular
+    const { data: rowsAffected, error: errRecalc } = await serviceDb.rpc("recalcular_existencias", {
+      p_tenant_id: tenantAId,
+    });
+    expect(errRecalc).toBeNull();
+    expect(Number(rowsAffected)).toBeGreaterThan(0);
+
+    // Comparar fila por fila
+    const { data: extDespues } = await serviceDb
+      .from("existencias_lote")
+      .select("lote_id, producto_id, cantidad")
+      .in("lote_id", loteIds);
+
+    expect(extDespues).toHaveLength(5);
+    for (const rowDespues of extDespues ?? []) {
+      const rowAntes = extAntes!.find((r) => r.lote_id === rowDespues.lote_id)!;
+      expect(Number(rowDespues.cantidad)).toBe(Number(rowAntes.cantidad));
+    }
+  });
+
+  it("RN-MV12: recalcular por producto no toca los demás", async () => {
+    // 2 productos: PX y PY
+    const { data: pX } = await serviceDb.from("productos").insert({
+      tenant_id: tenantAId, codigo: `PROD-REC-X-${Date.now()}`, nombre: "Prod Rec X", unidad_medida_id: unidadId,
+    }).select("id").single();
+    const { data: pY } = await serviceDb.from("productos").insert({
+      tenant_id: tenantAId, codigo: `PROD-REC-Y-${Date.now()}`, nombre: "Prod Rec Y", unidad_medida_id: unidadId,
+    }).select("id").single();
+
+    const { data: lX } = await serviceDb.from("lotes").insert({
+      tenant_id: tenantAId, producto_id: pX!.id, codigo_lote: `LOTE-REC-X-${Date.now()}`,
+      costo_unitario_neto: 50, costo_unitario_efectivo: 50, origen: "compra", usuario_id: usuarioAId,
+    }).select("id").single();
+
+    const { data: lY } = await serviceDb.from("lotes").insert({
+      tenant_id: tenantAId, producto_id: pY!.id, codigo_lote: `LOTE-REC-Y-${Date.now()}`,
+      costo_unitario_neto: 50, costo_unitario_efectivo: 50, origen: "compra", usuario_id: usuarioAId,
+    }).select("id").single();
+
+    // Movimientos reales: LX = 10, LY = 20
+    await serviceDb.from("movimientos_stock").insert({
+      tenant_id: tenantAId, operacion_id: crypto.randomUUID(), tipo: "entrada_inicial",
+      producto_id: pX!.id, lote_id: lX!.id, cantidad: 10, usuario_id: usuarioAId,
+    });
+    await serviceDb.from("movimientos_stock").insert({
+      tenant_id: tenantAId, operacion_id: crypto.randomUUID(), tipo: "entrada_inicial",
+      producto_id: pY!.id, lote_id: lY!.id, cantidad: 20, usuario_id: usuarioAId,
+    });
+
+    // Adulterar ambos
+    await serviceDb.from("existencias_lote").update({ cantidad: 999 }).eq("lote_id", lX!.id);
+    await serviceDb.from("existencias_lote").update({ cantidad: 888 }).eq("lote_id", lY!.id);
+
+    // Recalcular SOLO producto PX
+    const { error: errRecalc } = await serviceDb.rpc("recalcular_existencias", {
+      p_tenant_id: tenantAId,
+      p_producto_id: pX!.id,
+    });
+    expect(errRecalc).toBeNull();
+
+    // LX quedó corregido a 10
+    const { data: extX } = await serviceDb.from("existencias_lote").select("cantidad").eq("lote_id", lX!.id).single();
+    expect(Number(extX?.cantidad)).toBe(10);
+
+    // LY SIGUE adulterado a 888
+    const { data: extY } = await serviceDb.from("existencias_lote").select("cantidad").eq("lote_id", lY!.id).single();
+    expect(Number(extY?.cantidad)).toBe(888);
+  });
 });
