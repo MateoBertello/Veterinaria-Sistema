@@ -911,3 +911,98 @@ describeIntegration("RLS-N: Aislamiento de notificaciones (Etapa 6)", () => {
     expect(error).not.toBeNull();
   });
 });
+
+// ─── Módulo Comercial: Aislamiento por tenant (RN-SC4) ──────────────────────
+
+describeIntegration("RLS-Comercial: Catálogo comercial y proveedores aislados por tenant", () => {
+  let prodAId = "";
+  let famAId = "";
+  let provAId = "";
+  let convAId = "";
+
+  beforeAll(async () => {
+    if (skipIfNoCredentials() || !tenantAId || !tenantBId) return;
+
+    const { data: u } = await serviceDb.from("unidades_medida").select("id").eq("codigo", "unidad").single();
+    const unidadId = (u as { id: string })?.id;
+
+    // Sembrar familias, productos, conversiones y proveedores en tenant A
+    const { data: fam } = await serviceDb.from("familias_producto").insert({
+      tenant_id: tenantAId, nombre: `Fam RLS A ${Date.now()}`, unidad_base_id: unidadId,
+    }).select("id").single();
+    famAId = fam?.id ?? "";
+
+    const { data: prod1 } = await serviceDb.from("productos").insert({
+      tenant_id: tenantAId, codigo: `PROD-RLS-A1-${Date.now()}`, nombre: "Prod RLS A1",
+      unidad_medida_id: unidadId, familia_id: famAId,
+    }).select("id").single();
+    prodAId = prod1?.id ?? "";
+
+    const { data: prod2 } = await serviceDb.from("productos").insert({
+      tenant_id: tenantAId, codigo: `PROD-RLS-A2-${Date.now()}`, nombre: "Prod RLS A2",
+      unidad_medida_id: unidadId, familia_id: famAId,
+    }).select("id").single();
+
+    const { data: conv } = await serviceDb.from("producto_conversiones").insert({
+      tenant_id: tenantAId, producto_origen_id: prodAId, producto_destino_id: prod2?.id,
+      factor_teorico: 2,
+    }).select("id").single();
+    convAId = conv?.id ?? "";
+
+    const { data: prov } = await serviceDb.from("proveedores").insert({
+      tenant_id: tenantAId, razon_social: `Proveedor RLS A ${Date.now()}`,
+    }).select("id").single();
+    provAId = prov?.id ?? "";
+  });
+
+  it("RN-SC4: el usuario B no ve productos del tenant A", async () => {
+    if (skipIfNoCredentials()) return;
+    const db = userClient(jwtB);
+    const { data } = await db.from("productos").select("id, tenant_id").eq("id", prodAId);
+    expect(data ?? []).toHaveLength(0);
+  });
+
+  it("RN-SC4: el usuario B no ve familias, conversiones ni proveedores de A", async () => {
+    if (skipIfNoCredentials()) return;
+    const db = userClient(jwtB);
+
+    const { data: fams } = await db.from("familias_producto").select("id").eq("id", famAId);
+    expect(fams ?? []).toHaveLength(0);
+
+    const { data: convs } = await db.from("producto_conversiones").select("id").eq("id", convAId);
+    expect(convs ?? []).toHaveLength(0);
+
+    const { data: provs } = await db.from("proveedores").select("id").eq("id", provAId);
+    expect(provs ?? []).toHaveLength(0);
+  });
+
+  it("RN-SC4: el usuario A sí ve sus propios productos", async () => {
+    if (skipIfNoCredentials()) return;
+    const db = userClient(jwtA);
+    const { data, error } = await db.from("productos").select("id, tenant_id").eq("id", prodAId);
+    expect(error).toBeNull();
+    expect((data ?? []).length).toBe(1);
+    expect((data ?? [])[0].tenant_id).toBe(tenantAId);
+  });
+
+  it("RN-SC4: B no puede escribir el catálogo comercial por PostgREST", async () => {
+    if (skipIfNoCredentials()) return;
+    const db = userClient(jwtB);
+
+    const { data: u } = await serviceDb.from("unidades_medida").select("id").eq("codigo", "unidad").single();
+    const unidadId = (u as { id: string })?.id;
+
+    // Intento de INSERT directo con token de usuario
+    const { error: errInsert } = await db.from("productos").insert({
+      tenant_id: tenantBId,
+      codigo: `PROD-HACK-${Date.now()}`,
+      nombre: "Prod Postgrest Directo",
+      unidad_medida_id: unidadId,
+    });
+    expect(errInsert).not.toBeNull();
+
+    // Intento de UPDATE directo
+    const { error: errUpdate } = await db.from("productos").update({ nombre: "Nombre Hackeado" }).eq("id", prodAId);
+    expect(errUpdate).not.toBeNull();
+  });
+});

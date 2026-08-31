@@ -961,6 +961,95 @@ describeIntegration("Integridad cross-tenant en la BASE (FK compuestas, no solo 
 
     expect(error?.code).toBe("23503");
   });
+
+  // ── Módulo comercial: FK compuestas (RN-SC2) ───────────────────────────
+
+  it("RN-SC2: un producto de A no puede colgar de una familia de B", async () => {
+    if (skipIfNoCredentials() || !A?.tenantId || !B?.tenantId) return;
+
+    const { data: u } = await serviceDb.from("unidades_medida").select("id").eq("codigo", "unidad").single();
+    const unidadId = (u as { id: string })?.id;
+
+    // Familia en B
+    const { data: famB } = await serviceDb.from("familias_producto").insert({
+      tenant_id: B.tenantId, nombre: `Fam B ${Date.now()}`, unidad_base_id: unidadId,
+    }).select("id").single();
+
+    // Intentar insertar producto en A apuntando a la familia de B
+    const { error } = await serviceDb.from("productos").insert({
+      tenant_id: A.tenantId,
+      codigo: `PROD-CROSS-${Date.now()}`,
+      nombre: "Producto Cross A-B",
+      familia_id: famB?.id,
+      unidad_medida_id: unidadId,
+    });
+
+    expect(error, "la FK compuesta debió rechazar la familia de otro tenant").not.toBeNull();
+    expect(error?.code).toBe("23503");
+  });
+
+  it("RN-SC2: un proveedor de A no puede apuntar a un cliente de B", async () => {
+    if (skipIfNoCredentials() || !A?.tenantId || !B?.tenantId) return;
+
+    const { error } = await serviceDb.from("proveedores").insert({
+      tenant_id: A.tenantId,
+      razon_social: `Proveedor Cross ${Date.now()}`,
+      cliente_id: B.clienteId,
+    });
+
+    expect(error, "la FK compuesta debió rechazar el cliente de otro tenant").not.toBeNull();
+    expect(error?.code).toBe("23503");
+  });
+
+  it("RN-SC2: una conversión de A no puede referenciar un producto de B", async () => {
+    if (skipIfNoCredentials() || !A?.tenantId || !B?.tenantId) return;
+
+    const { data: u } = await serviceDb.from("unidades_medida").select("id").eq("codigo", "unidad").single();
+    const unidadId = (u as { id: string })?.id;
+
+    const { data: prodA } = await serviceDb.from("productos").insert({
+      tenant_id: A.tenantId, codigo: `CONV-ORIGEN-${Date.now()}`, nombre: "Prod Conv A", unidad_medida_id: unidadId,
+    }).select("id").single();
+
+    const { data: prodB } = await serviceDb.from("productos").insert({
+      tenant_id: B.tenantId, codigo: `CONV-DESTINO-${Date.now()}`, nombre: "Prod Conv B", unidad_medida_id: unidadId,
+    }).select("id").single();
+
+    const { error } = await serviceDb.from("producto_conversiones").insert({
+      tenant_id: A.tenantId,
+      producto_origen_id: prodA?.id,
+      producto_destino_id: prodB?.id,
+      factor_teorico: 10,
+    });
+
+    expect(error, "la FK compuesta debió rechazar el producto de otro tenant").not.toBeNull();
+    expect(error?.code).toBe("23503");
+  });
+
+  it("RN-SC2: tampoco poniéndole a la fila el tenant de la otra clínica", async () => {
+    if (skipIfNoCredentials() || !A?.tenantId || !B?.tenantId) return;
+
+    const { data: u } = await serviceDb.from("unidades_medida").select("id").eq("codigo", "unidad").single();
+    const unidadId = (u as { id: string })?.id;
+
+    const { data: prodA } = await serviceDb.from("productos").insert({
+      tenant_id: A.tenantId, codigo: `CONV-ORIGEN-2-${Date.now()}`, nombre: "Prod Conv A 2", unidad_medida_id: unidadId,
+    }).select("id").single();
+
+    const { data: prodB } = await serviceDb.from("productos").insert({
+      tenant_id: B.tenantId, codigo: `CONV-DESTINO-2-${Date.now()}`, nombre: "Prod Conv B 2", unidad_medida_id: unidadId,
+    }).select("id").single();
+
+    // Intentar mentir con tenant_id = B: producto_origen_id pertenece a A, por lo que la FK falla
+    const { error } = await serviceDb.from("producto_conversiones").insert({
+      tenant_id: B.tenantId,
+      producto_origen_id: prodA?.id,
+      producto_destino_id: prodB?.id,
+      factor_teorico: 10,
+    });
+
+    expect(error?.code).toBe("23503");
+  });
 });
 
 // ─── 6. UNA CLÍNICA NUEVA NACE UTILIZABLE ─────────────────────────────────────

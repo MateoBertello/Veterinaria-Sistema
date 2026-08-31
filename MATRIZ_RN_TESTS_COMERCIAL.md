@@ -44,8 +44,8 @@ no arranque, esas cinco RN efectivamente no están en el alcance de ninguna tand
 
 | Estado al corte de la planificación | Cantidad |
 |---|:-:|
-| ✅ con test que pasa | 1 |
-| `PENDIENTE` | 84 |
+| ✅ con test que pasa | 12 |
+| `PENDIENTE` | 73 |
 | `N/A` — se activan en C7·T1 | 5 |
 
 ---
@@ -54,24 +54,24 @@ no arranque, esas cinco RN efectivamente no están en el alcance de ninguna tand
 
 | RN | Tanda | Estado | Archivo previsto | Caso |
 |---|---|---|---|---|
-| RN-PR1 | C1·T3 | PENDIENTE | `tests/integration/catalogo-comercial.integration.test.ts` | Código duplicado en un tenant falla; el mismo código en dos tenants funciona. |
+| RN-PR1 | C1·T3 | ✅ | `tests/integration/catalogo-comercial.integration.test.ts` | Código duplicado en un tenant falla; el mismo código en dos tenants funciona. |
 | RN-PR2 | C1·T4 | PENDIENTE | `tests/unit/productos.service.test.ts`<br>`tests/integration/catalogo-comercial.integration.test.ts` | Borrar un producto con un movimiento falla por FK; la baja lógica funciona. |
 | RN-PR3 | C1·T4 | PENDIENTE | `tests/unit/productos.service.test.ts` | Producto inactivo rechazado en toda operación; su historial sigue consultable. |
-| RN-PR4 | C1·T3 | PENDIENTE | `tests/integration/catalogo-comercial.integration.test.ts` | Alta con alícuota 15,00 viola el CHECK. |
+| RN-PR4 | C1·T3 | ✅ | `tests/integration/catalogo-comercial.integration.test.ts` | Alta con alícuota 15,00 viola el CHECK. |
 | RN-PR5 | C1·T4 | PENDIENTE | `tests/unit/productos.service.test.ts` | Con un movimiento, el cambio de unidad falla; sin movimientos, se permite. |
-| RN-PR6 | C1·T3 | PENDIENTE | `tests/integration/catalogo-comercial.integration.test.ts` | `cantidad_valida_para_unidad()`: 1,5 comprimidos `false`; 1,5 kg `true`. Su aplicación en cada camino de escritura se reverifica en C2, C4, C5 y C6. |
-| RN-PR7 | C1·T3 | PENDIENTE | `tests/integration/catalogo-comercial.integration.test.ts` | Escala 4 falla; `admite_decimales=false` con escala 2 falla. |
-| RN-PR8 | C1·T3 | PENDIENTE | `tests/integration/catalogo-comercial.integration.test.ts` | Alta de familia sin `unidad_base_id` falla por NOT NULL. |
+| RN-PR6 | C1·T3 | ✅ | `tests/integration/catalogo-comercial.integration.test.ts` | `cantidad_valida_para_unidad()`: 1,5 comprimidos `false`; 1,5 kg `true`. Su aplicación en cada camino de escritura se reverifica en C2, C4, C5 y C6. |
+| RN-PR7 | C1·T3 | ✅ | `tests/integration/catalogo-comercial.integration.test.ts` | Escala 4 falla; `admite_decimales=false` con escala 2 falla. |
+| RN-PR8 | C1·T3 | ✅ | `tests/integration/catalogo-comercial.integration.test.ts` | Alta de familia sin `unidad_base_id` falla por NOT NULL. |
 | RN-PR9 | C1·T4 | PENDIENTE | `tests/unit/productos.service.test.ts` | Guard de producto sin `precio_venta`. Se reverifica en la venta real en C4·T2. |
 | RN-PR10 | C1·T4 | PENDIENTE | `tests/unit/productos.service.test.ts` | Guard de `es_vendible = false`. Se reverifica en C4·T2. |
-| RN-PR11 | C1·T3 | PENDIENTE | `tests/integration/catalogo-comercial.integration.test.ts` | Dos productos con el mismo código de barras falla; varios con `NULL` funciona. |
-| RN-PR12 | C1·T3 | PENDIENTE | `tests/integration/catalogo-comercial.integration.test.ts` | Dos productos activos con el mismo nombre falla → `PRODUCT_NAME_DUPLICATE` (resolución 0.4). |
+| RN-PR11 | C1·T3 | ✅ | `tests/integration/catalogo-comercial.integration.test.ts` | Dos productos con el mismo código de barras falla; varios con `NULL` funciona. |
+| RN-PR12 | C1·T3 | ✅ | `tests/integration/catalogo-comercial.integration.test.ts` | Dos productos activos con el mismo nombre falla → `PRODUCT_NAME_DUPLICATE` (resolución 0.4). |
 
 ## RN-PRV — Proveedores (C1)
 
 | RN | Tanda | Estado | Archivo previsto | Caso |
 |---|---|---|---|---|
-| RN-PRV1 | C1·T3 | PENDIENTE | `tests/integration/catalogo-comercial.integration.test.ts` | Razón social duplicada falla; mismo CUIT en otro tenant funciona. |
+| RN-PRV1 | C1·T3 | ✅ | `tests/integration/catalogo-comercial.integration.test.ts` | Razón social duplicada falla; mismo CUIT en otro tenant funciona. |
 | RN-PRV2 | C1·T5 | PENDIENTE | `tests/unit/proveedores.service.test.ts` | Desactivar y crear compra falla. Se reverifica en C2·T3. |
 | RN-PRV3 | C1·T5 | PENDIENTE | `tests/integration/compras.integration.test.ts` | Borrar un proveedor con una compra confirmada falla **por FK**. Se cierra en C2·T3. |
 
@@ -147,7 +147,7 @@ no arranque, esas cinco RN efectivamente no están en el alcance de ninguna tand
 | RN | Tanda | Estado | Archivo previsto | Caso |
 |---|---|---|---|---|
 | RN-FR1 | C6·T1 | PENDIENTE | `tests/integration/fraccionamiento.integration.test.ts` | Sin relación de conversión falla; con la relación desactivada, también. |
-| RN-FR2 | C1·T3 | PENDIENTE | `tests/integration/catalogo-comercial.integration.test.ts` | Con A→B y B→C cargadas, crear C→A falla por el trigger; A→A falla por CHECK. |
+| RN-FR2 | C1·T3 | ✅ | `tests/integration/catalogo-comercial.integration.test.ts` | Con A→B y B→C cargadas, crear C→A falla por el trigger; A→A falla por CHECK. |
 | RN-FR3 | C6·T1 | PENDIENTE | `tests/integration/fraccionamiento.integration.test.ts` | Provocar el fallo después de la salida: no queda el lote hijo ni el movimiento. |
 | RN-FR4 | C6·T1 + C6·T3 | PENDIENTE | `tests/integration/fraccionamiento.integration.test.ts` | Todo lote de origen `conversion` tiene padre; el CTE recursivo devuelve los tres niveles caja→blíster→comprimido. |
 | RN-FR5 | C6·T1 | PENDIENTE | `tests/integration/fraccionamiento.integration.test.ts` | Bolsa con factor 15 declarando 15,5 kg obtenidos falla. |
@@ -207,9 +207,9 @@ del fixture de volumen versionado:
 | RN | Tanda | Estado | Archivo previsto | Caso |
 |---|---|---|---|---|
 | RN-SC1 | C1·T5 | PENDIENTE | `tests/unit/tenant-filter-guardrail.test.ts` (**G1**)<br>`tests/integration/aislamiento-api.integration.test.ts` | Guardrail G1 con su assert de cobertura sobre los services del módulo + enviar `tenantId` en el body no cambia el tenant afectado. Se reverifica en cada etapa. |
-| RN-SC2 | C1·T3 + C2·T1 + C4·T1 | PENDIENTE | `tests/integration/aislamiento-api.integration.test.ts` | Insertar con `service_role` una fila cuyo `x_id` pertenece a otro tenant falla **por FK compuesta**, no por validación de aplicación. |
+| RN-SC2 | C1·T3 + C2·T1 + C4·T1 | ✅ | `tests/integration/aislamiento-api.integration.test.ts` | Insertar con `service_role` una fila cuyo `x_id` pertenece a otro tenant falla **por FK compuesta**, no por validación de aplicación. |
 | RN-SC3 | C1·T5 | PENDIENTE | `tests/integration/grants.integration.test.ts` (**G3**) | Bloque que **enumera** las funciones creadas por las migraciones del módulo y verifica `has_function_privilege('anon'\|'authenticated', …) = false` para todas. Una función nueva entra sola al alcance. |
-| RN-SC4 | C1·T3 | PENDIENTE | `tests/integration/rls.test.ts` | Con dos tenants sembrados, ninguna consulta de A devuelve filas de B en las tablas del módulo. **Bloqueante desde la primera etapa.** Se extiende en cada migración. |
+| RN-SC4 | C1·T3 | ✅ | `tests/integration/rls.test.ts` | Con dos tenants sembrados, ninguna consulta de A devuelve filas de B en las tablas del módulo. **Bloqueante desde la primera etapa.** Se extiende en cada migración. |
 | RN-SC5 | C1·T5 | PENDIENTE | `tests/unit/*.service.test.ts` de cada módulo | Por tipo de operación, verificar el asiento con su `module`; si la operación falla, no queda asiento huérfano. Se reverifica en cada etapa. |
 | RN-SC6 | C1·T1 | ✅ | `tests/unit/audit-modulo-enum.test.ts` (**G2**) | Todo `module:` de `recordAudit` existe en el ENUM `modulo_auditoria` **y** en el tipo `AuditModule`. La dirección TS es nueva y es la que hoy falta. |
 | RN-SC7 | C1·T5 | PENDIENTE | `tests/unit/*.controller.test.ts` de cada módulo | Matriz rol × endpoint con el 403 esperado; módulo no contratado → `MODULE_NOT_LICENSED`. Se reverifica en cada etapa. |
