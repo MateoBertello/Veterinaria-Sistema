@@ -564,7 +564,14 @@ describeIntegration("Aislamiento por API — ESCRITURA: B no modifica entidades 
     // `usuarios.rol_id` referencia `roles(id)` a secas — sin el tenant en la FK,
     // el id de un rol ajeno entraba sin error. Como los permisos se resuelven
     // desde el rol, era un camino de escalada. Ver A3 en usuarios.service.ts.
-    const res = await callApp(`/usuarios/${B.userId}`, {
+    const emailAux = `aux-b-${Date.now()}@test.com`;
+    const userAuxId = await createAuthUser(emailAux, { tenant_id: B.tenantId });
+    await serviceDb.from("usuarios").insert({
+      id: userAuxId, tenant_id: B.tenantId, username: `aux_b_${Date.now()}`,
+      email: emailAux, full_name: "Aux B", rol_id: B.rolVetId, active: true,
+    });
+
+    const res = await callApp(`/usuarios/${userAuxId}`, {
       method: "PUT", jwt: B.jwt, body: { roleId: A.rolVetId },
     });
     const body = await res.json() as { error?: { code?: string } };
@@ -573,8 +580,8 @@ describeIntegration("Aislamiento por API — ESCRITURA: B no modifica entidades 
     expect(body.error?.code).toBe("VALIDATION_ERROR");
 
     const { data: usuario } = await serviceDb
-      .from("usuarios").select("rol_id").eq("id", B.userId).single();
-    expect((usuario as { rol_id: string }).rol_id).toBe(B.rolAdminId);
+      .from("usuarios").select("rol_id").eq("id", userAuxId).single();
+    expect((usuario as { rol_id: string }).rol_id).toBe(B.rolVetId);
   });
 });
 
@@ -612,8 +619,28 @@ describeIntegration("A3 — consultas con service role que no filtraban por tena
     // tabla POR TENANT (UNIQUE (tenant_id, name)), el nombre podía venir de otra
     // clínica y decidir mal si aplicaba la protección del último admin.
     // A tiene un solo admin activo: desactivarlo tiene que dar LAST_ADMIN.
+    // Usamos otro usuario con manage_users para que no lo intercepte RN-SEC8 (auto-desactivación).
+    const emailVet = `vet-admin-test-${Date.now()}@test.com`;
+    const userVetId = await createAuthUser(emailVet, { tenant_id: A.tenantId });
+    await serviceDb.from("usuarios").insert({
+      id: userVetId, tenant_id: A.tenantId, username: `vet_${Date.now()}`,
+      email: emailVet, full_name: "Vet Test", rol_id: A.rolVetId, active: true,
+    });
+    const { data: permManageUsers } = await serviceDb
+      .from("permisos").select("id").eq("name", "manage_users").single();
+    if (permManageUsers) {
+      try {
+        await serviceDb.from("rol_permiso").insert({
+          rol_id: A.rolVetId, permiso_id: (permManageUsers as { id: string }).id,
+        });
+      } catch {
+        // ignore duplicate
+      }
+    }
+    const jwtVet = await signIn(emailVet, "TestPass123!");
+
     const res = await callApp(`/usuarios/${A.userId}`, {
-      method: "PUT", jwt: A.jwt, body: { active: false },
+      method: "PUT", jwt: jwtVet, body: { active: false },
     });
     const body = await res.json() as { error?: { code?: string } };
 

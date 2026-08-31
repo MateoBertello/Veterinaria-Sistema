@@ -94,6 +94,28 @@ export function usosDeModulo(relPath: string, source: string): UsoModulo[] {
   return usos;
 }
 
+// ─── Fuente 3: el tipo TypeScript AuditModule ────────────────────────────────
+
+/**
+ * Parsea los literales de la unión `export type AuditModule = ...;` en shared/audit.ts.
+ * Ignora literales dentro de comentarios de línea (`//`).
+ */
+export function modulosDesdeTipoAuditModule(source: string): Set<string> {
+  const valores = new Set<string>();
+  const match = source.match(/export\s+type\s+AuditModule\s*=([\s\S]*?);/);
+  if (!match?.[1]) return valores;
+
+  const lineas = match[1].split("\n");
+  for (const linea of lineas) {
+    const sinComentario = linea.replace(/\/\/[^\n]*/, "");
+    for (const m of sinComentario.matchAll(/"([^"]+)"/g)) {
+      valores.add(m[1]!);
+    }
+  }
+
+  return valores;
+}
+
 // ─── Recolección ─────────────────────────────────────────────────────────────
 
 function archivosDeCodigo(): Array<{ relPath: string; content: string }> {
@@ -162,6 +184,34 @@ describe("BLOQUEANTE: todo module: de recordAudit existe en el enum modulo_audit
   });
 });
 
+describe("BLOQUEANTE: todo valor de AuditModule existe en el enum modulo_auditoria", () => {
+  const enEnum = enumModulosDesdeMigraciones(migraciones());
+  const enTipo = modulosDesdeTipoAuditModule(
+    readFileSync(join(SHARED_DIR, "audit.ts"), "utf-8"),
+  );
+
+  it("el tipo se parsea y trae los módulos conocidos", () => {
+    // Si esto falla, el parser dejó de entender el tipo y el chequeo de abajo
+    // estaría dando verde por leer un conjunto vacío.
+    expect(enTipo.size).toBeGreaterThan(10);
+    expect(enTipo).toContain("medical_records");
+    expect(enTipo).toContain("catalogs");
+  });
+
+  it("RN-SC6: ningún valor del tipo AuditModule falta en el enum de la base", () => {
+    const faltantes = [...enTipo].filter((m) => !enEnum.has(m));
+    expect(
+      faltantes,
+      faltantes.length === 0 ? "" :
+        `${faltantes.length} valor(es) del tipo AuditModule que la base va a rechazar: ` +
+        `${faltantes.join(", ")}\n\n` +
+        "recordAudit es best-effort: esto NO rompe la operación, el asiento simplemente " +
+        "no queda. Agregá el valor con ALTER TYPE modulo_auditoria ADD VALUE en una " +
+        "migración nueva.",
+    ).toEqual([]);
+  });
+});
+
 // ─── Autoverificación por mutación ───────────────────────────────────────────
 
 describe("motor del guardrail — se pone rojo cuando debe", () => {
@@ -206,5 +256,23 @@ describe("motor del guardrail — se pone rojo cuando debe", () => {
     const usos = usosDeModulo("catalogos.service.ts", 'module:   "catalogs",');
 
     expect(usos.filter((u) => !permitidos.has(u.module))).toHaveLength(1);
+  });
+
+  it("parsea los literales de la unión de tipos", () => {
+    const s = 'export type AuditModule =\n  | "clients" | "pets"\n  | "inventory";';
+    expect([...modulosDesdeTipoAuditModule(s)].sort()).toEqual(["clients", "inventory", "pets"]);
+  });
+
+  it("ignora un literal que está en un comentario", () => {
+    const s = 'export type AuditModule =\n  // | "fantasma"\n  | "clients";';
+    expect(modulosDesdeTipoAuditModule(s).has("fantasma")).toBe(false);
+  });
+
+  it("MUTACIÓN — un valor del tipo que no está en el enum se detecta", () => {
+    const enEnum = enumModulosDesdeMigraciones([
+      { name: "a.sql", content: "CREATE TYPE modulo_auditoria AS ENUM ('clients');" },
+    ]);
+    const enTipo = modulosDesdeTipoAuditModule('export type AuditModule = | "clients" | "inventory";');
+    expect([...enTipo].filter((m) => !enEnum.has(m))).toEqual(["inventory"]);
   });
 });
