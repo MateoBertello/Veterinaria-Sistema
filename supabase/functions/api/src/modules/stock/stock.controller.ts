@@ -48,6 +48,13 @@ lotesRouter.get("/:id/kardex", async (c) => {
   return c.json(ok(result.data, result.meta));
 });
 
+lotesRouter.get("/:id/trazabilidad", async (c) => {
+  const id = c.req.param("id");
+  const { tenantId } = getTenantContext(c);
+  const data = await StockService.cadenaTrazabilidad(id, tenantId);
+  return c.json(ok(data));
+});
+
 lotesRouter.get("/:id", async (c) => {
   const id = c.req.param("id");
   const { tenantId } = getTenantContext(c);

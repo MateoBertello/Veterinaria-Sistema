@@ -82,10 +82,23 @@ export const ListarConversionesQuerySchema = z.object({
   limit:            z.coerce.number().int().min(1).max(100).default(20),
 });
 
+export const CrearDerivadoSchema = z.object({
+  codigo:                   z.string().trim().min(1).max(50),
+  nombre:                   z.string().trim().min(3).max(150),
+  unidadMedidaId:           z.string().uuid(),
+  factorTeorico:            z.number().positive(),
+  mermaEsperadaPorcentaje:  z.number().min(0).max(100).default(0),
+  precioVenta:              z.number().nonnegative().nullish(),
+  vidaUtilPostAperturaDias: z.number().int().min(1).max(3650).nullish(),
+  stockMinimo:              z.number().nonnegative().nullish(),
+  descripcion:              z.string().max(500).nullish(),
+});
+
 export type CrearProductoDto = z.infer<typeof CrearProductoSchema>;
 export type ActualizarProductoDto = z.infer<typeof ActualizarProductoSchema>;
 export type CambiarEstadoProductoDto = z.infer<typeof CambiarEstadoProductoSchema>;
 export type ListarProductosQuery = z.infer<typeof ListarProductosQuerySchema>;
+export type CrearDerivadoDto = z.infer<typeof CrearDerivadoSchema>;
 
 export type CrearFamiliaDto = z.infer<typeof CrearFamiliaSchema>;
 export type ActualizarFamiliaDto = z.infer<typeof ActualizarFamiliaSchema>;
@@ -94,3 +107,4 @@ export type ListarFamiliasQuery = z.infer<typeof ListarFamiliasQuerySchema>;
 export type CrearConversionDto = z.infer<typeof CrearConversionSchema>;
 export type ActualizarConversionDto = z.infer<typeof ActualizarConversionSchema>;
 export type ListarConversionesQuery = z.infer<typeof ListarConversionesQuerySchema>;
+

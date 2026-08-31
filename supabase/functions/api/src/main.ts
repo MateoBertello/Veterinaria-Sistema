@@ -57,6 +57,7 @@ import {
   recuentosRouter,
   devolucionesRouter,
 } from "./modules/ajustes/ajustes.controller.ts";
+import { fraccionamientoRouter } from "./modules/fraccionamiento/fraccionamiento.controller.ts";
 
 const app = new Hono().basePath("/api/v1");
 
@@ -132,6 +133,9 @@ app.route("/ajustes", ajustesRouter);
 app.route("/lotes", lotesAjustesRouter); // aditivo: /:id/bloquear y /:id/desbloquear
 app.route("/recuentos", recuentosRouter);
 app.route("/devoluciones", devolucionesRouter);
+
+// ─── Fraccionamiento (módulo stock — Etapa C6) ─────────────────────────────────
+app.route("/fraccionamiento", fraccionamientoRouter);
 
 // ─── Doctores + Horarios de Atención (Transversal — Etapa 4) ───────────────────
 // Doctores: ABM (listar/editar) bajo manage_users.

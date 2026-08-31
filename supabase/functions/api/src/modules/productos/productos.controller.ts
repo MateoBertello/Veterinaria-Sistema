@@ -10,6 +10,7 @@ import {
   ActualizarProductoSchema,
   CambiarEstadoProductoSchema,
   ListarProductosQuerySchema,
+  CrearDerivadoSchema,
   CrearFamiliaSchema,
   ActualizarFamiliaSchema,
   ListarFamiliasQuerySchema,
@@ -83,6 +84,26 @@ productosRouter.post("/", manageProducts, async (c) => {
 
   const producto = await ProductoService.crear(parsed.data, callerCtx(c));
   return c.json(ok(producto), 201);
+});
+
+productosRouter.post("/:id/derivado", manageProducts, async (c) => {
+  const body = await c.req.json().catch(() => ({}));
+  const parsed = CrearDerivadoSchema.safeParse(body);
+  if (!parsed.success) {
+    throw new DomainError(
+      ErrorCode.VALIDATION_ERROR,
+      422,
+      "Datos de derivado inválidos",
+      parsed.error.issues,
+    );
+  }
+
+  const resultado = await ProductoService.crearDerivado(
+    c.req.param("id")!,
+    parsed.data,
+    callerCtx(c),
+  );
+  return c.json(ok(resultado), 201);
 });
 
 productosRouter.put("/:id", manageProducts, async (c) => {

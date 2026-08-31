@@ -334,4 +334,155 @@ describe("ProductoService & Guards", () => {
     await expect(ProductoService.crear(dtoValido, ctx)).rejects.toThrow();
     expect(mockRecordAudit).not.toHaveBeenCalled();
   });
+
+  describe("C6·T2: ProductoService.crearDerivado (Plantilla y Conversión)", () => {
+    it("hereda atributos del padre y crea producto + conversión", async () => {
+      const padreDb = {
+        id: PROD_ID,
+        tenant_id: TENANT_ID,
+        codigo: "PADRE-1",
+        nombre: "Bolsa 15kg",
+        descripcion: "Alimento balanceado",
+        familia_id: "ffffffff-ffff-4fff-8fff-ffffffffffff",
+        unidad_medida_id: UNIDAD_ID_1,
+        marca: "Premium Dog",
+        alicuota_iva: 21,
+        condicion_venta: "libre",
+        controla_lote: true,
+        controla_vencimiento: true,
+        vida_util_post_apertura_dias: 60,
+        precio_venta: 45000,
+        es_vendible: true,
+        es_consumible_clinico: false,
+        requiere_frio: false,
+        trazable: false,
+        activo: true,
+      };
+
+      const hijoDb = {
+        id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+        tenant_id: TENANT_ID,
+        codigo: "HIJO-1",
+        nombre: "Suelto por kg",
+        descripcion: "Alimento balanceado",
+        familia_id: "ffffffff-ffff-4fff-8fff-ffffffffffff",
+        unidad_medida_id: UNIDAD_ID_2,
+        marca: "Premium Dog",
+        alicuota_iva: 21,
+        condicion_venta: "libre",
+        controla_lote: true,
+        controla_vencimiento: true,
+        vida_util_post_apertura_dias: 30, // sobreescrito en el DTO
+        precio_venta: 3500,
+        costo_reposicion: null,
+        margen_objetivo: null,
+        stock_minimo: 10,
+        es_vendible: true,
+        es_consumible_clinico: false,
+        requiere_frio: false,
+        trazable: false,
+        activo: true,
+        created_at: "2026-10-06T00:00:00Z",
+        updated_at: "2026-10-06T00:00:00Z",
+      };
+
+      const convDb = {
+        id: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+        tenant_id: TENANT_ID,
+        producto_origen_id: PROD_ID,
+        producto_destino_id: hijoDb.id,
+        factor_teorico: 15,
+        merma_esperada_porcentaje: 5,
+        activo: true,
+        created_at: "2026-10-06T00:00:00Z",
+      };
+
+      let callCount = 0;
+      const db = buildDbChain();
+      db["maybeSingle"] = vi.fn().mockImplementation(() => {
+        callCount++;
+        if (callCount === 1) return Promise.resolve({ data: padreDb, error: null }); // get padre
+        if (callCount === 2) return Promise.resolve({ data: null, error: null }); // check codigo hijo
+        if (callCount === 3) return Promise.resolve({ data: null, error: null }); // check nombre hijo
+        return Promise.resolve({ data: null, error: null });
+      });
+
+      let insertCount = 0;
+      db["single"] = vi.fn().mockImplementation(() => {
+        insertCount++;
+        if (insertCount === 1) return Promise.resolve({ data: hijoDb, error: null }); // insert producto hijo
+        if (insertCount === 2) return Promise.resolve({ data: convDb, error: null }); // insert conversion
+        return Promise.resolve({ data: null, error: null });
+      });
+
+      mockGetServiceDb.mockReturnValue(db as never);
+
+      const dtoDerivado = {
+        codigo: "HIJO-1",
+        nombre: "Suelto por kg",
+        unidadMedidaId: UNIDAD_ID_2,
+        factorTeorico: 15,
+        mermaEsperadaPorcentaje: 5,
+        precioVenta: 3500,
+        vidaUtilPostAperturaDias: 30,
+        stockMinimo: 10,
+      };
+
+      const resultado = await ProductoService.crearDerivado(PROD_ID, dtoDerivado, ctx);
+
+      expect(resultado.producto.id).toBe(hijoDb.id);
+      expect(resultado.producto.familiaId).toBe(padreDb.familia_id);
+      expect(resultado.producto.marca).toBe(padreDb.marca);
+      expect(resultado.producto.alicuotaIva).toBe(21);
+      expect(resultado.producto.costoReposicion).toBeNull();
+      expect(resultado.producto.precioVenta).toBe(3500);
+      expect(resultado.producto.vidaUtilPostAperturaDias).toBe(30);
+
+      expect(resultado.conversion.id).toBe(convDb.id);
+      expect(resultado.conversion.factorTeorico).toBe(15);
+      expect(resultado.conversion.mermaEsperadaPorcentaje).toBe(5);
+    });
+
+    it("falla si el producto padre no existe -> PRODUCT_NOT_FOUND (404)", async () => {
+      const db = buildDbChain({ maybeSingleData: null });
+      mockGetServiceDb.mockReturnValue(db as never);
+
+      await expect(
+        ProductoService.crearDerivado("00000000-0000-0000-0000-000000000000", {
+          codigo: "HIJO-1",
+          nombre: "Derivado",
+          unidadMedidaId: UNIDAD_ID_2,
+          factorTeorico: 10,
+          mermaEsperadaPorcentaje: 0,
+        }, ctx),
+      ).rejects.toMatchObject({
+        code: ErrorCode.PRODUCT_NOT_FOUND,
+        statusCode: 404,
+      });
+    });
+
+    it("falla si el producto padre está inactivo -> PRODUCT_INACTIVE (422)", async () => {
+      const padreInactivo = {
+        id: PROD_ID,
+        tenant_id: TENANT_ID,
+        activo: false,
+      };
+      const db = buildDbChain({ maybeSingleData: padreInactivo });
+      mockGetServiceDb.mockReturnValue(db as never);
+
+      await expect(
+        ProductoService.crearDerivado(PROD_ID, {
+          codigo: "HIJO-1",
+          nombre: "Derivado",
+          unidadMedidaId: UNIDAD_ID_2,
+          factorTeorico: 10,
+          mermaEsperadaPorcentaje: 0,
+        }, ctx),
+      ).rejects.toMatchObject({
+        code: ErrorCode.PRODUCT_INACTIVE,
+        statusCode: 422,
+      });
+    });
+  });
 });
+

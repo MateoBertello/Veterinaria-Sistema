@@ -6,6 +6,7 @@ import type {
   CrearProductoDto,
   ActualizarProductoDto,
   ListarProductosQuery,
+  CrearDerivadoDto,
   CrearFamiliaDto,
   ActualizarFamiliaDto,
   ListarFamiliasQuery,
@@ -265,6 +266,67 @@ export const ProductoService = {
     });
 
     return toProductoPublic(data as Record<string, unknown>);
+  },
+
+  async crearDerivado(
+    padreId: string,
+    dto: CrearDerivadoDto,
+    ctx: Context,
+  ): Promise<{ producto: ProductoPublico; conversion: ConversionPublica }> {
+    const db = getServiceDb();
+
+    // 1. Obtener producto padre
+    const { data: padre, error: errPadre } = await db
+      .from("productos")
+      .select("*")
+      .eq("id", padreId)
+      .eq("tenant_id", ctx.tenantId)
+      .maybeSingle();
+
+    if (errPadre || !padre) {
+      throw new DomainError(ErrorCode.PRODUCT_NOT_FOUND, 404, "Producto padre no encontrado");
+    }
+    if (!padre.activo) {
+      throw new DomainError(ErrorCode.PRODUCT_INACTIVE, 422, "El producto padre está inactivo");
+    }
+
+    // 2. Crear producto derivado heredando atributos del padre (D-06.e)
+    const productoHijoPayload: CrearProductoDto = {
+      codigo:                   dto.codigo,
+      nombre:                   dto.nombre,
+      descripcion:              dto.descripcion ?? padre.descripcion,
+      familiaId:                padre.familia_id,
+      unidadMedidaId:           dto.unidadMedidaId,
+      marca:                    padre.marca,
+      alicuotaIva:              Number(padre.alicuota_iva),
+      condicionVenta:           padre.condicion_venta,
+      controlaLote:             padre.controla_lote,
+      controlaVencimiento:      padre.controla_vencimiento,
+      vidaUtilPostAperturaDias: dto.vidaUtilPostAperturaDias ?? padre.vida_util_post_apertura_dias,
+      precioVenta:              dto.precioVenta ?? null,
+      costoReposicion:          null,
+      margenObjetivo:           null,
+      stockMinimo:              dto.stockMinimo ?? null,
+      esVendible:               padre.es_vendible,
+      esConsumibleClinico:      padre.es_consumible_clinico,
+      requiereFrio:             padre.requiere_frio,
+      trazable:                 padre.trazable,
+    };
+
+    const productoHijo = await ProductoService.crear(productoHijoPayload, ctx);
+
+    // 3. Crear conversión padre -> hijo
+    const conversion = await ConversionService.crear(
+      {
+        productoOrigenId:        padreId,
+        productoDestinoId:       productoHijo.id,
+        factorTeorico:           dto.factorTeorico,
+        mermaEsperadaPorcentaje: dto.mermaEsperadaPorcentaje,
+      },
+      ctx,
+    );
+
+    return { producto: productoHijo, conversion };
   },
 
   async obtenerPorId(id: string, ctx: Context): Promise<ProductoPublico> {

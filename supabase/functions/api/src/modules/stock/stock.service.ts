@@ -433,6 +433,32 @@ export class StockService {
 
     return insertadas?.length ?? 0;
   }
+
+  /**
+   * RN-FR4: Cadena de trazabilidad recursiva ascendente y descendente del lote.
+   */
+  static async cadenaTrazabilidad(loteId: string, tenantId: string) {
+    const db = getServiceDb();
+    const { data, error } = await db.rpc("cadena_trazabilidad_lote", {
+      p_tenant_id: tenantId,
+      p_lote_id: loteId,
+    });
+
+    if (error) {
+      throw new DomainError(ErrorCode.INTERNAL_ERROR, 500, error.message);
+    }
+
+    return (data ?? []).map((row: any) => ({
+      loteId:                row.lote_id,
+      productoId:            row.producto_id,
+      productoNombre:        row.producto_nombre,
+      codigoLote:            row.codigo_lote,
+      fechaVencimiento:      row.fecha_vencimiento,
+      costoUnitarioEfectivo: Number(row.costo_unitario_efectivo),
+      nivel:                 row.nivel,
+      direccion:             row.direccion,
+    }));
+  }
 }
 
 // TODO C4·T2: alerta de stock mínimo. Es por FLANCO, no por nivel: se crea al

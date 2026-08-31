@@ -42,10 +42,10 @@ no arranque, esas cinco RN efectivamente no están en el alcance de ninguna tand
 | RN-SC — Seguridad, permisos, auditoría y concurrencia | 8 | C1, C4 | 8 |
 | **Total** | **90** | | **90** |
 
-| Estado al corte de la planificación | Cantidad |
+| Estado al corte de la etapa C6 | Cantidad |
 |---|:-:|
-| ✅ con test que pasa | 65 |
-| `PENDIENTE` | 20 |
+| ✅ con test que pasa | 85 |
+| `PENDIENTE` | 0 |
 | `N/A` — se activan en C7·T1 | 5 |
 
 ---
@@ -146,19 +146,19 @@ no arranque, esas cinco RN efectivamente no están en el alcance de ninguna tand
 
 | RN | Tanda | Estado | Archivo previsto | Caso |
 |---|---|---|---|---|
-| RN-FR1 | C6·T1 | PENDIENTE | `tests/integration/fraccionamiento.integration.test.ts` | Sin relación de conversión falla; con la relación desactivada, también. |
+| RN-FR1 | C6·T1 | ✅ | `tests/integration/fraccionamiento.integration.test.ts` | Sin relación de conversión falla; con la relación desactivada, también. |
 | RN-FR2 | C1·T3 | ✅ | `tests/integration/catalogo-comercial.integration.test.ts` | Con A→B y B→C cargadas, crear C→A falla por el trigger; A→A falla por CHECK. |
-| RN-FR3 | C6·T1 | PENDIENTE | `tests/integration/fraccionamiento.integration.test.ts` | Provocar el fallo después de la salida: no queda el lote hijo ni el movimiento. |
-| RN-FR4 | C6·T1 + C6·T3 | PENDIENTE | `tests/integration/fraccionamiento.integration.test.ts` | Todo lote de origen `conversion` tiene padre; el CTE recursivo devuelve los tres niveles caja→blíster→comprimido. |
-| RN-FR5 | C6·T1 | PENDIENTE | `tests/integration/fraccionamiento.integration.test.ts` | Bolsa con factor 15 declarando 15,5 kg obtenidos falla. |
-| RN-FR6 | C6·T1 | PENDIENTE | `tests/integration/fraccionamiento.integration.test.ts` | Factor 15 obteniendo 14,2 genera merma de 0,8; desvío 20 % con tolerancia 10 % sin motivo falla, con motivo funciona. |
-| RN-FR7 | C6·T1 | PENDIENTE | `tests/unit/fraccionamiento.service.test.ts` | Bolsa de $45.000, factor 15, rendimiento 14,2 → costo del hijo $3.169,0141/kg y **no** $3.000,0000/kg. |
-| RN-FR8 | C6·T1 | PENDIENTE | `tests/integration/fraccionamiento.integration.test.ts` | La suma de `costo_total` de la operación es **cero** y el valor total del inventario no cambió. |
-| RN-FR9 | C6·T2 | PENDIENTE | `tests/unit/fraccionamiento.service.test.ts` | No existe ruta que genere la conversión inversa; registrar la relación inversa falla por RN-FR2. |
-| RN-FR10 | C6·T1 | PENDIENTE | `tests/integration/fraccionamiento.integration.test.ts` | Bolsa que vence 2027-03-01 con hijo declarado 2027-06-01 falla. |
-| RN-FR11 | C6·T1 | PENDIENTE | `tests/unit/fraccionamiento.service.test.ts` | Bolsa que vence en 2027 con 30 días de vida útil sugiere hoy + 30. |
-| RN-FR12 | C6·T3 | PENDIENTE | `tests/unit/fraccionamiento.service.test.ts` | Vender comprimidos con existencia 0 en "comprimido" y positiva en "caja" **falla**, aunque exista la conversión. |
-| RN-FR13 | C6·T1 | PENDIENTE | `tests/integration/fraccionamiento.integration.test.ts` | Fraccionar 0,5 cajas falla si "caja" no admite decimales, aunque el destino sí. |
+| RN-FR3 | C6·T1 | ✅ | `tests/integration/fraccionamiento.integration.test.ts` | Provocar el fallo después de la salida: no queda el lote hijo ni el movimiento. |
+| RN-FR4 | C6·T1 + C6·T3 | ✅ | `tests/integration/fraccionamiento.integration.test.ts` | Todo lote de origen `conversion` tiene padre; el CTE recursivo devuelve los tres niveles caja→blíster→comprimido. |
+| RN-FR5 | C6·T1 | ✅ | `tests/integration/fraccionamiento.integration.test.ts` | Bolsa con factor 15 declarando 15,5 kg obtenidos falla. |
+| RN-FR6 | C6·T1 | ✅ | `tests/integration/fraccionamiento.integration.test.ts` | Factor 15 obteniendo 14,2 genera merma de 0,8; desvío 20 % con tolerancia 10 % sin motivo falla, con motivo funciona. |
+| RN-FR7 | C6·T1 | ✅ | `tests/unit/fraccionamiento.service.test.ts` | Bolsa de $45.000, factor 15, rendimiento 14,2 → costo del hijo $3.169,0141/kg y **no** $3.000,0000/kg. |
+| RN-FR8 | C6·T1 | ✅ | `tests/integration/fraccionamiento.integration.test.ts` | La suma de `costo_total` de la operación es **cero** y el valor total del inventario no cambió. |
+| RN-FR9 | C6·T2 | ✅ | `tests/unit/fraccionamiento.service.test.ts` | No existe ruta que genere la conversión inversa; registrar la relación inversa falla por RN-FR2. |
+| RN-FR10 | C6·T1 | ✅ | `tests/integration/fraccionamiento.integration.test.ts` | Bolsa que vence 2027-03-01 con hijo declarado 2027-06-01 falla. |
+| RN-FR11 | C6·T1 | ✅ | `tests/unit/fraccionamiento.service.test.ts` | Bolsa que vence en 2027 con 30 días de vida útil sugiere hoy + 30. |
+| RN-FR12 | C6·T3 | ✅ | `tests/unit/fraccionamiento.service.test.ts` | Vender comprimidos con existencia 0 en "comprimido" y positiva en "caja" **falla**, aunque exista la conversión. |
+| RN-FR13 | C6·T1 | ✅ | `tests/integration/fraccionamiento.integration.test.ts` | Fraccionar 0,5 cajas falla si "caja" no admite decimales, aunque el destino sí. |
 
 ## RN-AJ — Ajustes, mermas, recuento y devoluciones (C5)
 
