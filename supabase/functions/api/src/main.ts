@@ -37,6 +37,11 @@ import {
   razasRouter,
   tiposVacunaRouter,
 } from "./modules/catalogos/catalogos.controller.ts";
+import {
+  productosRouter,
+  familiasRouter,
+  conversionesRouter,
+} from "./modules/productos/productos.controller.ts";
 
 const app = new Hono().basePath("/api/v1");
 
@@ -88,6 +93,11 @@ app.route("/configuracion", configuracionRouter);
 app.route("/especies", especiesRouter);
 app.route("/razas", razasRouter);
 app.route("/tipos-vacuna", tiposVacunaRouter);
+
+// ─── Catálogo comercial (módulo vendible stock — Etapa C1) ─────────────────────
+app.route("/productos", productosRouter);
+app.route("/familias-producto", familiasRouter);
+app.route("/producto-conversiones", conversionesRouter);
 
 // ─── Doctores + Horarios de Atención (Transversal — Etapa 4) ───────────────────
 // Doctores: ABM (listar/editar) bajo manage_users.

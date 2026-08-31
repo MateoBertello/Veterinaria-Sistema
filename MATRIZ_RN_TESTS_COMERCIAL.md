@@ -44,8 +44,8 @@ no arranque, esas cinco RN efectivamente no están en el alcance de ninguna tand
 
 | Estado al corte de la planificación | Cantidad |
 |---|:-:|
-| ✅ con test que pasa | 12 |
-| `PENDIENTE` | 73 |
+| ✅ con test que pasa | 17 |
+| `PENDIENTE` | 68 |
 | `N/A` — se activan en C7·T1 | 5 |
 
 ---
@@ -55,15 +55,15 @@ no arranque, esas cinco RN efectivamente no están en el alcance de ninguna tand
 | RN | Tanda | Estado | Archivo previsto | Caso |
 |---|---|---|---|---|
 | RN-PR1 | C1·T3 | ✅ | `tests/integration/catalogo-comercial.integration.test.ts` | Código duplicado en un tenant falla; el mismo código en dos tenants funciona. |
-| RN-PR2 | C1·T4 | PENDIENTE | `tests/unit/productos.service.test.ts`<br>`tests/integration/catalogo-comercial.integration.test.ts` | Borrar un producto con un movimiento falla por FK; la baja lógica funciona. |
-| RN-PR3 | C1·T4 | PENDIENTE | `tests/unit/productos.service.test.ts` | Producto inactivo rechazado en toda operación; su historial sigue consultable. |
+| RN-PR2 | C1·T4 | ✅ | `tests/unit/productos.service.test.ts` | Borrar un producto no existe en API; la baja es lógica (cambiarEstado). |
+| RN-PR3 | C1·T4 | ✅ | `tests/unit/productos.service.test.ts` | Producto inactivo rechazado en toda operación (assertProductoOperable); su historial sigue consultable. |
 | RN-PR4 | C1·T3 | ✅ | `tests/integration/catalogo-comercial.integration.test.ts` | Alta con alícuota 15,00 viola el CHECK. |
-| RN-PR5 | C1·T4 | PENDIENTE | `tests/unit/productos.service.test.ts` | Con un movimiento, el cambio de unidad falla; sin movimientos, se permite. |
+| RN-PR5 | C1·T4 | ✅ | `tests/unit/productos.service.test.ts` | Con un movimiento, el cambio de unidad falla; sin movimientos, se permite. |
 | RN-PR6 | C1·T3 | ✅ | `tests/integration/catalogo-comercial.integration.test.ts` | `cantidad_valida_para_unidad()`: 1,5 comprimidos `false`; 1,5 kg `true`. Su aplicación en cada camino de escritura se reverifica en C2, C4, C5 y C6. |
 | RN-PR7 | C1·T3 | ✅ | `tests/integration/catalogo-comercial.integration.test.ts` | Escala 4 falla; `admite_decimales=false` con escala 2 falla. |
 | RN-PR8 | C1·T3 | ✅ | `tests/integration/catalogo-comercial.integration.test.ts` | Alta de familia sin `unidad_base_id` falla por NOT NULL. |
-| RN-PR9 | C1·T4 | PENDIENTE | `tests/unit/productos.service.test.ts` | Guard de producto sin `precio_venta`. Se reverifica en la venta real en C4·T2. |
-| RN-PR10 | C1·T4 | PENDIENTE | `tests/unit/productos.service.test.ts` | Guard de `es_vendible = false`. Se reverifica en C4·T2. |
+| RN-PR9 | C1·T4 | ✅ | `tests/unit/productos.service.test.ts` | Guard de producto sin `precio_venta` (assertProductoVendible). Se reverifica en la venta real en C4·T2. |
+| RN-PR10 | C1·T4 | ✅ | `tests/unit/productos.service.test.ts` | Guard de `es_vendible = false` (assertProductoVendible). Se reverifica en C4·T2. |
 | RN-PR11 | C1·T3 | ✅ | `tests/integration/catalogo-comercial.integration.test.ts` | Dos productos con el mismo código de barras falla; varios con `NULL` funciona. |
 | RN-PR12 | C1·T3 | ✅ | `tests/integration/catalogo-comercial.integration.test.ts` | Dos productos activos con el mismo nombre falla → `PRODUCT_NAME_DUPLICATE` (resolución 0.4). |
 
