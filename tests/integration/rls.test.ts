@@ -1230,3 +1230,177 @@ describeIntegration("C3·T1 / RN-SC4: Aislamiento RLS de Cajas, Sesiones de Caja
     expect(errMov).not.toBeNull();
   });
 });
+
+describe("Módulo Comercial: Ventas, ítems, pagos y contadores", () => {
+  let ventaAId = "";
+  let ventaItemAId = "";
+  let pagoAId = "";
+  let cajaAId = "";
+  let sesionAId = "";
+  let productoAId = "";
+
+  beforeAll(async () => {
+    if (skipIfNoCredentials() || !tenantAId || !userAId) return;
+
+    // 1. Caja y Sesión para Tenant A
+    const { data: caja } = await serviceDb.from("cajas").insert({
+      tenant_id: tenantAId,
+      nombre: `Caja Ventas RLS-${Date.now()}`,
+    }).select("id").single();
+    cajaAId = caja?.id ?? "";
+
+    const { data: sesion } = await serviceDb.from("sesiones_caja").insert({
+      tenant_id: tenantAId,
+      caja_id: cajaAId,
+      estado: "abierta",
+      apertura_usuario_id: userAId,
+      saldo_inicial: 1000,
+    }).select("id").single();
+    sesionAId = sesion?.id ?? "";
+
+    // 2. Producto para Tenant A
+    const { data: um } = await serviceDb.from("unidades_medida").select("id").eq("codigo", "unidad").single();
+    const { data: prod } = await serviceDb.from("productos").insert({
+      tenant_id: tenantAId,
+      codigo: `RLS-VNT-${Date.now()}`,
+      nombre: "Producto Ventas RLS",
+      unidad_medida_id: um?.id,
+      precio_venta: 1000,
+      alicuota_iva: 21.00,
+      activo: true,
+      es_vendible: true,
+    }).select("id").single();
+    productoAId = prod?.id ?? "";
+
+    // 3. Contador para Tenant A
+    await serviceDb.from("contadores_tenant").insert({
+      tenant_id: tenantAId,
+      nombre: "venta",
+      valor: 1,
+    });
+
+    // 4. Venta para Tenant A
+    const { data: venta } = await serviceDb.from("ventas").insert({
+      tenant_id: tenantAId,
+      numero_operacion: 1,
+      sesion_caja_id: sesionAId,
+      usuario_id: userAId,
+      subtotal_neto: 826.45,
+      total_iva: 173.55,
+      total: 1000,
+    }).select("id").single();
+    ventaAId = venta?.id ?? "";
+
+    // 5. Item de venta
+    const { data: item } = await serviceDb.from("ventas_items").insert({
+      tenant_id: tenantAId,
+      venta_id: ventaAId,
+      tipo_item: "producto",
+      producto_id: productoAId,
+      descripcion_snapshot: "Producto Ventas RLS",
+      cantidad: 1,
+      precio_unitario: 1000,
+      alicuota_iva: 21.00,
+      neto_unitario: 826.45,
+      iva_unitario: 173.55,
+      importe_total: 1000,
+    }).select("id").single();
+    ventaItemAId = item?.id ?? "";
+
+    // 6. Pago de venta
+    const { data: mp } = await serviceDb.from("medios_pago").select("id").eq("codigo", "efectivo").single();
+    const { data: pago } = await serviceDb.from("ventas_pagos").insert({
+      tenant_id: tenantAId,
+      venta_id: ventaAId,
+      medio_pago_id: mp?.id,
+      importe: 1000,
+    }).select("id").single();
+    pagoAId = pago?.id ?? "";
+  });
+
+  it("RN-SC4: el usuario B no ve ventas, ventas_items, ventas_pagos ni contadores_tenant del tenant A", async () => {
+    if (skipIfNoCredentials()) return;
+    const db = userClient(jwtB);
+
+    const { data: ventas } = await db.from("ventas").select("id, tenant_id").eq("id", ventaAId);
+    expect(ventas ?? []).toHaveLength(0);
+
+    const { data: items } = await db.from("ventas_items").select("id, tenant_id").eq("id", ventaItemAId);
+    expect(items ?? []).toHaveLength(0);
+
+    const { data: pagos } = await db.from("ventas_pagos").select("id, tenant_id").eq("id", pagoAId);
+    expect(pagos ?? []).toHaveLength(0);
+
+    const { data: contadores } = await db.from("contadores_tenant").select("nombre, tenant_id").eq("tenant_id", tenantAId);
+    expect(contadores ?? []).toHaveLength(0);
+  });
+
+  it("RN-SC4: el usuario A sí ve sus propias ventas, ventas_items, ventas_pagos y contadores_tenant", async () => {
+    if (skipIfNoCredentials()) return;
+    const db = userClient(jwtA);
+
+    const { data: ventas, error: errV } = await db.from("ventas").select("id, tenant_id").eq("id", ventaAId);
+    expect(errV).toBeNull();
+    expect((ventas ?? []).length).toBe(1);
+
+    const { data: items, error: errI } = await db.from("ventas_items").select("id, tenant_id").eq("id", ventaItemAId);
+    expect(errI).toBeNull();
+    expect((items ?? []).length).toBe(1);
+
+    const { data: pagos, error: errP } = await db.from("ventas_pagos").select("id, tenant_id").eq("id", pagoAId);
+    expect(errP).toBeNull();
+    expect((pagos ?? []).length).toBe(1);
+
+    const { data: contadores, error: errC } = await db.from("contadores_tenant").select("nombre, tenant_id").eq("tenant_id", tenantAId);
+    expect(errC).toBeNull();
+    expect((contadores ?? []).length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("RN-SC4: B no puede escribir ventas, ventas_items, ventas_pagos ni contadores_tenant por PostgREST", async () => {
+    if (skipIfNoCredentials()) return;
+    const db = userClient(jwtB);
+
+    // Intento de INSERT directo en ventas
+    const { error: errV } = await db.from("ventas").insert({
+      tenant_id: tenantBId,
+      numero_operacion: 999,
+      sesion_caja_id: sesionAId,
+      usuario_id: userAId,
+    });
+    expect(errV).not.toBeNull();
+
+    // Intento de INSERT directo en ventas_items
+    const { error: errI } = await db.from("ventas_items").insert({
+      tenant_id: tenantBId,
+      venta_id: ventaAId,
+      tipo_item: "producto",
+      producto_id: productoAId,
+      descripcion_snapshot: "hack",
+      cantidad: 1,
+      precio_unitario: 10,
+      alicuota_iva: 21,
+      neto_unitario: 8.26,
+      iva_unitario: 1.74,
+      importe_total: 10,
+    });
+    expect(errI).not.toBeNull();
+
+    // Intento de INSERT directo en ventas_pagos
+    const { error: errP } = await db.from("ventas_pagos").insert({
+      tenant_id: tenantBId,
+      venta_id: ventaAId,
+      medio_pago_id: "00000000-0000-0000-0000-000000000000",
+      importe: 10,
+    });
+    expect(errP).not.toBeNull();
+
+    // Intento de INSERT directo en contadores_tenant
+    const { error: errC } = await db.from("contadores_tenant").insert({
+      tenant_id: tenantBId,
+      nombre: "venta",
+      valor: 999,
+    });
+    expect(errC).not.toBeNull();
+  });
+});
+

@@ -13,6 +13,7 @@ let usuarioAId = "";
 let unidadId = "";
 let productoAId = "";
 let loteAId = "";
+let ventaItemAId = "";
 
 export async function crearFixtureStock(db: SupabaseClient, prefix: string) {
   // 1. Tenant
@@ -94,7 +95,43 @@ export async function crearFixtureStock(db: SupabaseClient, prefix: string) {
   if (errL || !l) throw new Error(`Error creando lote: ${errL?.message}`);
   const loteId = l.id as string;
 
-  return { tenantId, usuarioId, unidadId: uId, productoId, loteId };
+  // 6. Venta Item para FK diferida
+  const { data: caja } = await db.from("cajas").insert({
+    tenant_id: tenantId,
+    nombre: `${prefix} Caja`,
+  }).select("id").single();
+  const { data: sesion } = await db.from("sesiones_caja").insert({
+    tenant_id: tenantId,
+    caja_id: caja!.id,
+    estado: "abierta",
+    apertura_usuario_id: usuarioId,
+    saldo_inicial: 0,
+  }).select("id").single();
+  const { data: venta } = await db.from("ventas").insert({
+    tenant_id: tenantId,
+    numero_operacion: 1,
+    sesion_caja_id: sesion!.id,
+    usuario_id: usuarioId,
+    subtotal_neto: 826.45,
+    total_iva: 173.55,
+    total: 1000,
+  }).select("id").single();
+  const { data: vItem } = await db.from("ventas_items").insert({
+    tenant_id: tenantId,
+    venta_id: venta!.id,
+    tipo_item: "producto",
+    producto_id: productoId,
+    descripcion_snapshot: "Item Snapshot",
+    cantidad: 1000,
+    precio_unitario: 1000,
+    alicuota_iva: 21,
+    neto_unitario: 826.45,
+    iva_unitario: 173.55,
+    importe_total: 1000,
+  }).select("id").single();
+  const ventaItemId = vItem!.id as string;
+
+  return { tenantId, usuarioId, unidadId: uId, productoId, loteId, ventaItemId };
 }
 
 beforeAll(async () => {
@@ -107,6 +144,7 @@ beforeAll(async () => {
   unidadId = fixture.unidadId;
   productoAId = fixture.productoId;
   loteAId = fixture.loteId;
+  ventaItemAId = fixture.ventaItemId;
 });
 
 afterAll(async () => {
@@ -114,6 +152,10 @@ afterAll(async () => {
   await serviceDb.from("movimientos_stock").delete().eq("tenant_id", tenantAId);
   await serviceDb.from("existencias_lote").delete().eq("tenant_id", tenantAId);
   await serviceDb.from("lotes").delete().eq("tenant_id", tenantAId);
+  await serviceDb.from("ventas_items").delete().eq("tenant_id", tenantAId);
+  await serviceDb.from("ventas").delete().eq("tenant_id", tenantAId);
+  await serviceDb.from("sesiones_caja").delete().eq("tenant_id", tenantAId);
+  await serviceDb.from("cajas").delete().eq("tenant_id", tenantAId);
   await serviceDb.from("compras_items").delete().eq("tenant_id", tenantAId);
   await serviceDb.from("compras").delete().eq("tenant_id", tenantAId);
   await serviceDb.from("productos").delete().eq("tenant_id", tenantAId);
@@ -241,7 +283,7 @@ describeIntegration("C2·T1 — Libro mayor, lotes y existencias_lote (Base de d
         tenant_id: tenantAId,
         operacion_id: crypto.randomUUID(),
         tipo: "salida_venta",
-        venta_item_id: crypto.randomUUID(),
+        venta_item_id: ventaItemAId,
         producto_id: productoAId,
         lote_id: loteAId,
         cantidad: 3,
@@ -288,7 +330,7 @@ describeIntegration("C2·T1 — Libro mayor, lotes y existencias_lote (Base de d
       tenant_id: tenantAId,
       operacion_id: crypto.randomUUID(),
       tipo: "salida_venta",
-      venta_item_id: crypto.randomUUID(),
+      venta_item_id: ventaItemAId,
       producto_id: productoAId,
       lote_id: loteId,
       cantidad: 8,
@@ -381,7 +423,7 @@ describeIntegration("C2·T1 — Libro mayor, lotes y existencias_lote (Base de d
       tenant_id: tenantAId,
       operacion_id: crypto.randomUUID(),
       tipo: "salida_venta",
-      venta_item_id: crypto.randomUUID(),
+      venta_item_id: ventaItemAId,
       producto_id: productoAId,
       lote_id: loteId,
       cantidad: 3,
@@ -439,7 +481,7 @@ describeIntegration("C2·T1 — Libro mayor, lotes y existencias_lote (Base de d
       tenant_id: tenantAId,
       operacion_id: crypto.randomUUID(),
       tipo: "salida_venta",
-      venta_item_id: crypto.randomUUID(),
+      venta_item_id: ventaItemAId,
       producto_id: productoAId,
       lote_id: loteId,
       cantidad: 3,
@@ -618,7 +660,7 @@ describeIntegration("C2·T1 — Libro mayor, lotes y existencias_lote (Base de d
           tenant_id: tenantAId,
           operacion_id: crypto.randomUUID(),
           tipo: "salida_venta",
-          venta_item_id: crypto.randomUUID(),
+          venta_item_id: ventaItemAId,
           producto_id: target.productoId,
           lote_id: target.id,
           cantidad: cant,

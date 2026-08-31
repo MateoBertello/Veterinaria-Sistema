@@ -121,7 +121,7 @@ no arranque, esas cinco RN efectivamente no están en el alcance de ninguna tand
 |---|---|---|---|---|
 | RN-VT1 | C4·T2 | PENDIENTE | `tests/unit/ventas.service.test.ts` | Tres líneas de $1.000 al 21 % → neto 826,45, IVA 173,55, total 3.000,00. Barrido de $0,01 a $10.000 verificando `neto + iva = precio`. |
 | RN-VT2 | C4·T2 | PENDIENTE | `tests/unit/ventas.service.test.ts` | Cinco líneas de alícuotas mixtas: `total = SUM(importe_total)` al centavo. |
-| RN-VT3 | C4·T1 | PENDIENTE | `tests/integration/ventas.integration.test.ts` | Con los dos IDs viola el CHECK; con ninguno, también. |
+| RN-VT3 | C4·T1 | ✅ | `tests/integration/ventas.integration.test.ts` | Con los dos IDs viola el CHECK; con ninguno, también. |
 | RN-VT4 | C4·T3 | PENDIENTE | `tests/integration/ventas.integration.test.ts` | Anular devuelve la existencia a los lotes originales, genera el egreso, la venta sigue en el listado, y anular dos veces falla. |
 | RN-VT5 | C4·T3 | PENDIENTE | `tests/integration/ventas.integration.test.ts` | Cerrar sesión, abrir otra, anular una venta de la primera → el movimiento pertenece a la segunda. |
 | RN-VT6 | C4·T2 | PENDIENTE | `tests/integration/ventas.integration.test.ts` | Vender, renombrar el producto y cambiarle la alícuota: la línea vieja conserva los tres valores. |
