@@ -49,6 +49,7 @@ import {
   existenciasRouter,
 } from "./modules/stock/stock.controller.ts";
 import { comprasRouter } from "./modules/compras/compras.controller.ts";
+import { cajaRouter } from "./modules/caja/caja.controller.ts";
 
 const app = new Hono().basePath("/api/v1");
 
@@ -112,6 +113,9 @@ app.route("/lotes", lotesRouter);
 app.route("/movimientos-stock", movimientosRouter);
 app.route("/existencias", existenciasRouter);
 app.route("/compras", comprasRouter);
+
+// ─── Caja (módulo vendible ventas — Etapa C3) ─────────────────────────────────
+app.route("/caja", cajaRouter);
 
 // ─── Doctores + Horarios de Atención (Transversal — Etapa 4) ───────────────────
 // Doctores: ABM (listar/editar) bajo manage_users.
