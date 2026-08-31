@@ -101,7 +101,7 @@ no arranque, esas cinco RN efectivamente no están en el alcance de ninguna tand
 | RN-LO3 | C2·T3 | ✅ | `tests/integration/compras.integration.test.ts` | Comprar y vender sin control de lote funciona sin pedir lote y genera `lote_id` no nulo. |
 | RN-LO4 | C2·T4 | ✅ | `tests/unit/stock.service.test.ts` | Lote vencido rechazado **para los tres roles, incluido admin**. Se reverifica en C4·T2 and C6·T1. |
 | RN-LO5 | C2·T4 | ✅ | `tests/unit/stock.service.test.ts` | 2026-01, 2026-03 y `NULL` → sugiere enero; dos de igual vencimiento dan orden estable. |
-| RN-LO6 | C4·T2 | PENDIENTE | `tests/integration/ventas.integration.test.ts` | Sin motivo falla; con motivo, el movimiento queda con `fefo_respetado=false` y el texto. |
+| RN-LO6 | C4·T2 | ✅ | `tests/integration/ventas.integration.test.ts` | Sin motivo falla; con motivo, el movimiento queda con `fefo_respetado=false` y el texto. |
 | RN-LO7 | C2·T4 | ✅ | `tests/unit/stock.service.test.ts` | Bloquear un lote y vender falla. El bloqueo/desbloqueo se implementa en C5·T2. |
 | RN-LO8 | C2·T5 | ✅ | `tests/integration/stock.integration.test.ts` | Lote a 30 días con umbral 60 genera notificación y **permite** la venta. |
 
@@ -119,20 +119,20 @@ no arranque, esas cinco RN efectivamente no están en el alcance de ninguna tand
 
 | RN | Tanda | Estado | Archivo previsto | Caso |
 |---|---|---|---|---|
-| RN-VT1 | C4·T2 | PENDIENTE | `tests/unit/ventas.service.test.ts` | Tres líneas de $1.000 al 21 % → neto 826,45, IVA 173,55, total 3.000,00. Barrido de $0,01 a $10.000 verificando `neto + iva = precio`. |
-| RN-VT2 | C4·T2 | PENDIENTE | `tests/unit/ventas.service.test.ts` | Cinco líneas de alícuotas mixtas: `total = SUM(importe_total)` al centavo. |
+| RN-VT1 | C4·T2 | ✅ | `tests/unit/ventas.service.test.ts` | Tres líneas de $1.000 al 21 % → neto 826,45, IVA 173,55, total 3.000,00. Barrido de $0,01 a $10.000 verificando `neto + iva = precio`. |
+| RN-VT2 | C4·T2 | ✅ | `tests/unit/ventas.service.test.ts` | Cinco líneas de alícuotas mixtas: `total = SUM(importe_total)` al centavo. |
 | RN-VT3 | C4·T1 | ✅ | `tests/integration/ventas.integration.test.ts` | Con los dos IDs viola el CHECK; con ninguno, también. |
 | RN-VT4 | C4·T3 | PENDIENTE | `tests/integration/ventas.integration.test.ts` | Anular devuelve la existencia a los lotes originales, genera el egreso, la venta sigue en el listado, y anular dos veces falla. |
 | RN-VT5 | C4·T3 | PENDIENTE | `tests/integration/ventas.integration.test.ts` | Cerrar sesión, abrir otra, anular una venta de la primera → el movimiento pertenece a la segunda. |
-| RN-VT6 | C4·T2 | PENDIENTE | `tests/integration/ventas.integration.test.ts` | Vender, renombrar el producto y cambiarle la alícuota: la línea vieja conserva los tres valores. |
-| RN-VT7 | C4·T2 | PENDIENTE | `tests/unit/ventas.service.test.ts` | Registrar con arreglo de ítems vacío falla. |
-| RN-VT8 | C4·T2 | PENDIENTE | `tests/integration/ventas.integration.test.ts` | Sin sesión de caja abierta, la venta falla. |
+| RN-VT6 | C4·T2 | ✅ | `tests/integration/ventas.integration.test.ts` | Vender, renombrar el producto y cambiarle la alícuota: la línea vieja conserva los tres valores. |
+| RN-VT7 | C4·T2 | ✅ | `tests/unit/ventas.service.test.ts` | Registrar con arreglo de ítems vacío falla. |
+| RN-VT8 | C4·T2 | ✅ | `tests/integration/ventas.integration.test.ts` | Sin sesión de caja abierta, la venta falla. |
 
 ## RN-CJ — Caja (C3, C4)
 
 | RN | Tanda | Estado | Archivo previsto | Caso |
 |---|---|---|---|---|
-| RN-CJ1 | C4·T2 | PENDIENTE | `tests/unit/ventas.service.test.ts` | $1.000 con pagos por $900 al contado falla; $600 efectivo + $400 transferencia funciona; $900 en cuenta corriente deja saldo 100. |
+| RN-CJ1 | C4·T2 | ✅ | `tests/unit/ventas.service.test.ts` | $1.000 con pagos por $900 al contado falla; $600 efectivo + $400 transferencia funciona; $900 en cuenta corriente deja saldo 100. |
 | RN-CJ2 | C3·T2 | ✅ | `tests/integration/caja.integration.test.ts` | Saldo inicial 1.000, venta de 5.000 en transferencia y 2.000 en efectivo → teórico 3.000, no 8.000. |
 | RN-CJ3 | C4·T4 | PENDIENTE | `tests/unit/caja.service.test.ts` | Saldo inicial 1.000 y una venta íntegra en cuenta corriente → teórico 1.000, diferencia 0. |
 | RN-CJ4 | C3·T1 + C3·T2 | ✅ | `tests/integration/caja.integration.test.ts` | T1: el índice parcial único rechaza la segunda sesión abierta. T2: dos aperturas simultáneas con `Promise.all` y `rpcReallyRan()` → gana exactamente una. |
