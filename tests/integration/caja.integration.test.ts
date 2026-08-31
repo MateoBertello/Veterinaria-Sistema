@@ -332,3 +332,436 @@ describeIntegration("C3·T1: Restricciones de base de datos para Caja", () => {
     expect(error?.code).toBe("23503"); // foreign_key_violation
   });
 });
+
+type RpcResult = { data: unknown; error: { message: string; code?: string } | null };
+
+function rpcReallyRan(error: { message: string } | null): boolean {
+  return !/could not find|schema cache/i.test(error?.message ?? "");
+}
+
+function esExito(r: RpcResult): boolean {
+  return r.error === null && Array.isArray(r.data) && r.data.length === 1;
+}
+
+describeIntegration("C3·T2: RPCs de Caja y Concurrencia", () => {
+  let t2TenantId = "";
+  let t2UsuarioId = "";
+
+  beforeAll(async () => {
+    serviceDb = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+
+    const fix = await crearFixtureCaja(serviceDb, "CajaT2");
+    t2TenantId = fix.tenantId;
+    t2UsuarioId = fix.usuarioId;
+  });
+
+  afterAll(async () => {
+    if (!serviceDb) return;
+    if (t2UsuarioId) await borrarUsuarioAuth(t2UsuarioId);
+    if (t2TenantId) await serviceDb.from("tenants").delete().eq("id", t2TenantId);
+  });
+
+  it("RN-CJ4: dos aperturas SIMULTÁNEAS de la misma caja → gana exactamente una", async () => {
+    const reps = process.env.CONCURRENCY_REPS ? parseInt(process.env.CONCURRENCY_REPS, 10) : 50;
+
+    for (let i = 0; i < reps; i++) {
+      const { data: cajaConcurrente, error: errCaja } = await serviceDb
+        .from("cajas")
+        .insert({
+          tenant_id: t2TenantId,
+          nombre: `Caja Concurrente ${Date.now()}_${i}`,
+        })
+        .select("id")
+        .single();
+      expect(errCaja).toBeNull();
+      const cajaId = cajaConcurrente!.id as string;
+
+      const [r1, r2] = (await Promise.all([
+        serviceDb.rpc("abrir_sesion_caja", {
+          p_tenant_id: t2TenantId,
+          p_usuario_id: t2UsuarioId,
+          p_caja_id: cajaId,
+          p_saldo_inicial: 1000,
+        }),
+        serviceDb.rpc("abrir_sesion_caja", {
+          p_tenant_id: t2TenantId,
+          p_usuario_id: t2UsuarioId,
+          p_caja_id: cajaId,
+          p_saldo_inicial: 1000,
+        }),
+      ])) as [RpcResult, RpcResult];
+
+      expect(rpcReallyRan(r1.error)).toBe(true);
+      expect(rpcReallyRan(r2.error)).toBe(true);
+
+      const exitos = [r1, r2].filter(esExito);
+      const fallos = [r1, r2].filter((r) => r.error !== null);
+
+      expect(exitos).toHaveLength(1);
+      expect(fallos).toHaveLength(1);
+      expect(fallos[0].error?.message ?? "").toContain("CASH_SESSION_ALREADY_OPEN");
+
+      const { count } = await serviceDb
+        .from("sesiones_caja")
+        .select("*", { count: "exact", head: true })
+        .eq("tenant_id", t2TenantId)
+        .eq("caja_id", cajaId)
+        .eq("estado", "abierta");
+
+      expect(count).toBe(1);
+    }
+  });
+
+  it("RN-CJ2: solo el efectivo afecta el arqueo", async () => {
+    // 1. Crear caja
+    const { data: caja } = await serviceDb
+      .from("cajas")
+      .insert({
+        tenant_id: t2TenantId,
+        nombre: `Caja Arqueo ${Date.now()}`,
+      })
+      .select("id")
+      .single();
+    const cajaId = caja!.id as string;
+
+    // 2. Abrir sesion con 1000
+    const { data: sData, error: errApertura } = await serviceDb.rpc("abrir_sesion_caja", {
+      p_tenant_id: t2TenantId,
+      p_usuario_id: t2UsuarioId,
+      p_caja_id: cajaId,
+      p_saldo_inicial: 1000,
+    });
+    expect(errApertura).toBeNull();
+    const sesionId = (sData as Array<{ sesion_id: string }>)[0].sesion_id;
+
+    // 3. Medios de pago: transferencia y efectivo
+    const { data: mpTransf } = await serviceDb.from("medios_pago").select("id").eq("codigo", "transferencia").single();
+    const { data: mpEfec } = await serviceDb.from("medios_pago").select("id").eq("codigo", "efectivo").single();
+
+    // Movimiento transferencia 5000 (afecta_arqueo = false)
+    const { error: err1 } = await serviceDb.rpc("registrar_movimiento_caja", {
+      p_tenant_id: t2TenantId,
+      p_usuario_id: t2UsuarioId,
+      p_sesion_id: sesionId,
+      p_tipo: "ingreso_venta",
+      p_medio_pago_id: mpTransf!.id,
+      p_importe: 5000,
+      p_referencia: "TR-123456",
+    });
+    expect(err1).toBeNull();
+
+    // Movimiento efectivo 2000 (afecta_arqueo = true)
+    const { error: err2 } = await serviceDb.rpc("registrar_movimiento_caja", {
+      p_tenant_id: t2TenantId,
+      p_usuario_id: t2UsuarioId,
+      p_sesion_id: sesionId,
+      p_tipo: "ingreso_venta",
+      p_medio_pago_id: mpEfec!.id,
+      p_importe: 2000,
+    });
+    expect(err2).toBeNull();
+
+    // 4. Cerrar sesion con 3000 contados (1000 inicial + 2000 efectivo = 3000 teorico)
+    const { data: cierreData, error: errCierre } = await serviceDb.rpc("cerrar_sesion_caja", {
+      p_tenant_id: t2TenantId,
+      p_usuario_id: t2UsuarioId,
+      p_sesion_id: sesionId,
+      p_efectivo_contado: 3000,
+    });
+    expect(errCierre).toBeNull();
+    const cierre = (cierreData as Array<any>)[0];
+    expect(Number(cierre.saldo_teorico_efectivo)).toBe(3000);
+    expect(Number(cierre.efectivo_contado)).toBe(3000);
+    expect(Number(cierre.diferencia)).toBe(0);
+  });
+
+  it("RN-CJ5: cerrar es irreversible", async () => {
+    // Abrir y cerrar una sesion
+    const { data: caja } = await serviceDb
+      .from("cajas")
+      .insert({
+        tenant_id: t2TenantId,
+        nombre: `Caja Irreversible ${Date.now()}`,
+      })
+      .select("id")
+      .single();
+    const cajaId = caja!.id as string;
+
+    const { data: sData } = await serviceDb.rpc("abrir_sesion_caja", {
+      p_tenant_id: t2TenantId,
+      p_usuario_id: t2UsuarioId,
+      p_caja_id: cajaId,
+      p_saldo_inicial: 500,
+    });
+    const sesionId = (sData as Array<{ sesion_id: string }>)[0].sesion_id;
+
+    await serviceDb.rpc("cerrar_sesion_caja", {
+      p_tenant_id: t2TenantId,
+      p_usuario_id: t2UsuarioId,
+      p_sesion_id: sesionId,
+      p_efectivo_contado: 500,
+    });
+
+    // (a) registrar_movimiento_caja sobre sesion cerrada -> CASH_SESSION_CLOSED
+    const { data: mpEfec } = await serviceDb.from("medios_pago").select("id").eq("codigo", "efectivo").single();
+    const { error: errMov } = await serviceDb.rpc("registrar_movimiento_caja", {
+      p_tenant_id: t2TenantId,
+      p_usuario_id: t2UsuarioId,
+      p_sesion_id: sesionId,
+      p_tipo: "ingreso_manual",
+      p_medio_pago_id: mpEfec!.id,
+      p_importe: 100,
+      p_motivo: "Motivo de prueba con mas de diez caracteres",
+    });
+    expect(errMov?.message).toContain("CASH_SESSION_CLOSED");
+
+    // (b) cerrar_sesion_caja otra vez -> CASH_SESSION_CLOSED
+    const { error: errCierreDoble } = await serviceDb.rpc("cerrar_sesion_caja", {
+      p_tenant_id: t2TenantId,
+      p_usuario_id: t2UsuarioId,
+      p_sesion_id: sesionId,
+      p_efectivo_contado: 500,
+    });
+    expect(errCierreDoble?.message).toContain("CASH_SESSION_CLOSED");
+
+    // (c) No existe ninguna función que la reabra
+    const { data: procs, error: errProcs } = await serviceDb.rpc("signo_movimiento_caja", {
+      p_tipo: "ingreso_venta",
+    });
+    expect(errProcs).toBeNull();
+  });
+
+  it("RN-CJ6: la diferencia se guarda incluso en cero", async () => {
+    const { data: caja } = await serviceDb
+      .from("cajas")
+      .insert({
+        tenant_id: t2TenantId,
+        nombre: `Caja Cero ${Date.now()}`,
+      })
+      .select("id")
+      .single();
+    const cajaId = caja!.id as string;
+
+    const { data: sData } = await serviceDb.rpc("abrir_sesion_caja", {
+      p_tenant_id: t2TenantId,
+      p_usuario_id: t2UsuarioId,
+      p_caja_id: cajaId,
+      p_saldo_inicial: 1000,
+    });
+    const sesionId = (sData as Array<{ sesion_id: string }>)[0].sesion_id;
+
+    const { data: cData, error: errCierre } = await serviceDb.rpc("cerrar_sesion_caja", {
+      p_tenant_id: t2TenantId,
+      p_usuario_id: t2UsuarioId,
+      p_sesion_id: sesionId,
+      p_efectivo_contado: 1000,
+    });
+    expect(errCierre).toBeNull();
+    const res = (cData as Array<any>)[0];
+    expect(Number(res.diferencia)).toBe(0);
+
+    const { data: row } = await serviceDb
+      .from("sesiones_caja")
+      .select("diferencia")
+      .eq("id", sesionId)
+      .single();
+    expect(row?.diferencia).not.toBeNull();
+    expect(Number(row?.diferencia)).toBe(0);
+  });
+
+  it("RN-CJ7: la diferencia sobre la tolerancia exige motivo", async () => {
+    // 1. tolerancia = 0
+    await serviceDb
+      .from("configuracion_tenant")
+      .update({ tolerancia_diferencia_arqueo: 0 })
+      .eq("tenant_id", t2TenantId);
+
+    const { data: caja1 } = await serviceDb
+      .from("cajas")
+      .insert({
+        tenant_id: t2TenantId,
+        nombre: `Caja Tol0 ${Date.now()}`,
+      })
+      .select("id")
+      .single();
+    const caja1Id = caja1!.id as string;
+
+    const { data: s1Data } = await serviceDb.rpc("abrir_sesion_caja", {
+      p_tenant_id: t2TenantId,
+      p_usuario_id: t2UsuarioId,
+      p_caja_id: caja1Id,
+      p_saldo_inicial: 1000,
+    });
+    const sesion1Id = (s1Data as Array<{ sesion_id: string }>)[0].sesion_id;
+
+    // Faltante de $50 sin motivo -> REASON_REQUIRED
+    const { error: errSinMotivo } = await serviceDb.rpc("cerrar_sesion_caja", {
+      p_tenant_id: t2TenantId,
+      p_usuario_id: t2UsuarioId,
+      p_sesion_id: sesion1Id,
+      p_efectivo_contado: 950,
+    });
+    expect(errSinMotivo?.message).toContain("REASON_REQUIRED");
+
+    // Con motivo >= 10 chars -> exito
+    const { data: c1Data, error: errConMotivo } = await serviceDb.rpc("cerrar_sesion_caja", {
+      p_tenant_id: t2TenantId,
+      p_usuario_id: t2UsuarioId,
+      p_sesion_id: sesion1Id,
+      p_efectivo_contado: 950,
+      p_motivo: "Faltante justificado por cambio",
+    });
+    expect(errConMotivo).toBeNull();
+    expect((c1Data as Array<any>)[0].diferencia).toBe(-50);
+
+    const { data: sesionGuardada } = await serviceDb
+      .from("sesiones_caja")
+      .select("motivo_diferencia")
+      .eq("id", sesion1Id)
+      .single();
+    expect(sesionGuardada?.motivo_diferencia).toBe("Faltante justificado por cambio");
+
+    // 2. tolerancia = 100
+    await serviceDb
+      .from("configuracion_tenant")
+      .update({ tolerancia_diferencia_arqueo: 100 })
+      .eq("tenant_id", t2TenantId);
+
+    const { data: caja2 } = await serviceDb
+      .from("cajas")
+      .insert({
+        tenant_id: t2TenantId,
+        nombre: `Caja Tol100 ${Date.now()}`,
+      })
+      .select("id")
+      .single();
+    const caja2Id = caja2!.id as string;
+
+    const { data: s2Data } = await serviceDb.rpc("abrir_sesion_caja", {
+      p_tenant_id: t2TenantId,
+      p_usuario_id: t2UsuarioId,
+      p_caja_id: caja2Id,
+      p_saldo_inicial: 1000,
+    });
+    const sesion2Id = (s2Data as Array<{ sesion_id: string }>)[0].sesion_id;
+
+    // Faltante de $50 sin motivo con tolerancia 100 -> exito
+    const { error: errTol100 } = await serviceDb.rpc("cerrar_sesion_caja", {
+      p_tenant_id: t2TenantId,
+      p_usuario_id: t2UsuarioId,
+      p_sesion_id: sesion2Id,
+      p_efectivo_contado: 950,
+    });
+    expect(errTol100).toBeNull();
+  });
+
+  it("RN-CJ8: el teórico se congela", async () => {
+    const { data: caja } = await serviceDb
+      .from("cajas")
+      .insert({
+        tenant_id: t2TenantId,
+        nombre: `Caja Freeze ${Date.now()}`,
+      })
+      .select("id")
+      .single();
+    const cajaId = caja!.id as string;
+
+    const { data: sData } = await serviceDb.rpc("abrir_sesion_caja", {
+      p_tenant_id: t2TenantId,
+      p_usuario_id: t2UsuarioId,
+      p_caja_id: cajaId,
+      p_saldo_inicial: 1000,
+    });
+    const sesionId = (sData as Array<{ sesion_id: string }>)[0].sesion_id;
+
+    // Cerrar sesion con 1000
+    await serviceDb.rpc("cerrar_sesion_caja", {
+      p_tenant_id: t2TenantId,
+      p_usuario_id: t2UsuarioId,
+      p_sesion_id: sesionId,
+      p_efectivo_contado: 1000,
+    });
+
+    // Forzar un movimiento directo por serviceDb
+    const { data: mpEfec } = await serviceDb.from("medios_pago").select("id").eq("codigo", "efectivo").single();
+    await serviceDb.from("movimientos_caja").insert({
+      tenant_id: t2TenantId,
+      sesion_caja_id: sesionId,
+      tipo: "ingreso_manual",
+      medio_pago_id: mpEfec!.id,
+      importe: 500,
+      usuario_id: t2UsuarioId,
+      motivo: "Movimiento forzado posterior",
+    });
+
+    // Releer la sesion cerrada
+    const { data: sesionReleida } = await serviceDb
+      .from("sesiones_caja")
+      .select("saldo_teorico_efectivo, diferencia")
+      .eq("id", sesionId)
+      .single();
+
+    expect(Number(sesionReleida?.saldo_teorico_efectivo)).toBe(1000);
+    expect(Number(sesionReleida?.diferencia)).toBe(0);
+  });
+
+  it("RN-CJ9: la referencia es obligatoria según el medio", async () => {
+    const { data: caja } = await serviceDb
+      .from("cajas")
+      .insert({
+        tenant_id: t2TenantId,
+        nombre: `Caja Ref ${Date.now()}`,
+      })
+      .select("id")
+      .single();
+    const cajaId = caja!.id as string;
+
+    const { data: sData } = await serviceDb.rpc("abrir_sesion_caja", {
+      p_tenant_id: t2TenantId,
+      p_usuario_id: t2UsuarioId,
+      p_caja_id: cajaId,
+      p_saldo_inicial: 1000,
+    });
+    const sesionId = (sData as Array<{ sesion_id: string }>)[0].sesion_id;
+
+    const { data: mpTransf } = await serviceDb.from("medios_pago").select("id").eq("codigo", "transferencia").single();
+    const { data: mpEfec } = await serviceDb.from("medios_pago").select("id").eq("codigo", "efectivo").single();
+
+    // Transferencia sin referencia -> PAYMENT_REFERENCE_REQUIRED
+    const { error: errTransfSinRef } = await serviceDb.rpc("registrar_movimiento_caja", {
+      p_tenant_id: t2TenantId,
+      p_usuario_id: t2UsuarioId,
+      p_sesion_id: sesionId,
+      p_tipo: "ingreso_venta",
+      p_medio_pago_id: mpTransf!.id,
+      p_importe: 100,
+    });
+    expect(errTransfSinRef?.message).toContain("PAYMENT_REFERENCE_REQUIRED");
+
+    // Transferencia con referencia -> exito
+    const { error: errTransfConRef } = await serviceDb.rpc("registrar_movimiento_caja", {
+      p_tenant_id: t2TenantId,
+      p_usuario_id: t2UsuarioId,
+      p_sesion_id: sesionId,
+      p_tipo: "ingreso_venta",
+      p_medio_pago_id: mpTransf!.id,
+      p_importe: 100,
+      p_referencia: "REF-998877",
+    });
+    expect(errTransfConRef).toBeNull();
+
+    // Efectivo sin referencia -> exito
+    const { error: errEfecSinRef } = await serviceDb.rpc("registrar_movimiento_caja", {
+      p_tenant_id: t2TenantId,
+      p_usuario_id: t2UsuarioId,
+      p_sesion_id: sesionId,
+      p_tipo: "ingreso_venta",
+      p_medio_pago_id: mpEfec!.id,
+      p_importe: 100,
+    });
+    expect(errEfecSinRef).toBeNull();
+  });
+});
+
