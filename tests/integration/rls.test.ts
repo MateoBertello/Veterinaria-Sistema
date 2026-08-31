@@ -13,7 +13,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { SUPABASE_URL, SUPABASE_ANON_KEY, SERVICE_ROLE_KEY, describeIntegration } from "./_env.ts";
-
+import { crearUsuarioAuth, borrarUsuarioAuth } from "./_teardown.ts";
 
 globalThis.WebSocket = class FakeWebSocket {} as any;
 
@@ -58,10 +58,28 @@ beforeAll(async () => {
     auth: { persistSession: false },
   });
 
+  // Limpieza defensiva de ejecuciones previas
+  for (const cuit of ["30-11111111-1", "30-22222222-2"]) {
+    const { data: prev } = await serviceDb.from("tenants").select("id").eq("cuit_rut", cuit);
+    for (const row of prev ?? []) {
+      await serviceDb.from("movimientos_stock").delete().eq("tenant_id", row.id);
+      await serviceDb.from("existencias_lote").delete().eq("tenant_id", row.id);
+      await serviceDb.from("lotes").delete().eq("tenant_id", row.id);
+      await serviceDb.from("producto_conversiones").delete().eq("tenant_id", row.id);
+      await serviceDb.from("productos").delete().eq("tenant_id", row.id);
+      await serviceDb.from("familias_producto").delete().eq("tenant_id", row.id);
+      await serviceDb.from("proveedores").delete().eq("tenant_id", row.id);
+      await serviceDb.from("tenants").delete().eq("id", row.id);
+    }
+  }
+
+  const cuitA = `30-${Date.now().toString().slice(-6)}11-1`;
+  const cuitB = `30-${Date.now().toString().slice(-6)}22-2`;
+
   // Crear tenant A (plan basico) y tenant B (plan premium)
   const { data: tA, error: eA } = await serviceDb
     .from("tenants")
-    .insert({ nombre: "Clínica Test A", cuit_rut: "30-11111111-1", email_contacto: "a@test.com", plan: "basico" })
+    .insert({ nombre: "Clínica Test A", cuit_rut: cuitA, email_contacto: "a@test.com", plan: "basico" })
     .select("id")
     .single();
   if (eA || !tA) throw new Error(`No se pudo crear tenant A: ${eA?.message}`);
@@ -69,7 +87,7 @@ beforeAll(async () => {
 
   const { data: tB, error: eB } = await serviceDb
     .from("tenants")
-    .insert({ nombre: "Clínica Test B", cuit_rut: "30-22222222-2", email_contacto: "b@test.com", plan: "premium" })
+    .insert({ nombre: "Clínica Test B", cuit_rut: cuitB, email_contacto: "b@test.com", plan: "premium" })
     .select("id")
     .single();
   if (eB || !tB) throw new Error(`No se pudo crear tenant B: ${eB?.message}`);
@@ -80,44 +98,17 @@ beforeAll(async () => {
   await rpc("on_tenant_created", { p_tenant_id: tenantBId });
 
   // Crear usuarios en auth.users via API de admin
-  const adminHeaders = {
-    "Content-Type": "application/json",
-    "Authorization": `Bearer ${SERVICE_ROLE_KEY}`,
-    "apikey": SERVICE_ROLE_KEY,
-  };
-  const apiBase = `${SUPABASE_URL}/auth/v1/admin/users`;
+  const emailA = `usera_${Date.now()}_${Math.floor(Math.random() * 10000)}@test.com`;
+  const emailB = `userb_${Date.now()}_${Math.floor(Math.random() * 10000)}@test.com`;
 
-  const resA = await fetch(apiBase, {
-    method: "POST",
-    headers: adminHeaders,
-    body: JSON.stringify({
-      email: "usera@test.com",
-      password: "Password123!",
-      email_confirm: true,
-      app_metadata: { tenant_id: tenantAId },
-    }),
-  });
-  const userAData = await resA.json() as { id?: string; access_token?: string };
-  userAId = userAData.id ?? "";
-
-  const resB = await fetch(apiBase, {
-    method: "POST",
-    headers: adminHeaders,
-    body: JSON.stringify({
-      email: "userb@test.com",
-      password: "Password123!",
-      email_confirm: true,
-      app_metadata: { tenant_id: tenantBId },
-    }),
-  });
-  const userBData = await resB.json() as { id?: string };
-  userBId = userBData.id ?? "";
+  userAId = await crearUsuarioAuth(emailA, { tenant_id: tenantAId }, "Password123!");
+  userBId = await crearUsuarioAuth(emailB, { tenant_id: tenantBId }, "Password123!");
 
   // Obtener JWTs de los usuarios (sign-in)
   const signInA = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=password`, {
     method: "POST",
     headers: { "Content-Type": "application/json", "apikey": SUPABASE_ANON_KEY },
-    body: JSON.stringify({ email: "usera@test.com", password: "Password123!" }),
+    body: JSON.stringify({ email: emailA, password: "Password123!" }),
   });
   const tokenA = await signInA.json() as { access_token?: string };
   jwtA = tokenA.access_token ?? "";
@@ -125,7 +116,7 @@ beforeAll(async () => {
   const signInB = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=password`, {
     method: "POST",
     headers: { "Content-Type": "application/json", "apikey": SUPABASE_ANON_KEY },
-    body: JSON.stringify({ email: "userb@test.com", password: "Password123!" }),
+    body: JSON.stringify({ email: emailB, password: "Password123!" }),
   });
   const tokenB = await signInB.json() as { access_token?: string };
   jwtB = tokenB.access_token ?? "";
@@ -143,10 +134,11 @@ beforeAll(async () => {
     await serviceDb.from("usuarios").insert({
       id: userAId,
       tenant_id: tenantAId,
-      username: "usera",
-      email: "usera@test.com",
+      username: `usera_${Date.now()}`,
+      email: emailA,
       full_name: "Usuario A",
       rol_id: rolAId,
+      active: true,
     });
   }
 
@@ -162,10 +154,11 @@ beforeAll(async () => {
     await serviceDb.from("usuarios").insert({
       id: userBId,
       tenant_id: tenantBId,
-      username: "userb",
-      email: "userb@test.com",
+      username: `userb_${Date.now()}`,
+      email: emailB,
       full_name: "Usuario B",
       rol_id: rolBId,
+      active: true,
     });
   }
 
@@ -226,10 +219,19 @@ afterAll(async () => {
     "apikey": SERVICE_ROLE_KEY,
   };
 
-  // CASCADE en tenants elimina todo lo demás. Va PRIMERO: desde que
-  // `usuarios.id` referencia a `auth.users` con ON DELETE CASCADE (migración
-  // 20260725000005), borrar la cuenta de Auth arrastra la fila espejo y las FK
-  // que apuntan al usuario frenan el borrado, dejando cuentas huérfanas.
+  // Borrado explícito hijo → padre de las tablas comerciales antes de borrar tenants
+  for (const tid of [tenantAId, tenantBId]) {
+    if (!tid) continue;
+    await serviceDb.from("movimientos_stock").delete().eq("tenant_id", tid);
+    await serviceDb.from("existencias_lote").delete().eq("tenant_id", tid);
+    await serviceDb.from("lotes").delete().eq("tenant_id", tid);
+    await serviceDb.from("producto_conversiones").delete().eq("tenant_id", tid);
+    await serviceDb.from("productos").delete().eq("tenant_id", tid);
+    await serviceDb.from("familias_producto").delete().eq("tenant_id", tid);
+    await serviceDb.from("proveedores").delete().eq("tenant_id", tid);
+  }
+
+  // CASCADE en tenants elimina todo lo demás.
   if (tenantAId) await serviceDb.from("tenants").delete().eq("id", tenantAId);
   if (tenantBId) await serviceDb.from("tenants").delete().eq("id", tenantBId);
 
@@ -817,7 +819,7 @@ describeIntegration("RLS-auditoria: registros_auditoria — aislamiento por tena
         user_role: "admin",
         action:    "CREATE",
         module:    "clients",
-        entity_id: "ent-audit-001",
+        entity_id: crypto.randomUUID(),
         details:   "registro de prueba RLS",
       })
       .select("id")
@@ -1004,5 +1006,120 @@ describeIntegration("RLS-Comercial: Catálogo comercial y proveedores aislados p
     // Intento de UPDATE directo
     const { error: errUpdate } = await db.from("productos").update({ nombre: "Nombre Hackeado" }).eq("id", prodAId);
     expect(errUpdate).not.toBeNull();
+  });
+});
+
+describeIntegration("C2·T1 / RN-SC4: Aislamiento RLS del Libro Mayor, Lotes y Existencias", () => {
+  let prodAId = "";
+  let loteAId = "";
+  let movAId = "";
+
+  beforeAll(async () => {
+    if (skipIfNoCredentials() || !tenantAId || !userAId) return;
+
+    const { data: u } = await serviceDb.from("unidades_medida").select("id").eq("codigo", "unidad").single();
+    const unidadId = (u as { id: string })?.id;
+
+    // Crear producto para Tenant A
+    const { data: prod } = await serviceDb.from("productos").insert({
+      tenant_id: tenantAId,
+      codigo: `PROD-RLS-STOCK-${Date.now()}`,
+      nombre: "Prod RLS Stock",
+      unidad_medida_id: unidadId,
+    }).select("id").single();
+    prodAId = prod?.id ?? "";
+
+    // Crear lote para Tenant A
+    const { data: lote } = await serviceDb.from("lotes").insert({
+      tenant_id: tenantAId,
+      producto_id: prodAId,
+      codigo_lote: `LOTE-RLS-A-${Date.now()}`,
+      costo_unitario_neto: 200,
+      costo_unitario_efectivo: 200,
+      origen: "compra",
+      usuario_id: userAId,
+    }).select("id").single();
+    loteAId = lote?.id ?? "";
+
+    // Crear movimiento para Tenant A
+    const { data: mov } = await serviceDb.from("movimientos_stock").insert({
+      tenant_id: tenantAId,
+      operacion_id: crypto.randomUUID(),
+      tipo: "entrada_inicial",
+      producto_id: prodAId,
+      lote_id: loteAId,
+      cantidad: 10,
+      usuario_id: userAId,
+    }).select("id").single();
+    movAId = mov?.id ?? "";
+  });
+
+  it("RN-SC4: el usuario B no ve lotes, movimientos_stock ni existencias_lote del tenant A", async () => {
+    if (skipIfNoCredentials()) return;
+    const db = userClient(jwtB);
+
+    const { data: lotes } = await db.from("lotes").select("id, tenant_id").eq("id", loteAId);
+    expect(lotes ?? []).toHaveLength(0);
+
+    const { data: movs } = await db.from("movimientos_stock").select("id, tenant_id").eq("id", movAId);
+    expect(movs ?? []).toHaveLength(0);
+
+    const { data: ext } = await db.from("existencias_lote").select("lote_id, tenant_id").eq("lote_id", loteAId);
+    expect(ext ?? []).toHaveLength(0);
+  });
+
+  it("RN-SC4: el usuario A sí ve sus propios lotes, movimientos y existencias_lote", async () => {
+    if (skipIfNoCredentials()) return;
+    const db = userClient(jwtA);
+
+    const { data: lotes, error: errLote } = await db.from("lotes").select("id, tenant_id").eq("id", loteAId);
+    expect(errLote).toBeNull();
+    expect((lotes ?? []).length).toBe(1);
+
+    const { data: movs, error: errMov } = await db.from("movimientos_stock").select("id, tenant_id").eq("id", movAId);
+    expect(errMov).toBeNull();
+    expect((movs ?? []).length).toBe(1);
+
+    const { data: ext, error: errExt } = await db.from("existencias_lote").select("lote_id, tenant_id").eq("lote_id", loteAId);
+    expect(errExt).toBeNull();
+    expect((ext ?? []).length).toBe(1);
+  });
+
+  it("RN-SC4: B no puede escribir lotes, movimientos_stock ni existencias_lote por PostgREST", async () => {
+    if (skipIfNoCredentials()) return;
+    const db = userClient(jwtB);
+
+    // Intento de INSERT directo en lotes
+    const { error: errLote } = await db.from("lotes").insert({
+      tenant_id: tenantBId,
+      producto_id: prodAId,
+      codigo_lote: "LOTE-HACK",
+      costo_unitario_neto: 10,
+      costo_unitario_efectivo: 10,
+      origen: "compra",
+      usuario_id: userAId,
+    });
+    expect(errLote).not.toBeNull();
+
+    // Intento de INSERT directo en movimientos_stock
+    const { error: errMov } = await db.from("movimientos_stock").insert({
+      tenant_id: tenantBId,
+      operacion_id: crypto.randomUUID(),
+      tipo: "entrada_inicial",
+      producto_id: prodAId,
+      lote_id: loteAId,
+      cantidad: 5,
+      usuario_id: userAId,
+    });
+    expect(errMov).not.toBeNull();
+
+    // Intento de INSERT directo en existencias_lote
+    const { error: errExt } = await db.from("existencias_lote").insert({
+      lote_id: loteAId,
+      tenant_id: tenantBId,
+      producto_id: prodAId,
+      cantidad: 999,
+    });
+    expect(errExt).not.toBeNull();
   });
 });

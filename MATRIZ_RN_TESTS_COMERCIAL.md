@@ -44,8 +44,8 @@ no arranque, esas cinco RN efectivamente no están en el alcance de ninguna tand
 
 | Estado al corte de la planificación | Cantidad |
 |---|:-:|
-| ✅ con test que pasa | 17 |
-| `PENDIENTE` | 68 |
+| ✅ con test que pasa | 22 |
+| `PENDIENTE` | 63 |
 | `N/A` — se activan en C7·T1 | 5 |
 
 ---
@@ -80,13 +80,13 @@ no arranque, esas cinco RN efectivamente no están en el alcance de ninguna tand
 | RN | Tanda | Estado | Archivo previsto | Caso |
 |---|---|---|---|---|
 | RN-MV1 | C2·T5 | PENDIENTE | `tests/unit/stock-ledger-guardrail.test.ts` | Guardrail estático: ningún `.from("existencias_lote").update(` ni `.insert(` en `src/modules/`. |
-| RN-MV2 | C2·T1 | PENDIENTE | `tests/integration/stock.integration.test.ts` | Con el cliente `service_role`, `.update()` y `.delete()` sobre un movimiento devuelven `MOVEMENT_IMMUTABLE`. |
-| RN-MV3 | C2·T1 | PENDIENTE | `tests/integration/stock.integration.test.ts` | Insertar cantidad 0 o negativa viola el CHECK. |
-| RN-MV4 | C2·T1 | PENDIENTE | `tests/integration/stock.integration.test.ts` | `entrada_compra` da signo `+`, `salida_venta` da `−`; la columna generada no se puede escribir. |
-| RN-MV5 | C2·T1 | PENDIENTE | `tests/integration/stock.integration.test.ts` | Forzar existencia negativa por PostgREST viola el CHECK de `existencias_lote`. La validación bajo bloqueo se cierra en C4·T2. |
+| RN-MV2 | C2·T1 | ✅ | `tests/integration/stock.integration.test.ts` | Con el cliente `service_role`, `.update()` y `.delete()` sobre un movimiento devuelven `MOVEMENT_IMMUTABLE`. |
+| RN-MV3 | C2·T1 | ✅ | `tests/integration/stock.integration.test.ts` | Insertar cantidad 0 o negativa viola el CHECK. |
+| RN-MV4 | C2·T1 | ✅ | `tests/integration/stock.integration.test.ts` | `entrada_compra` da signo `+`, `salida_venta` da `−`; la columna generada no se puede escribir. |
+| RN-MV5 | C2·T1 | ✅ | `tests/integration/stock.integration.test.ts` | Forzar existencia negativa por PostgREST viola el CHECK de `existencias_lote`. La validación bajo bloqueo se cierra en C4·T2. |
 | RN-MV6 | C2·T4 | PENDIENTE | `tests/unit/stock.service.test.ts` | Cambiar `costo_reposicion` no altera `movimientos_stock.costo_unitario` ya registrado. |
 | RN-MV7 | C2·T3 | PENDIENTE | `tests/integration/compras.integration.test.ts` | Fallo a mitad de `confirmar_compra`: no queda ni el lote ni el movimiento. Se reverifica en C6·T1. |
-| RN-MV8 | C2·T1 | PENDIENTE | `tests/integration/stock.integration.test.ts` | `salida_venta` sin `venta_item_id` falla; `entrada_compra` con `venta_item_id` falla. |
+| RN-MV8 | C2·T1 | ✅ | `tests/integration/stock.integration.test.ts` | `salida_venta` sin `venta_item_id` falla; `entrada_compra` con `venta_item_id` falla. |
 | RN-MV9 | C2·T4 | PENDIENTE | `tests/integration/compras.integration.test.ts` | La anulación genera movimientos nuevos y no borra los originales. |
 | RN-MV10 | C2·T5 | PENDIENTE | `tests/unit/stock-ledger-guardrail.test.ts` | Guardrail estático: ninguna ruta de aplicación escribe `existencias_lote`. |
 | RN-MV11 | C2·T2 | PENDIENTE | `tests/integration/stock.integration.test.ts` | Adulterar la caché con `service_role`, `verificar_existencias` lo reporta, `recalcular_existencias` la reconstruye. **Es el test que justifica la caché (D-02).** |

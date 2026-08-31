@@ -1050,6 +1050,68 @@ describeIntegration("Integridad cross-tenant en la BASE (FK compuestas, no solo 
 
     expect(error?.code).toBe("23503");
   });
+
+  it("RN-SC2: un lote de A no puede referenciar un producto de B", async () => {
+    if (skipIfNoCredentials() || !A?.tenantId || !B?.tenantId) return;
+
+    const { data: u } = await serviceDb.from("unidades_medida").select("id").eq("codigo", "unidad").single();
+    const unidadId = (u as { id: string })?.id;
+
+    const { data: prodB } = await serviceDb.from("productos").insert({
+      tenant_id: B.tenantId, codigo: `PROD-B-LOTE-${Date.now()}`, nombre: "Prod B Lote", unidad_medida_id: unidadId,
+    }).select("id").single();
+
+    const { error } = await serviceDb.from("lotes").insert({
+      tenant_id: A.tenantId,
+      producto_id: prodB?.id,
+      codigo_lote: "LOTE-CROSS",
+      costo_unitario_neto: 100,
+      costo_unitario_efectivo: 100,
+      origen: "compra",
+      usuario_id: A.userId,
+    });
+
+    expect(error, "la FK compuesta debió rechazar el producto ajeno").not.toBeNull();
+    expect(error?.code).toBe("23503");
+  });
+
+  it("RN-SC2: un movimiento de A no puede referenciar un lote de B", async () => {
+    if (skipIfNoCredentials() || !A?.tenantId || !B?.tenantId) return;
+
+    const { data: u } = await serviceDb.from("unidades_medida").select("id").eq("codigo", "unidad").single();
+    const unidadId = (u as { id: string })?.id;
+
+    const { data: prodA } = await serviceDb.from("productos").insert({
+      tenant_id: A.tenantId, codigo: `PROD-A-MOV-${Date.now()}`, nombre: "Prod A Mov", unidad_medida_id: unidadId,
+    }).select("id").single();
+
+    const { data: prodB } = await serviceDb.from("productos").insert({
+      tenant_id: B.tenantId, codigo: `PROD-B-MOV-${Date.now()}`, nombre: "Prod B Mov", unidad_medida_id: unidadId,
+    }).select("id").single();
+
+    const { data: loteB } = await serviceDb.from("lotes").insert({
+      tenant_id: B.tenantId,
+      producto_id: prodB?.id,
+      codigo_lote: "LOTE-B",
+      costo_unitario_neto: 100,
+      costo_unitario_efectivo: 100,
+      origen: "compra",
+      usuario_id: B.userId,
+    }).select("id").single();
+
+    const { error } = await serviceDb.from("movimientos_stock").insert({
+      tenant_id: A.tenantId,
+      operacion_id: crypto.randomUUID(),
+      tipo: "entrada_inicial",
+      producto_id: prodA?.id,
+      lote_id: loteB?.id,
+      cantidad: 5,
+      usuario_id: A.userId,
+    });
+
+    expect(error, "la FK compuesta debió rechazar el lote ajeno").not.toBeNull();
+    expect(error?.code).toBe("23503");
+  });
 });
 
 // ─── 6. UNA CLÍNICA NUEVA NACE UTILIZABLE ─────────────────────────────────────
