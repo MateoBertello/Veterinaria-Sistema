@@ -256,4 +256,53 @@ describe("CajaService — Unit Tests", () => {
     expect(mockFrom).toHaveBeenNthCalledWith(2, "movimientos_caja");
     expect(resumen.totalesPorMedioPago).toHaveLength(2);
   });
+
+  it("RN-CJ3: una venta en cuenta corriente no altera el arqueo", async () => {
+    const chainSesion: any = {};
+    chainSesion.eq = vi.fn().mockReturnValue(chainSesion);
+    chainSesion.maybeSingle = vi.fn().mockResolvedValue({
+      data: {
+        id: SESION_ID,
+        estado: "abierta",
+        saldo_inicial: 1000,
+        saldo_teorico_efectivo: null,
+        efectivo_contado: null,
+        diferencia: null,
+      },
+      error: null,
+    });
+
+    const chainMovs: any = {};
+    chainMovs.eq = vi.fn().mockImplementation((col: string) => {
+      if (col === "tenant_id") {
+        return Promise.resolve({
+          data: [
+            {
+              tipo: "ingreso_venta",
+              importe: 5000,
+              medio_pago: { id: "mp-cc", codigo: "cuenta_corriente", nombre: "Cuenta Corriente", afecta_arqueo: false },
+            },
+          ],
+          error: null,
+        });
+      }
+      return chainMovs;
+    });
+
+    const mockFrom = vi.fn().mockImplementation((table: string) => {
+      if (table === "sesiones_caja") {
+        return { select: vi.fn().mockReturnValue(chainSesion) };
+      }
+      if (table === "movimientos_caja") {
+        return { select: vi.fn().mockReturnValue(chainMovs) };
+      }
+      return {};
+    });
+
+    mockGetServiceDb.mockReturnValue({ from: mockFrom } as any);
+
+    const resumen = await CajaService.resumenSesion(SESION_ID, TENANT_ID);
+    expect(resumen.saldoInicial).toBe(1000);
+    expect(resumen.saldoTeoricoEfectivo).toBe(1000);
+  });
 });

@@ -1,5 +1,24 @@
-import { describe, it, expect } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { descomponerLinea, redondear2 } from "../../supabase/functions/api/src/modules/ventas/ventas.calculo.ts";
+
+vi.mock("../../supabase/functions/api/src/shared/db.ts", () => ({
+  getDb: vi.fn(),
+  getServiceDb: vi.fn(),
+}));
+
+vi.mock("../../supabase/functions/api/src/shared/audit.ts", () => ({
+  recordAudit: vi.fn().mockResolvedValue(undefined),
+}));
+
+import { getServiceDb } from "../../supabase/functions/api/src/shared/db.ts";
+import { VentaService, type Context } from "../../supabase/functions/api/src/modules/ventas/ventas.service.ts";
+
+const mockGetServiceDb = vi.mocked(getServiceDb);
+
+const TENANT_ID = "11111111-1111-4111-8111-111111111111";
+const CALLER_USER_ID = "22222222-2222-4222-8222-222222222222";
 
 describe("RN-VT1 & RN-VT2: Cálculo y descomposición de IVA en ventas", () => {
   it("RN-VT1: el IVA se calcula por diferencia y neto + iva = precio", () => {
@@ -59,14 +78,8 @@ describe("RN-VT1 & RN-VT2: Cálculo y descomposición de IVA en ventas", () => {
     const sumaEsperada = redondear2(333.33 + 155.55 + 277.77 + 499.99 + 888.88);
     expect(totalCalculado).toBe(sumaEsperada);
 
-    // Comprobar que NO coincide con el recálculo desde la suma de netos + suma de ivas
-    // Ejemplo de discrepancia con cálculo por separado vs suma de líneas redondeadas:
-    // Línea: precio 10.05 al 21%. neto = 8.31, iva = 1.74. cantidad 3 -> importe_total = 30.15
-    // Si sumamos 3 * neto = 24.93, 3 * iva = 5.22 -> 24.93 + 5.22 = 30.15
-    // Pero si se calculase neto_total = round(30.15 / 1.21) = 24.92 e iva = round(24.92 * 0.21) = 5.23
     const netoGlobal = redondear2(lineas.reduce((acc, l) => acc + l.netoUnitario, 0));
     const ivaGlobalCalculadoAparte = redondear2(netoGlobal * 0.21);
-    // Demostramos que recalcular IVA desde el neto global difiere de la suma de importes
     expect(netoGlobal + ivaGlobalCalculadoAparte).not.toBe(totalCalculado);
   });
 
@@ -107,5 +120,130 @@ describe("RN-VT1 & RN-VT2: Cálculo y descomposición de IVA en ventas", () => {
 
     // $900 en cuenta corriente con condicion_pago='cuenta_corriente' -> OK, saldo_pendiente = 100
     expect(validarPagos(1000, [{ importe: 900 }], "cuenta_corriente", 100)).toBe(true);
+  });
+});
+
+describe("VentaService — Unit Tests", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  function createMockDb() {
+    const chain: Record<string, any> = {};
+    chain.from = vi.fn().mockReturnValue(chain);
+    chain.select = vi.fn().mockReturnValue(chain);
+    chain.insert = vi.fn().mockReturnValue(chain);
+    chain.update = vi.fn().mockReturnValue(chain);
+    chain.delete = vi.fn().mockReturnValue(chain);
+    chain.eq = vi.fn().mockReturnValue(chain);
+    chain.gte = vi.fn().mockReturnValue(chain);
+    chain.lte = vi.fn().mockReturnValue(chain);
+    chain.order = vi.fn().mockReturnValue(chain);
+    chain.range = vi.fn().mockReturnValue(chain);
+    chain.maybeSingle = vi.fn().mockResolvedValue({ data: null, error: null });
+    chain.single = vi.fn().mockResolvedValue({ data: null, error: null });
+    chain.rpc = vi.fn().mockResolvedValue({ data: [], error: null });
+    mockGetServiceDb.mockReturnValue(chain as any);
+    return chain;
+  }
+
+  it("RN-MV6: el reporte de margen usa el costo guardado", async () => {
+    const db = createMockDb();
+    // Simulamos vista v_margen_venta que almacena costo_total desde el costo guardado (100)
+    // independiente del costo de reposición que pueda cambiar
+    const mockMargenData = [
+      {
+        tenant_id: TENANT_ID,
+        venta_id: "venta-1",
+        item_id: "prod-1",
+        item_nombre: "Vacuna Antirrábica",
+        cantidad: 1,
+        importe_total: 200,
+        neto_total: 165.29,
+        costo_total: 100, // costo unitario efectivo guardado
+        margen: 65.29,
+      },
+    ];
+
+    db.range.mockReturnValue(db);
+    db.order.mockResolvedValueOnce({ data: mockMargenData, error: null });
+
+    const ctx: Context = {
+      tenantId: TENANT_ID,
+      callerUserId: CALLER_USER_ID,
+      permisos: new Set(["view_sales"]),
+    };
+
+    const reporte = await VentaService.margenPorProducto({}, ctx);
+    expect(reporte).toHaveLength(1);
+    expect(reporte[0].costo_total).toBe(100);
+    expect(reporte[0].margen).toBe(65.29);
+    // El servicio consultó v_margen_venta con tenant_id
+    expect(db.from).toHaveBeenCalledWith("v_margen_venta");
+    expect(db.eq).toHaveBeenCalledWith("tenant_id", TENANT_ID);
+  });
+
+  it("sin view_sales el listado se acota al usuario", async () => {
+    const db = createMockDb();
+    db.range.mockResolvedValueOnce({ data: [], count: 0, error: null });
+
+    // 1. Sin view_sales -> filtra por usuario_id = callerUserId
+    const ctxSinViewSales: Context = {
+      tenantId: TENANT_ID,
+      callerUserId: CALLER_USER_ID,
+      permisos: new Set(["manage_sales"]), // NO tiene view_sales
+    };
+
+    await VentaService.buscarPaginado({ page: 1, limit: 20 }, ctxSinViewSales);
+    expect(db.eq).toHaveBeenCalledWith("tenant_id", TENANT_ID);
+    expect(db.eq).toHaveBeenCalledWith("usuario_id", CALLER_USER_ID);
+
+    vi.clearAllMocks();
+    const db2 = createMockDb();
+    db2.range.mockResolvedValueOnce({ data: [], count: 0, error: null });
+
+    // 2. Con view_sales -> NO acota por callerUserId
+    const ctxConViewSales: Context = {
+      tenantId: TENANT_ID,
+      callerUserId: CALLER_USER_ID,
+      permisos: new Set(["manage_sales", "view_sales"]),
+    };
+
+    await VentaService.buscarPaginado({ page: 1, limit: 20 }, ctxConViewSales);
+    expect(db2.eq).toHaveBeenCalledWith("tenant_id", TENANT_ID);
+    expect(db2.eq).not.toHaveBeenCalledWith("usuario_id", CALLER_USER_ID);
+  });
+
+  it("el Service no lee existencias", () => {
+    const servicePath = join(
+      process.cwd(),
+      "supabase/functions/api/src/modules/ventas/ventas.service.ts"
+    );
+    const content = readFileSync(servicePath, "utf-8");
+    expect(content).not.toContain("existencias_lote");
+    expect(content).not.toContain("movimientos_stock");
+  });
+
+  it("no hay N+1 en el listado", async () => {
+    const db = createMockDb();
+    db.range.mockResolvedValueOnce({
+      data: [
+        { id: "v1", cliente: { full_name: "Juan Perez" }, usuario: { full_name: "Admin" } },
+        { id: "v2", cliente: { full_name: "Maria Lopez" }, usuario: { full_name: "Admin" } },
+      ],
+      count: 2,
+      error: null,
+    });
+
+    const ctx: Context = {
+      tenantId: TENANT_ID,
+      callerUserId: CALLER_USER_ID,
+      permisos: new Set(["view_sales"]),
+    };
+
+    const res = await VentaService.buscarPaginado({ page: 1, limit: 20 }, ctx);
+    expect(res.items).toHaveLength(2);
+    expect(db.from).toHaveBeenCalledTimes(1);
+    expect(db.from).toHaveBeenCalledWith("ventas");
   });
 });

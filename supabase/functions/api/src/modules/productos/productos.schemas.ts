@@ -45,12 +45,13 @@ export const ActualizarProductoSchema = CrearProductoSchema.partial();
 export const CambiarEstadoProductoSchema = z.object({ activo: z.boolean() });
 
 export const ListarProductosQuerySchema = z.object({
-  search:    z.string().trim().min(1).max(100).optional(),
-  familiaId: z.string().uuid().optional(),
-  activo:    z.string().optional().transform((v) => (v === undefined ? undefined : v === "true")),
-  vendible:  z.string().optional().transform((v) => (v === undefined ? undefined : v === "true")),
-  page:      z.coerce.number().int().min(1).default(1),
-  limit:     z.coerce.number().int().min(1).max(100).default(20),
+  search:       z.string().trim().min(1).max(100).optional(),
+  familiaId:    z.string().uuid().optional(),
+  codigoBarras: z.string().trim().optional(),
+  activo:       z.string().optional().transform((v) => (v === undefined ? undefined : v === "true")),
+  vendible:     z.string().optional().transform((v) => (v === undefined ? undefined : v === "true")),
+  page:         z.coerce.number().int().min(1).default(1),
+  limit:        z.coerce.number().int().min(1).max(100).default(20),
 });
 
 export const CrearFamiliaSchema = z.object({

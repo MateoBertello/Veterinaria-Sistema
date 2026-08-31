@@ -134,7 +134,7 @@ no arranque, esas cinco RN efectivamente no están en el alcance de ninguna tand
 |---|---|---|---|---|
 | RN-CJ1 | C4·T2 | ✅ | `tests/unit/ventas.service.test.ts` | $1.000 con pagos por $900 al contado falla; $600 efectivo + $400 transferencia funciona; $900 en cuenta corriente deja saldo 100. |
 | RN-CJ2 | C3·T2 | ✅ | `tests/integration/caja.integration.test.ts` | Saldo inicial 1.000, venta de 5.000 en transferencia y 2.000 en efectivo → teórico 3.000, no 8.000. |
-| RN-CJ3 | C4·T4 | PENDIENTE | `tests/unit/caja.service.test.ts` | Saldo inicial 1.000 y una venta íntegra en cuenta corriente → teórico 1.000, diferencia 0. |
+| RN-CJ3 | C4·T4 | ✅ | `tests/unit/caja.service.test.ts` | Saldo inicial 1.000 y una venta íntegra en cuenta corriente → teórico 1.000, diferencia 0. |
 | RN-CJ4 | C3·T1 + C3·T2 | ✅ | `tests/integration/caja.integration.test.ts` | T1: el índice parcial único rechaza la segunda sesión abierta. T2: dos aperturas simultáneas con `Promise.all` y `rpcReallyRan()` → gana exactamente una. |
 | RN-CJ5 | C3·T2 | ✅ | `tests/integration/caja.integration.test.ts` | Cerrar y registrar un movimiento falla; cerrar dos veces falla; no existe endpoint de reapertura. |
 | RN-CJ6 | C3·T2 | ✅ | `tests/integration/caja.integration.test.ts` | Cerrar con el efectivo exacto guarda `diferencia = 0.00`, **no** `NULL`. |

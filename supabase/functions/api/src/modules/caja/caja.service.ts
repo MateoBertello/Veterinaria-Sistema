@@ -457,10 +457,19 @@ export class CajaService {
       }
     }
 
+    const totalAfectaArqueo = [...porMedioMap.values()]
+      .filter((mp) => mp.afectaArqueo)
+      .reduce((acc, mp) => acc + mp.neto, 0);
+
+    const saldoTeoricoEfectivo =
+      sesion.saldo_teorico_efectivo !== null
+        ? Number(sesion.saldo_teorico_efectivo)
+        : Number(sesion.saldo_inicial) + totalAfectaArqueo;
+
     return {
       sesionId,
       saldoInicial:         Number(sesion.saldo_inicial),
-      saldoTeoricoEfectivo: sesion.saldo_teorico_efectivo !== null ? Number(sesion.saldo_teorico_efectivo) : null,
+      saldoTeoricoEfectivo: saldoTeoricoEfectivo,
       efectivoContado:      sesion.efectivo_contado !== null ? Number(sesion.efectivo_contado) : null,
       diferencia:           sesion.diferencia !== null ? Number(sesion.diferencia) : null,
       totalesPorMedioPago:  [...porMedioMap.values()],

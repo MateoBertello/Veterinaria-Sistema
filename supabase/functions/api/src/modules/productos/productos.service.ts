@@ -294,10 +294,13 @@ export const ProductoService = {
       .eq("tenant_id", ctx.tenantId);
 
     if (query.search) {
-      q = q.or(`nombre.ilike.%${query.search}%,codigo.ilike.%${query.search}%`);
+      q = q.or(`nombre.ilike.%${query.search}%,codigo.ilike.%${query.search}%,codigo_barras.ilike.%${query.search}%`);
     }
     if (query.familiaId) {
       q = q.eq("familia_id", query.familiaId);
+    }
+    if (query.codigoBarras) {
+      q = q.eq("codigo_barras", query.codigoBarras);
     }
     if (query.activo !== undefined) {
       q = q.eq("activo", query.activo);
