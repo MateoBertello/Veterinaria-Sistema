@@ -1123,3 +1123,110 @@ describeIntegration("C2·T1 / RN-SC4: Aislamiento RLS del Libro Mayor, Lotes y E
     expect(errExt).not.toBeNull();
   });
 });
+
+describeIntegration("C3·T1 / RN-SC4: Aislamiento RLS de Cajas, Sesiones de Caja y Movimientos de Caja", () => {
+  let cajaAId = "";
+  let sesionAId = "";
+  let movCajaAId = "";
+
+  beforeAll(async () => {
+    if (skipIfNoCredentials() || !tenantAId || !userAId) return;
+
+    // 1. Crear caja para Tenant A
+    const { data: caja } = await serviceDb.from("cajas").insert({
+      tenant_id: tenantAId,
+      nombre: `Caja Principal RLS-${Date.now()}`,
+    }).select("id").single();
+    cajaAId = caja?.id ?? "";
+
+    // 2. Crear sesión para Tenant A
+    const { data: sesion } = await serviceDb.from("sesiones_caja").insert({
+      tenant_id: tenantAId,
+      caja_id: cajaAId,
+      estado: "abierta",
+      apertura_usuario_id: userAId,
+      saldo_inicial: 1000,
+    }).select("id").single();
+    sesionAId = sesion?.id ?? "";
+
+    // 3. Medio de pago
+    const { data: mp } = await serviceDb.from("medios_pago").select("id").eq("codigo", "efectivo").single();
+    const medioPagoId = mp?.id as string;
+
+    // 4. Crear movimiento de caja para Tenant A
+    const { data: mov } = await serviceDb.from("movimientos_caja").insert({
+      tenant_id: tenantAId,
+      sesion_caja_id: sesionAId,
+      tipo: "ingreso_manual",
+      medio_pago_id: medioPagoId,
+      importe: 500,
+      usuario_id: userAId,
+      motivo: "Fondo inicial extra",
+    }).select("id").single();
+    movCajaAId = mov?.id ?? "";
+  });
+
+  it("RN-SC4: el usuario B no ve cajas, sesiones_caja ni movimientos_caja del tenant A", async () => {
+    if (skipIfNoCredentials()) return;
+    const db = userClient(jwtB);
+
+    const { data: cajas } = await db.from("cajas").select("id, tenant_id").eq("id", cajaAId);
+    expect(cajas ?? []).toHaveLength(0);
+
+    const { data: sesiones } = await db.from("sesiones_caja").select("id, tenant_id").eq("id", sesionAId);
+    expect(sesiones ?? []).toHaveLength(0);
+
+    const { data: movs } = await db.from("movimientos_caja").select("id, tenant_id").eq("id", movCajaAId);
+    expect(movs ?? []).toHaveLength(0);
+  });
+
+  it("RN-SC4: el usuario A sí ve sus propias cajas, sesiones_caja y movimientos_caja", async () => {
+    if (skipIfNoCredentials()) return;
+    const db = userClient(jwtA);
+
+    const { data: cajas, error: errCaja } = await db.from("cajas").select("id, tenant_id").eq("id", cajaAId);
+    expect(errCaja).toBeNull();
+    expect((cajas ?? []).length).toBe(1);
+
+    const { data: sesiones, error: errSesion } = await db.from("sesiones_caja").select("id, tenant_id").eq("id", sesionAId);
+    expect(errSesion).toBeNull();
+    expect((sesiones ?? []).length).toBe(1);
+
+    const { data: movs, error: errMov } = await db.from("movimientos_caja").select("id, tenant_id").eq("id", movCajaAId);
+    expect(errMov).toBeNull();
+    expect((movs ?? []).length).toBe(1);
+  });
+
+  it("RN-SC4: B no puede escribir cajas, sesiones_caja ni movimientos_caja por PostgREST", async () => {
+    if (skipIfNoCredentials()) return;
+    const db = userClient(jwtB);
+
+    // Intento de INSERT directo en cajas
+    const { error: errCaja } = await db.from("cajas").insert({
+      tenant_id: tenantBId,
+      nombre: "Caja Hack",
+    });
+    expect(errCaja).not.toBeNull();
+
+    // Intento de INSERT directo en sesiones_caja
+    const { error: errSesion } = await db.from("sesiones_caja").insert({
+      tenant_id: tenantBId,
+      caja_id: cajaAId,
+      estado: "abierta",
+      apertura_usuario_id: userAId,
+      saldo_inicial: 500,
+    });
+    expect(errSesion).not.toBeNull();
+
+    // Intento de INSERT directo en movimientos_caja
+    const { error: errMov } = await db.from("movimientos_caja").insert({
+      tenant_id: tenantBId,
+      sesion_caja_id: sesionAId,
+      tipo: "ingreso_manual",
+      medio_pago_id: "00000000-0000-0000-0000-000000000000",
+      importe: 100,
+      usuario_id: userAId,
+    });
+    expect(errMov).not.toBeNull();
+  });
+});

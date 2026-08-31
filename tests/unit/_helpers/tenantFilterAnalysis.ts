@@ -47,7 +47,7 @@ export function extractSchemaFromMigrations(files: MigrationFile[]): SchemaInfo 
     // `-- CREATE TABLE foo (tenant_id ...)` dejado en un comentario.
     const cleaned = content.replace(/--.*$/gm, "");
 
-    const createRe = /CREATE TABLE\s+(?:IF NOT EXISTS\s+)?"?(\w+)"?\s*\(/gi;
+    const createRe = /CREATE TABLE\s+(?:IF NOT EXISTS\s+)?(?:["\w]+\.)?"?(\w+)"?\s*\(/gi;
     let match: RegExpExecArray | null;
     while ((match = createRe.exec(cleaned))) {
       const table = match[1]!;
@@ -64,7 +64,7 @@ export function extractSchemaFromMigrations(files: MigrationFile[]): SchemaInfo 
       createRe.lastIndex = i;
     }
 
-    const alterRe = /ALTER TABLE\s+(?:ONLY\s+)?"?(\w+)"?\s+ADD COLUMN\s+(?:IF NOT EXISTS\s+)?"?tenant_id"?\s+UUID/gi;
+    const alterRe = /ALTER TABLE\s+(?:ONLY\s+)?(?:["\w]+\.)?"?(\w+)"?\s+ADD COLUMN\s+(?:IF NOT EXISTS\s+)?"?tenant_id"?\s+UUID/gi;
     while ((match = alterRe.exec(cleaned))) {
       allTables.add(match[1]!);
       tenantTables.add(match[1]!);

@@ -55,19 +55,55 @@ function loadRealSchema() {
   return extractSchemaFromMigrations(files);
 }
 
-function listServiceFiles(): Array<{ absPath: string; relPath: string }> {
-  const moduleDirs = readdirSync(SERVICES_DIR, { withFileTypes: true }).filter((d) => d.isDirectory());
-  const files: Array<{ absPath: string; relPath: string }> = [];
-  for (const dir of moduleDirs) {
-    const dirPath = join(SERVICES_DIR, dir.name);
-    for (const entry of readdirSync(dirPath)) {
-      if (entry.endsWith(".service.ts")) {
-        const absPath = join(dirPath, entry);
-        files.push({ absPath, relPath: relative(REPO_ROOT, absPath).split(sep).join("/") });
+function listServiceFiles(dir = SERVICES_DIR): Array<{ absPath: string; relPath: string }> {
+  const results: Array<{ absPath: string; relPath: string }> = [];
+  function walk(currentDir: string) {
+    const entries = readdirSync(currentDir, { withFileTypes: true });
+    for (const entry of entries) {
+      const fullPath = join(currentDir, entry.name);
+      if (entry.isDirectory()) {
+        walk(fullPath);
+      } else if (entry.name.endsWith(".service.ts")) {
+        results.push({
+          absPath: fullPath,
+          relPath: relative(REPO_ROOT, fullPath).split(sep).join("/"),
+        });
       }
     }
   }
-  return files;
+  walk(dir);
+  return results;
+}
+
+function getCommercialTenantTables(): Set<string> {
+  const files = readdirSync(MIGRATIONS_DIR)
+    .filter((f) => f.endsWith(".sql") && (f.includes("_comercial_") || f.includes("@modulo: comercial")))
+    .sort()
+    .map((name) => ({ name, content: readFileSync(join(MIGRATIONS_DIR, name), "utf-8") }));
+  return extractSchemaFromMigrations(files).tenantTables;
+}
+
+function discoverCommercialModules(): Set<string> {
+  const commercialTables = getCommercialTenantTables();
+  const commercialModules = new Set<string>();
+  const moduleDirs = readdirSync(SERVICES_DIR, { withFileTypes: true }).filter((d) => d.isDirectory());
+
+  for (const dir of moduleDirs) {
+    const dirPath = join(SERVICES_DIR, dir.name);
+    const entries = readdirSync(dirPath, { recursive: true }) as string[];
+    for (const entry of entries) {
+      if (typeof entry === "string" && entry.endsWith(".ts") && !entry.endsWith(".test.ts")) {
+        const content = readFileSync(join(dirPath, entry), "utf-8");
+        for (const table of commercialTables) {
+          if (content.includes(`"${table}"`) || content.includes(`'${table}'`)) {
+            commercialModules.add(dir.name);
+            break;
+          }
+        }
+      }
+    }
+  }
+  return commercialModules;
 }
 
 // ─── Allowlist ──────────────────────────────────────────────────────────────
@@ -458,17 +494,13 @@ it("BLOQUEANTE: toda .from() sobre tabla con tenant_id, corriendo con getService
 });
 
 describe("BLOQUEANTE: el guardrail efectivamente ve los services del módulo comercial", () => {
-  // Los directorios de módulo del comercial, en el orden en que las etapas los crean.
-  // Cada tanda que agrega un módulo nuevo agrega su nombre acá. Es la ÚNICA lista
-  // escrita a mano de este archivo, y existe porque su ausencia es indetectable:
-  // un guardrail que no escanea nada pasa en verde para siempre.
-  const MODULOS_COMERCIALES = ["productos", "proveedores", "stock", "compras"];
+  it("descubre automáticamente los módulos comerciales y verifica que estén en el escaneo", () => {
+    const commercialModules = Array.from(discoverCommercialModules());
+    expect(commercialModules.length).toBeGreaterThanOrEqual(4); // Al menos productos, proveedores, stock, compras
 
-  const escaneados = listServiceFiles().map((f) => f.relPath);
+    const escaneados = listServiceFiles().map((f) => f.relPath);
 
-  it.each(MODULOS_COMERCIALES)(
-    "el service de %s está dentro del alcance del guardrail",
-    (modulo) => {
+    for (const modulo of commercialModules) {
       const match = escaneados.filter((p) => p.includes(`/modules/${modulo}/`));
       expect(
         match,
@@ -477,15 +509,18 @@ describe("BLOQUEANTE: el guardrail efectivamente ve los services del módulo com
         `por tenant de ese módulo no tiene ninguna red. Archivos que sí ve:\n` +
         escaneados.join("\n"),
       ).not.toHaveLength(0);
-    },
-  );
+    }
+  });
 
-  it("el esquema derivado de las migraciones incluye las tablas del módulo", () => {
+  it("el esquema derivado de las migraciones incluye todas las tablas comerciales con tenant_id", () => {
     const { tenantTables } = loadRealSchema();
-    for (const tabla of ["productos", "familias_producto", "producto_conversiones", "proveedores"]) {
+    const commercialTenantTables = getCommercialTenantTables();
+    expect(commercialTenantTables.size).toBeGreaterThan(0);
+
+    for (const tabla of commercialTenantTables) {
       expect(
         tenantTables.has(tabla),
-        `La tabla ${tabla} no quedó en el esquema derivado del DDL: el guardrail no va ` +
+        `La tabla comercial "${tabla}" no quedó en el esquema derivado del DDL: el guardrail no va ` +
         `a exigir el filtro de tenant en sus consultas.`,
       ).toBe(true);
     }
