@@ -176,11 +176,11 @@ no arranque, esas cinco RN efectivamente no están en el alcance de ninguna tand
 
 | RN | Tanda | Estado | Archivo previsto | Caso |
 |---|---|---|---|---|
-| RN-CC1 | C7·T1 | N/A | `tests/integration/consumo.integration.test.ts` | Aplicar una vacuna genera un movimiento `consumo_clinico` con `historial_id` y `mascota_id`, y **no** genera venta ni movimiento de caja. **C7·T1 la activa.** |
-| RN-CC2 | C7·T1 | N/A | `tests/integration/consumo.integration.test.ts` | Consumir de un lote vencido falla; consumir más de lo disponible falla; el lote sugerido es el de FEFO. **C7·T1 la activa.** |
-| RN-CC3 | C7·T2 | N/A | `tests/unit/consumo.service.test.ts` | Los dos escenarios de `exigir_receta_bloqueante`, cambiando **solo** la configuración del tenant, sin migración. **C7·T1 la activa.** |
-| RN-CC4 | C7·T3 | N/A | `tests/integration/consumo.integration.test.ts` | Dado un lote, las mascotas que lo recibieron; dada una mascota, los lotes que recibió. Las dos consultas tras tres consumos sobre dos mascotas. **C7·T1 la activa.** |
-| RN-CC5 | C7·T1 | N/A | `tests/integration/consumo.integration.test.ts` | Tras un ciclo completo de operaciones, ningún movimiento tiene `trazabilidad_estado` distinto de `no_aplica`. **Es un test de que NO se construyó el puente a SIGTRAZAVET.** **C7·T1 la activa.** |
+| RN-CC1 | C7·T1 | ✅ | `tests/integration/consumo.integration.test.ts` | Aplicar una vacuna genera un movimiento `consumo_clinico` con `historial_id` y `mascota_id`, y **no** genera venta ni movimiento de caja. **C7·T1 la activa.** |
+| RN-CC2 | C7·T1 | ✅ | `tests/integration/consumo.integration.test.ts` | Consumir de un lote vencido falla; consumir más de lo disponible falla; el lote sugerido es el de FEFO. **C7·T1 la activa.** |
+| RN-CC3 | C7·T2 | ✅ | `tests/unit/consumo.service.test.ts` | Los dos escenarios de `exigir_receta_bloqueante`, cambiando **solo** la configuración del tenant, sin migración. **C7·T1 la activa.** |
+| RN-CC4 | C7·T3 | PENDIENTE | `tests/integration/consumo.integration.test.ts` | Dado un lote, las mascotas que lo recibieron; dada una mascota, los lotes que recibió. Las dos consultas tras tres consumos sobre dos mascotas. **C7·T1 la activa.** |
+| RN-CC5 | C7·T1 | ✅ | `tests/integration/consumo.integration.test.ts` | Tras un ciclo completo de operaciones, ningún movimiento tiene `trazabilidad_estado` distinto de `no_aplica`. **Es un test de que NO se construyó el puente a SIGTRAZAVET.** **C7·T1 la activa.** |
 
 > Las columnas que C7 necesita (`movimientos_stock.historial_id`, `plan_vacunacion_id`,
 > `mascota_id`, `receta_id`, `profesional_prescriptor_id`) **ya se crearon en C2·T1**, junto con
