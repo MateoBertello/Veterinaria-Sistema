@@ -72,7 +72,7 @@ no arranque, esas cinco RN efectivamente no están en el alcance de ninguna tand
 | RN | Tanda | Estado | Archivo previsto | Caso |
 |---|---|---|---|---|
 | RN-PRV1 | C1·T3 | ✅ | `tests/integration/catalogo-comercial.integration.test.ts` | Razón social duplicada falla; mismo CUIT en otro tenant funciona. |
-| RN-PRV2 | C1·T5 | PENDIENTE | `tests/unit/proveedores.service.test.ts` | Desactivar y crear compra falla. Se reverifica en C2·T3. |
+| RN-PRV2 | C1·T5 | ✅ | `tests/unit/proveedores.service.test.ts` | Desactivar y crear compra falla. Se reverifica en C2·T3. |
 | RN-PRV3 | C1·T5 | PENDIENTE | `tests/integration/compras.integration.test.ts` | Borrar un proveedor con una compra confirmada falla **por FK**. Se cierra en C2·T3. |
 
 ## RN-MV — Movimientos y existencias (C2)
@@ -206,11 +206,11 @@ del fixture de volumen versionado:
 
 | RN | Tanda | Estado | Archivo previsto | Caso |
 |---|---|---|---|---|
-| RN-SC1 | C1·T5 | PENDIENTE | `tests/unit/tenant-filter-guardrail.test.ts` (**G1**)<br>`tests/integration/aislamiento-api.integration.test.ts` | Guardrail G1 con su assert de cobertura sobre los services del módulo + enviar `tenantId` en el body no cambia el tenant afectado. Se reverifica en cada etapa. |
+| RN-SC1 | C1·T5 | ✅ | `tests/unit/tenant-filter-guardrail.test.ts` (**G1**)<br>`tests/unit/productos.controller.test.ts`<br>`tests/unit/proveedores.controller.test.ts`<br>`tests/integration/aislamiento-api.integration.test.ts` | Guardrail G1 con su assert de cobertura sobre los services del módulo + enviar `tenantId` en el body no cambia el tenant afectado. Se reverifica en cada etapa. |
 | RN-SC2 | C1·T3 + C2·T1 + C4·T1 | ✅ | `tests/integration/aislamiento-api.integration.test.ts` | Insertar con `service_role` una fila cuyo `x_id` pertenece a otro tenant falla **por FK compuesta**, no por validación de aplicación. |
-| RN-SC3 | C1·T5 | PENDIENTE | `tests/integration/grants.integration.test.ts` (**G3**) | Bloque que **enumera** las funciones creadas por las migraciones del módulo y verifica `has_function_privilege('anon'\|'authenticated', …) = false` para todas. Una función nueva entra sola al alcance. |
+| RN-SC3 | C1·T5 | ✅ | `tests/integration/grants.integration.test.ts` (**G3**) | Bloque que **enumera** las funciones creadas por las migraciones del módulo y verifica `has_function_privilege('anon'\|'authenticated', …) = false` para todas. Una función nueva entra sola al alcance. |
 | RN-SC4 | C1·T3 | ✅ | `tests/integration/rls.test.ts` | Con dos tenants sembrados, ninguna consulta de A devuelve filas de B en las tablas del módulo. **Bloqueante desde la primera etapa.** Se extiende en cada migración. |
-| RN-SC5 | C1·T5 | PENDIENTE | `tests/unit/*.service.test.ts` de cada módulo | Por tipo de operación, verificar el asiento con su `module`; si la operación falla, no queda asiento huérfano. Se reverifica en cada etapa. |
+| RN-SC5 | C1·T5 | ✅ | `tests/unit/productos.service.test.ts`<br>`tests/unit/proveedores.service.test.ts` | Por tipo de operación, verificar el asiento con su `module`; si la operación falla, no queda asiento huérfano. Se reverifica en cada etapa. |
 | RN-SC6 | C1·T1 | ✅ | `tests/unit/audit-modulo-enum.test.ts` (**G2**) | Todo `module:` de `recordAudit` existe en el ENUM `modulo_auditoria` **y** en el tipo `AuditModule`. La dirección TS es nueva y es la que hoy falta. |
-| RN-SC7 | C1·T5 | PENDIENTE | `tests/unit/*.controller.test.ts` de cada módulo | Matriz rol × endpoint con el 403 esperado; módulo no contratado → `MODULE_NOT_LICENSED`. Se reverifica en cada etapa. |
+| RN-SC7 | C1·T5 | ✅ | `tests/unit/productos.controller.test.ts`<br>`tests/unit/proveedores.controller.test.ts` | Matriz rol × endpoint con el 403 esperado; módulo no contratado → `MODULE_NOT_LICENSED`. Se reverifica en cada etapa. |
 | RN-SC8 | C4·T5 | PENDIENTE | `tests/integration/ventas.integration.test.ts` | Dos `.rpc("registrar_venta")` en `Promise.all` sobre un lote con existencia 1, con `rpcReallyRan()`, N repeticiones (default 50). Una tiene éxito y la otra falla con `INSUFFICIENT_STOCK`; **nunca las dos**. |

@@ -456,3 +456,38 @@ it("BLOQUEANTE: toda .from() sobre tabla con tenant_id, corriendo con getService
 
   expect(unexpected).toHaveLength(0);
 });
+
+describe("BLOQUEANTE: el guardrail efectivamente ve los services del módulo comercial", () => {
+  // Los directorios de módulo del comercial, en el orden en que las etapas los crean.
+  // Cada tanda que agrega un módulo nuevo agrega su nombre acá. Es la ÚNICA lista
+  // escrita a mano de este archivo, y existe porque su ausencia es indetectable:
+  // un guardrail que no escanea nada pasa en verde para siempre.
+  const MODULOS_COMERCIALES = ["productos", "proveedores"];
+
+  const escaneados = listServiceFiles().map((f) => f.relPath);
+
+  it.each(MODULOS_COMERCIALES)(
+    "el service de %s está dentro del alcance del guardrail",
+    (modulo) => {
+      const match = escaneados.filter((p) => p.includes(`/modules/${modulo}/`));
+      expect(
+        match,
+        `El guardrail de tenant_id no está escaneando ningún .service.ts de ` +
+        `src/modules/${modulo}/. Sus consultas NO están verificadas y el aislamiento ` +
+        `por tenant de ese módulo no tiene ninguna red. Archivos que sí ve:\n` +
+        escaneados.join("\n"),
+      ).not.toHaveLength(0);
+    },
+  );
+
+  it("el esquema derivado de las migraciones incluye las tablas del módulo", () => {
+    const { tenantTables } = loadRealSchema();
+    for (const tabla of ["productos", "familias_producto", "producto_conversiones", "proveedores"]) {
+      expect(
+        tenantTables.has(tabla),
+        `La tabla ${tabla} no quedó en el esquema derivado del DDL: el guardrail no va ` +
+        `a exigir el filtro de tenant en sus consultas.`,
+      ).toBe(true);
+    }
+  });
+});

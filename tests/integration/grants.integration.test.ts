@@ -16,9 +16,47 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { readFileSync, readdirSync } from "node:fs";
+import { join } from "node:path";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { SUPABASE_URL, SUPABASE_ANON_KEY, SERVICE_ROLE_KEY, describeIntegration } from "./_env.ts";
 import { borrarUsuarioAuth, crearUsuarioAuth } from "./_teardown.ts";
+
+const MIGRATIONS_DIR = join(process.cwd(), "supabase/migrations");
+
+/**
+ * Funciones creadas por las migraciones del módulo comercial.
+ *
+ * Se descubren parseando las migraciones que llevan la marca `-- @modulo: comercial`
+ * en su primera línea, en vez de una lista escrita a mano: un RPC nuevo entra solo
+ * al alcance de este guardrail el día que se agrega su migración. Ese es todo el
+ * punto — la lista a mano se olvida justo en el RPC que importa.
+ */
+export function funcionesDeMigracionesComerciales(
+  files: Array<{ name: string; content: string }>,
+): string[] {
+  const nombres = new Set<string>();
+
+  for (const { content } of files) {
+    if (!/^\s*--\s*@modulo:\s*comercial\s*$/m.test(content)) continue;
+
+    const sinComentarios = content.replace(/--[^\n]*/g, "");
+    for (const m of sinComentarios.matchAll(
+      /CREATE\s+(?:OR\s+REPLACE\s+)?FUNCTION\s+(?:public\.)?([a-z0-9_]+)\s*\(/gi,
+    )) {
+      nombres.add(m[1]!.toLowerCase());
+    }
+  }
+
+  return [...nombres].sort();
+}
+
+function migracionesComerciales() {
+  return readdirSync(MIGRATIONS_DIR)
+    .filter((f) => f.endsWith(".sql"))
+    .sort()
+    .map((name) => ({ name, content: readFileSync(join(MIGRATIONS_DIR, name), "utf-8") }));
+}
 
 globalThis.WebSocket = class FakeWebSocket {} as any;
 
@@ -161,5 +199,30 @@ describeIntegration("DT-5: catálogos siguen respondiendo para authenticated (si
       const { error } = await db.from(tabla).select("*");
       expect(error, `${tabla} debería seguir siendo legible por authenticated`).toBeNull();
     }
+  });
+});
+
+describeIntegration("RN-SC3 — ningún RPC del módulo comercial es ejecutable por anon ni authenticated", () => {
+  const funciones = funcionesDeMigracionesComerciales(migracionesComerciales());
+
+  it("el enumerador encuentra funciones (si no, este bloque no prueba nada)", () => {
+    // Sin esta aserción, un parser roto o una marca `-- @modulo: comercial` olvidada
+    // dejarían el it.each de abajo con cero casos, y el bloque pasaría en verde sin
+    // haber verificado ni un solo GRANT.
+    expect(funciones.length).toBeGreaterThan(0);
+  });
+
+  it.each(funciones)("RN-SC3: anon no puede ejecutar %s", async (fn) => {
+    if (skipIfNoCredentials()) return;
+    const { error } = await anonClient().rpc(fn, {});
+    // PostgREST devuelve 42501 (insufficient_privilege) o PGRST202 (función no visible
+    // en el catálogo para este rol al carecer de EXECUTE grant).
+    expect(["42501", "PGRST202"]).toContain(error?.code);
+  });
+
+  it.each(funciones)("RN-SC3: authenticated no puede ejecutar %s", async (fn) => {
+    if (skipIfNoCredentials()) return;
+    const { error } = await userClient(jwt).rpc(fn, {});
+    expect(["42501", "PGRST202"]).toContain(error?.code);
   });
 });

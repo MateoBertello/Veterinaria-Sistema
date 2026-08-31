@@ -126,6 +126,7 @@ describe("productosRouter — permisos y aislamiento", () => {
 
   it("RN-SC7: las escrituras exigen manage_products", async () => {
     // 1. Con view_stock pero sin manage_products: GET 200, POST 403
+    invalidateModuleCache(TENANT_ID, "stock");
     mockDbSequence(mockGetDb, [
       tenantActiveResult(),
       moduleEnabledResult(true),
@@ -134,6 +135,7 @@ describe("productosRouter — permisos y aislamiento", () => {
     const resGet = await req("GET", "/productos");
     expect(resGet.status).toBe(200);
 
+    invalidateModuleCache(TENANT_ID, "stock");
     mockDbSequence(mockGetDb, [
       tenantActiveResult(),
       moduleEnabledResult(true),
@@ -149,6 +151,7 @@ describe("productosRouter — permisos y aislamiento", () => {
 
   it("RN-SC7: sin el módulo stock contratado, 403 MODULE_NOT_LICENSED", async () => {
     // GET sin módulo
+    invalidateModuleCache(TENANT_ID, "stock");
     mockDbSequence(mockGetDb, [
       tenantActiveResult(),
       moduleEnabledResult(false), // stock no contratado
@@ -159,6 +162,7 @@ describe("productosRouter — permisos y aislamiento", () => {
     expect(bodyGet.error.code).toBe("MODULE_NOT_LICENSED");
 
     // POST sin módulo
+    invalidateModuleCache(TENANT_ID, "stock");
     mockDbSequence(mockGetDb, [
       tenantActiveResult(),
       moduleEnabledResult(false), // stock no contratado
@@ -167,5 +171,45 @@ describe("productosRouter — permisos y aislamiento", () => {
     const bodyPost = await resPost.json();
     expect(resPost.status).toBe(403);
     expect(bodyPost.error.code).toBe("MODULE_NOT_LICENSED");
+  });
+
+  it("RN-SC7: familias y conversiones exigen view_stock para leer y manage_products para escribir", async () => {
+    // Familias GET con view_stock -> 200
+    invalidateModuleCache(TENANT_ID, "stock");
+    mockDbSequence(mockGetDb, [tenantActiveResult(), moduleEnabledResult(true), permissionResult(["view_stock"])]);
+    const resFamGet = await req("GET", "/familias-producto");
+    expect(resFamGet.status).toBe(200);
+
+    // Familias POST sin manage_products -> 403
+    invalidateModuleCache(TENANT_ID, "stock");
+    mockDbSequence(mockGetDb, [
+      tenantActiveResult(),
+      moduleEnabledResult(true),
+      permissionResult(["view_stock"]),
+      permissionResult(["view_stock"]),
+    ]);
+    const resFamPost = await req("POST", "/familias-producto", { nombre: "Fam", unidadBaseId: "22222222-2222-4222-8222-222222222222" });
+    expect(resFamPost.status).toBe(403);
+
+    // Conversiones GET con view_stock -> 200
+    invalidateModuleCache(TENANT_ID, "stock");
+    mockDbSequence(mockGetDb, [tenantActiveResult(), moduleEnabledResult(true), permissionResult(["view_stock"])]);
+    const resConvGet = await req("GET", "/producto-conversiones");
+    expect(resConvGet.status).toBe(200);
+
+    // Conversiones POST sin manage_products -> 403
+    invalidateModuleCache(TENANT_ID, "stock");
+    mockDbSequence(mockGetDb, [
+      tenantActiveResult(),
+      moduleEnabledResult(true),
+      permissionResult(["view_stock"]),
+      permissionResult(["view_stock"]),
+    ]);
+    const resConvPost = await req("POST", "/producto-conversiones", {
+      productoOrigenId: "11111111-1111-4111-8111-111111111111",
+      productoDestinoId: "22222222-2222-4222-8222-222222222222",
+      factorTeorico: 5,
+    });
+    expect(resConvPost.status).toBe(403);
   });
 });

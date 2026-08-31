@@ -42,6 +42,7 @@ import {
   familiasRouter,
   conversionesRouter,
 } from "./modules/productos/productos.controller.ts";
+import { proveedoresRouter } from "./modules/proveedores/proveedores.controller.ts";
 
 const app = new Hono().basePath("/api/v1");
 
@@ -98,6 +99,7 @@ app.route("/tipos-vacuna", tiposVacunaRouter);
 app.route("/productos", productosRouter);
 app.route("/familias-producto", familiasRouter);
 app.route("/producto-conversiones", conversionesRouter);
+app.route("/proveedores", proveedoresRouter);
 
 // ─── Doctores + Horarios de Atención (Transversal — Etapa 4) ───────────────────
 // Doctores: ABM (listar/editar) bajo manage_users.
