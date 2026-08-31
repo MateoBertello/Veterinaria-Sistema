@@ -159,7 +159,7 @@ describeIntegration("RN-SM: deshabilitar 'turnos' en el tenant A", () => {
     const res  = await callApp(`/admin/tenants/${tenantAId}/modulos`, { jwt: jwtSuperAdmin });
     const body = await res.json() as { success: boolean; data: Array<Record<string, unknown>> };
     expect(res.status).toBe(200);
-    expect(body.data).toHaveLength(3);
+    expect(body.data).toHaveLength(5);
     expect(Object.keys(body.data[0]).sort()).toEqual(["fechaAlta", "habilitado", "modulo"]);
   });
 

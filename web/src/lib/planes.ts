@@ -61,10 +61,22 @@ export const MODULO_META: Record<ModuloVendible, ModuloMeta> = {
     label:       "Guardería",
     description: "Estadías, cupo diario y check-in/check-out.",
   },
+  stock: {
+    sigla:       "ST",
+    label:       "Stock",
+    description: "Productos, lotes, existencias, compras y fraccionamiento.",
+  },
+  ventas: {
+    sigla:       "VE",
+    label:       "Ventas",
+    description: "Mostrador, caja y arqueo. Requiere Stock contratado.",
+  },
 };
 
 /** Orden estable de los módulos vendibles en la consola. */
-export const MODULOS_ORDEN: ModuloVendible[] = ["historial_clinico", "turnos", "guarderia"];
+export const MODULOS_ORDEN: ModuloVendible[] = [
+  "historial_clinico", "turnos", "guarderia", "stock", "ventas",
+];
 
 /** Etiqueta legible de un módulo (fallback: el valor crudo del backend). */
 export function getModuloLabel(modulo: string): string {

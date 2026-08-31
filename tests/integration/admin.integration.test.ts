@@ -134,7 +134,7 @@ describeIntegration("RN-SA1 / RN-SA2: alta de tenant", () => {
     const { count: modulos } = await serviceDb
       .from("modulos_contratados").select("*", { count: "exact", head: true }).eq("tenant_id", body.data.id);
     expect(roles).toBe(3);
-    expect(modulos).toBe(3);
+    expect(modulos).toBe(5);
   });
 
   it("RN-SA1: CUIT/RUT duplicado → 409 TENANT_DUPLICATE_TAXID", async () => {

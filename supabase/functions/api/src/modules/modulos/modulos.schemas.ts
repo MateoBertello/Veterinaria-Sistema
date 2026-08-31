@@ -5,6 +5,8 @@ export const ModuloVendibleEnum = z.enum([
   "historial_clinico",
   "turnos",
   "guarderia",
+  "stock",
+  "ventas",
 ]);
 
 // Body del toggle: PUT /admin/tenants/:id/modulos/:modulo (Addendum §7).

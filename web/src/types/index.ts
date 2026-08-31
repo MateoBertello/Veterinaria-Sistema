@@ -849,7 +849,7 @@ export interface ResumenDashboard {
 
 // ─── Módulos vendibles ─────────────────────────────────────────────────────
 
-export type ModuloVendible = "historial_clinico" | "turnos" | "guarderia";
+export type ModuloVendible = "historial_clinico" | "turnos" | "guarderia" | "stock" | "ventas";
 
 export interface ModuloContratado {
   modulo:     ModuloVendible;

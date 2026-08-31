@@ -3,7 +3,7 @@ import { DomainError, ErrorCode } from "../shared/errors.ts";
 import { getDb } from "../shared/db.ts";
 import { getTenantContext } from "./tenantContext.ts";
 
-export type ModuloVendible = "historial_clinico" | "turnos" | "guarderia";
+export type ModuloVendible = "historial_clinico" | "turnos" | "guarderia" | "stock" | "ventas";
 
 interface CacheEntry {
   value:     boolean;

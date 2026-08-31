@@ -650,12 +650,11 @@ describeIntegration("RLS-10: on_tenant_created — roles correctos", () => {
       .select("*", { count: "exact", head: true })
       .eq("rol_id", adminRol?.id ?? "");
 
-    // 12 desde 20260827000001_catalogos_por_tenant.sql, que suma manage_catalogs
-    // a los 11 de seed_global.sql. El admin recibe todos por regla general.
-    expect(count).toBe(12);
+    // 22 desde 20260901000002_comercial_permisos_licenciamiento.sql (12 previos + 10 comerciales)
+    expect(count).toBe(22);
   });
 
-  it("el rol veterinario tiene exactamente 7 permisos, incluidos manage_clients y manage_catalogs", async () => {
+  it("el rol veterinario tiene exactamente 11 permisos, incluidos manage_clients y manage_catalogs", async () => {
     if (skipIfNoCredentials()) return;
     const { data: vetRol } = await serviceDb
       .from("roles")
@@ -669,7 +668,7 @@ describeIntegration("RLS-10: on_tenant_created — roles correctos", () => {
       .select("permisos!inner(name)", { count: "exact" })
       .eq("rol_id", vetRol?.id ?? "");
 
-    expect(count).toBe(7);
+    expect(count).toBe(11);
     // El Documento Maestro lo lista como actor de la gestión de clientes; sin
     // este permiso no podía ni consultar la ficha del dueño de su paciente.
     const nombres = (permisos ?? []).map((rp: { permisos: { name: string } }) => rp.permisos.name);
@@ -680,7 +679,7 @@ describeIntegration("RLS-10: on_tenant_created — roles correctos", () => {
     expect(nombres).toContain("manage_catalogs");
   });
 
-  it("el rol recepcionista tiene exactamente 6 permisos, incluido manage_catalogs", async () => {
+  it("el rol recepcionista tiene exactamente 11 permisos, incluido manage_catalogs", async () => {
     if (skipIfNoCredentials()) return;
     const { data: recepRol } = await serviceDb
       .from("roles")
@@ -694,7 +693,7 @@ describeIntegration("RLS-10: on_tenant_created — roles correctos", () => {
       .select("*", { count: "exact", head: true })
       .eq("rol_id", recepRol?.id ?? "");
 
-    expect(count).toBe(6);
+    expect(count).toBe(11);
   });
 
   // El catálogo clínico se aprovisiona junto con los roles y la configuración
