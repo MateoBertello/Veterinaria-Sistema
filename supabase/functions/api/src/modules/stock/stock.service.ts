@@ -371,4 +371,72 @@ export class StockService {
       })),
     };
   }
+
+  /**
+   * RN-LO8: avisa de los lotes que vencen dentro de dias_alerta_vencimiento.
+   * NO bloquea nada: el lote sigue siendo candidato FEFO hasta el día que vence.
+   *
+   * El UNIQUE (tenant_id, origen, referencia_id, canal) de `notificaciones`
+   * absorbe los reintentos: una notificación por lote, para siempre. Por eso el
+   * insert va con ON CONFLICT DO NOTHING y no con una consulta previa.
+   */
+  static async notificarLotesPorVencer(tenantId: string): Promise<number> {
+    const db = getServiceDb();
+
+    const { data: config, error: errConfig } = await db
+      .from("configuracion_tenant")
+      .select("dias_alerta_vencimiento")
+      .eq("tenant_id", tenantId)
+      .maybeSingle();
+
+    if (errConfig) {
+      throw new DomainError(ErrorCode.INTERNAL_ERROR, 500, errConfig.message);
+    }
+
+    const diasUmbral = config?.dias_alerta_vencimiento ?? 60;
+
+    const { data: lotesPorVencer, error: errLotes } = await db
+      .from("v_lotes_por_vencer")
+      .select("lote_id, producto_nombre, codigo_lote, fecha_vencimiento, dias_restantes, cantidad")
+      .eq("tenant_id", tenantId)
+      .lte("dias_restantes", diasUmbral)
+      .gte("dias_restantes", 0);
+
+    if (errLotes) {
+      throw new DomainError(ErrorCode.INTERNAL_ERROR, 500, errLotes.message);
+    }
+
+    if (!lotesPorVencer || lotesPorVencer.length === 0) {
+      return 0;
+    }
+
+    const notificacionesAInsertar = lotesPorVencer.map((lote: any) => ({
+      tenant_id: tenantId,
+      origen: "vencimiento_lote",
+      referencia_id: lote.lote_id,
+      canal: "email",
+      estado: "pendiente",
+      mensaje: `El lote ${lote.codigo_lote ?? "sin código"} del producto ${lote.producto_nombre} vence el ${lote.fecha_vencimiento} (en ${lote.dias_restantes} días). Stock: ${lote.cantidad}.`,
+    }));
+
+    const { data: insertadas, error: errInsert } = await db
+      .from("notificaciones")
+      .upsert(notificacionesAInsertar, {
+        onConflict: "tenant_id,origen,referencia_id,canal",
+        ignoreDuplicates: true,
+      })
+      .select("id");
+
+    if (errInsert) {
+      throw new DomainError(ErrorCode.INTERNAL_ERROR, 500, errInsert.message);
+    }
+
+    return insertadas?.length ?? 0;
+  }
 }
+
+// TODO C4·T2: alerta de stock mínimo. Es por FLANCO, no por nivel: se crea al
+// cruzar el mínimo hacia abajo y se ELIMINA al cruzarlo hacia arriba, de modo
+// que el UNIQUE de notificaciones deje de bloquear y el próximo faltante vuelva
+// a avisar. Se evalúa DENTRO del RPC, después de cada movimiento, no por tarea
+// programada: así la alerta llega cuando pasa y no al día siguiente.

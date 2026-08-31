@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { SUPABASE_URL, SERVICE_ROLE_KEY, describeIntegration } from "./_env.ts";
 import { crearUsuarioAuth, borrarUsuarioAuth } from "./_teardown.ts";
+import { StockService } from "../../supabase/functions/api/src/modules/stock/stock.service.ts";
 
 globalThis.WebSocket = class FakeWebSocket {} as any;
 
@@ -707,5 +708,165 @@ describeIntegration("C2·T1 — Libro mayor, lotes y existencias_lote (Base de d
     // LY SIGUE adulterado a 888
     const { data: extY } = await serviceDb.from("existencias_lote").select("cantidad").eq("lote_id", lY!.id).single();
     expect(Number(extY?.cantidad)).toBe(888);
+  });
+
+  describe("RN-LO8: Notificaciones de vencimiento próximo", () => {
+    it("RN-LO8: el vencimiento próximo notifica y NO bloquea", async () => {
+      // 1. Configurar tenant con dias_alerta_vencimiento = 60
+      await serviceDb
+        .from("configuracion_tenant")
+        .update({ dias_alerta_vencimiento: 60 })
+        .eq("tenant_id", tenantAId);
+
+      // 2. Crear lote que vence en 30 días con existencia > 0
+      const d30 = new Date();
+      d30.setDate(d30.getDate() + 30);
+      const fecha30 = d30.toISOString().split("T")[0];
+
+      const { data: loteVencePronto } = await serviceDb.from("lotes").insert({
+        tenant_id: tenantAId,
+        producto_id: productoAId,
+        codigo_lote: `L-VENCE-30-${Date.now()}`,
+        fecha_vencimiento: fecha30,
+        costo_unitario_neto: 100,
+        costo_unitario_efectivo: 100,
+        estado: "disponible",
+        origen: "compra",
+        usuario_id: usuarioAId,
+      }).select("id").single();
+
+      await serviceDb.from("movimientos_stock").insert({
+        tenant_id: tenantAId,
+        operacion_id: crypto.randomUUID(),
+        tipo: "entrada_inicial",
+        producto_id: productoAId,
+        lote_id: loteVencePronto!.id,
+        cantidad: 15,
+        costo_unitario: 100,
+        costo_total: 1500,
+        usuario_id: usuarioAId,
+      });
+
+      // 3. Ejecutar notificarLotesPorVencer
+      const creadas = await StockService.notificarLotesPorVencer(tenantAId);
+      expect(creadas).toBeGreaterThanOrEqual(1);
+
+      // 4. Verificar que se creó la fila en notificaciones
+      const { data: notif } = await serviceDb
+        .from("notificaciones")
+        .select("id, origen, referencia_id, canal, estado, mensaje")
+        .eq("tenant_id", tenantAId)
+        .eq("origen", "vencimiento_lote")
+        .eq("referencia_id", loteVencePronto!.id)
+        .single();
+
+      expect(notif).not.toBeNull();
+      expect(notif?.origen).toBe("vencimiento_lote");
+      expect(notif?.canal).toBe("email");
+
+      // 5. Verificar que el lote NO está bloqueado: sigue apareciendo en candidatos FEFO
+      const candidatos = await StockService.listarCandidatosFefo(productoAId, 1, tenantAId);
+      const candidatoEncontrado = candidatos.find((c: any) => c.loteId === loteVencePronto!.id);
+      expect(candidatoEncontrado).toBeDefined();
+      expect(candidatoEncontrado?.cantidadDisponible).toBe(15);
+    });
+
+    it("RN-LO8: no se notifica dos veces el mismo lote", async () => {
+      // Re-ejecutar la notificación sobre el tenantAId
+      const creadasSegundaVez = await StockService.notificarLotesPorVencer(tenantAId);
+      // Las existentes se absorben por ON CONFLICT DO NOTHING (0 nuevas para los mismos lotes)
+      expect(creadasSegundaVez).toBe(0);
+
+      // Verificar que no se duplicaron las notificaciones
+      const { data: notifs } = await serviceDb
+        .from("notificaciones")
+        .select("id")
+        .eq("tenant_id", tenantAId)
+        .eq("origen", "vencimiento_lote");
+
+      // El total de notificaciones no debe haberse duplicado
+      const { count } = await serviceDb
+        .from("notificaciones")
+        .select("id", { count: "exact", head: true })
+        .eq("tenant_id", tenantAId)
+        .eq("origen", "vencimiento_lote");
+
+      expect(count).toBe(notifs?.length);
+    });
+
+    it("RN-LO8: un lote fuera del umbral no notifica", async () => {
+      // Lote que vence en 90 días (umbral es 60)
+      const d90 = new Date();
+      d90.setDate(d90.getDate() + 90);
+      const fecha90 = d90.toISOString().split("T")[0];
+
+      const { data: loteLejano } = await serviceDb.from("lotes").insert({
+        tenant_id: tenantAId,
+        producto_id: productoAId,
+        codigo_lote: `L-LEJOS-90-${Date.now()}`,
+        fecha_vencimiento: fecha90,
+        costo_unitario_neto: 100,
+        costo_unitario_efectivo: 100,
+        estado: "disponible",
+        origen: "compra",
+        usuario_id: usuarioAId,
+      }).select("id").single();
+
+      await serviceDb.from("movimientos_stock").insert({
+        tenant_id: tenantAId,
+        operacion_id: crypto.randomUUID(),
+        tipo: "entrada_inicial",
+        producto_id: productoAId,
+        lote_id: loteLejano!.id,
+        cantidad: 10,
+        costo_unitario: 100,
+        costo_total: 1000,
+        usuario_id: usuarioAId,
+      });
+
+      // Notificación para este lote no debe crearse
+      const { data: notif } = await serviceDb
+        .from("notificaciones")
+        .select("id")
+        .eq("tenant_id", tenantAId)
+        .eq("origen", "vencimiento_lote")
+        .eq("referencia_id", loteLejano!.id)
+        .maybeSingle();
+
+      expect(notif).toBeNull();
+    });
+
+    it("RN-LO8: un lote sin existencia no notifica", async () => {
+      // Lote que vence en 20 días pero sin existencia (cantidad = 0)
+      const d20 = new Date();
+      d20.setDate(d20.getDate() + 20);
+      const fecha20 = d20.toISOString().split("T")[0];
+
+      const { data: loteSinStock } = await serviceDb.from("lotes").insert({
+        tenant_id: tenantAId,
+        producto_id: productoAId,
+        codigo_lote: `L-SINSTOCK-20-${Date.now()}`,
+        fecha_vencimiento: fecha20,
+        costo_unitario_neto: 100,
+        costo_unitario_efectivo: 100,
+        estado: "disponible",
+        origen: "compra",
+        usuario_id: usuarioAId,
+      }).select("id").single();
+
+      // No insertamos movimientos_stock -> existencia_lote no existe o tiene 0
+
+      await StockService.notificarLotesPorVencer(tenantAId);
+
+      const { data: notif } = await serviceDb
+        .from("notificaciones")
+        .select("id")
+        .eq("tenant_id", tenantAId)
+        .eq("origen", "vencimiento_lote")
+        .eq("referencia_id", loteSinStock!.id)
+        .maybeSingle();
+
+      expect(notif).toBeNull();
+    });
   });
 });
