@@ -113,7 +113,10 @@ afterAll(async () => {
   await serviceDb.from("movimientos_stock").delete().eq("tenant_id", tenantAId);
   await serviceDb.from("existencias_lote").delete().eq("tenant_id", tenantAId);
   await serviceDb.from("lotes").delete().eq("tenant_id", tenantAId);
+  await serviceDb.from("compras_items").delete().eq("tenant_id", tenantAId);
+  await serviceDb.from("compras").delete().eq("tenant_id", tenantAId);
   await serviceDb.from("productos").delete().eq("tenant_id", tenantAId);
+  await serviceDb.from("proveedores").delete().eq("tenant_id", tenantAId);
   await serviceDb.from("usuarios").delete().eq("tenant_id", tenantAId);
   await serviceDb.from("tenants").delete().eq("id", tenantAId);
   if (usuarioAId) await borrarUsuarioAuth(usuarioAId);
@@ -188,6 +191,29 @@ describeIntegration("C2·T1 — Libro mayor, lotes y existencias_lote (Base de d
   });
 
   it("RN-MV4: el signo lo determina el tipo", async () => {
+    const { data: prov } = await serviceDb
+      .from("proveedores")
+      .insert({ tenant_id: tenantAId, razon_social: `Prov RNMV4 ${Date.now()}` })
+      .select("id")
+      .single();
+    const { data: compra } = await serviceDb
+      .from("compras")
+      .insert({ tenant_id: tenantAId, proveedor_id: prov!.id, fecha: "2026-09-08", usuario_id: usuarioAId })
+      .select("id")
+      .single();
+    const { data: cItem } = await serviceDb
+      .from("compras_items")
+      .insert({
+        tenant_id: tenantAId,
+        compra_id: compra!.id,
+        producto_id: productoAId,
+        cantidad: 10,
+        costo_unitario_neto: 100,
+        alicuota_iva: 21,
+      })
+      .select("id")
+      .single();
+
     // 1. entrada_compra da signo positivo (+10)
     const { data: movEntrada, error: errEntrada } = await serviceDb
       .from("movimientos_stock")
@@ -195,7 +221,7 @@ describeIntegration("C2·T1 — Libro mayor, lotes y existencias_lote (Base de d
         tenant_id: tenantAId,
         operacion_id: crypto.randomUUID(),
         tipo: "entrada_compra",
-        compra_item_id: crypto.randomUUID(),
+        compra_item_id: cItem!.id,
         producto_id: productoAId,
         lote_id: loteAId,
         cantidad: 10,
