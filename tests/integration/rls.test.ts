@@ -1404,3 +1404,101 @@ describe("Módulo Comercial: Ventas, ítems, pagos y contadores", () => {
   });
 });
 
+describe("C5·T1 / RN-SC4: Aislamiento RLS de Recuentos y Recuentos Detalle", () => {
+  let recAId = "";
+  let recDetAId = "";
+  let prodAId = "";
+  let loteAId = "";
+
+  beforeAll(async () => {
+    if (skipIfNoCredentials() || !tenantAId || !userAId) return;
+
+    // 1. Producto y Lote para Tenant A
+    const { data: u } = await serviceDb.from("unidades_medida").select("id").eq("codigo", "unidad").single();
+    const unidadId = (u as { id: string })?.id;
+
+    const { data: prod } = await serviceDb.from("productos").insert({
+      tenant_id: tenantAId,
+      codigo: `PROD-RLS-REC-${Date.now()}`,
+      nombre: "Prod RLS Recuento",
+      unidad_medida_id: unidadId,
+    }).select("id").single();
+    prodAId = prod?.id ?? "";
+
+    const { data: lote } = await serviceDb.from("lotes").insert({
+      tenant_id: tenantAId,
+      producto_id: prodAId,
+      codigo_lote: `LOTE-RLS-REC-${Date.now()}`,
+      costo_unitario_neto: 100,
+      costo_unitario_efectivo: 100,
+      origen: "compra",
+      usuario_id: userAId,
+    }).select("id").single();
+    loteAId = lote?.id ?? "";
+
+    // 2. Recuento y Recuento Detalle para Tenant A
+    const { data: rec } = await serviceDb.from("recuentos").insert({
+      tenant_id: tenantAId,
+      usuario_id: userAId,
+      estado: "borrador",
+      observaciones: "Recuento RLS A",
+    }).select("id").single();
+    recAId = rec?.id ?? "";
+
+    const { data: det } = await serviceDb.from("recuentos_detalle").insert({
+      tenant_id: tenantAId,
+      recuento_id: recAId,
+      lote_id: loteAId,
+      cantidad_contada: 10,
+    }).select("id").single();
+    recDetAId = det?.id ?? "";
+  });
+
+  it("RN-SC4: el usuario B no ve recuentos ni recuentos_detalle del tenant A", async () => {
+    if (skipIfNoCredentials()) return;
+    const db = userClient(jwtB);
+
+    const { data: recs } = await db.from("recuentos").select("id, tenant_id").eq("id", recAId);
+    expect(recs ?? []).toHaveLength(0);
+
+    const { data: dets } = await db.from("recuentos_detalle").select("id, tenant_id").eq("id", recDetAId);
+    expect(dets ?? []).toHaveLength(0);
+  });
+
+  it("RN-SC4: el usuario A sí ve sus propios recuentos y recuentos_detalle", async () => {
+    if (skipIfNoCredentials()) return;
+    const db = userClient(jwtA);
+
+    const { data: recs, error: errR } = await db.from("recuentos").select("id, tenant_id").eq("id", recAId);
+    expect(errR).toBeNull();
+    expect((recs ?? []).length).toBe(1);
+
+    const { data: dets, error: errD } = await db.from("recuentos_detalle").select("id, tenant_id").eq("id", recDetAId);
+    expect(errD).toBeNull();
+    expect((dets ?? []).length).toBe(1);
+  });
+
+  it("RN-SC4: B no puede escribir recuentos ni recuentos_detalle por PostgREST", async () => {
+    if (skipIfNoCredentials()) return;
+    const db = userClient(jwtB);
+
+    // Intento de INSERT directo en recuentos
+    const { error: errR } = await db.from("recuentos").insert({
+      tenant_id: tenantBId,
+      usuario_id: userAId,
+      estado: "borrador",
+    });
+    expect(errR).not.toBeNull();
+
+    // Intento de INSERT directo en recuentos_detalle
+    const { error: errD } = await db.from("recuentos_detalle").insert({
+      tenant_id: tenantBId,
+      recuento_id: recAId,
+      lote_id: loteAId,
+      cantidad_contada: 5,
+    });
+    expect(errD).not.toBeNull();
+  });
+});
+
+

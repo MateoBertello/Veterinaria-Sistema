@@ -1,4 +1,4 @@
-# Resumen de Ejecución — Etapa C4 (Ventas)
+# Resumen de Ejecución — Etapa C5 (Ajustes, Mermas, Recuentos y Devoluciones)
 
 **Fecha:** 2026-08-31
 **Rama:** `feat/modulo-comercial`
@@ -8,86 +8,88 @@
 
 ## 1. Resumen Ejecutivo
 
-La **Etapa C4 (Ventas)** implementó el núcleo comercial de facturación, caja, descuento atómico de stock e inmutabilidad:
+La **Etapa C5 (Ajustes, Mermas, Recuentos y Devoluciones)** implementó los mecanismos transaccionales de corrección de stock, bloqueo de lotes, recuentos físicos con detección de concurrencia y devoluciones de ventas:
 
-1. **C4·T1 (Esquema de BD):**
-   - Migración `20260922000001_comercial_ventas.sql` (`ventas`, `ventas_items`, `ventas_pagos`, `contadores_tenant`, `UNIQUE(id, tenant_id)` en `servicios`, FKs compuestas, RLS SELECT).
-2. **C4·T2 (RPC `registrar_venta`):**
-   - Cálculo de IVA por diferencia (`neto = round(precio/(1+alicuota/100), 2)`, `iva = precio - neto`), barrido de >100.000 precios sin descalce.
-   - Descuento atómico FEFO con pre-bloqueo `ORDER BY lote_id FOR UPDATE`.
-   - Congelamiento de snapshots (`descripcion_snapshot`, `precio_unitario`, `alicuota_iva`, `costo_unitario_efectivo`).
-   - Generación de asientos de caja por medio de pago y alerta de stock mínimo por flanco.
-3. **C4·T3 (RPC `anular_venta`):**
-   - Restitución íntegra de stock (`entrada_devolucion`) y egreso de caja (`egreso_devolucion`).
-   - Anulación sobre sesión cerrada rutea el reintegro a la sesión abierta actual del tenant (`RN-VT5`).
-   - Inmutabilidad estricta: asientos nuevos, sin `UPDATE` ni `DELETE` de movimientos.
-4. **C4·T4 (Services, Vistas y REST):**
-   - Vistas `v_items_vendidos` y `v_margen_venta` (con `COMMENT` formal y costo guardado en `ventas_items`, sin recalcular contra `productos.costo_reposicion`).
-   - `VentaService` y `ventasRouter` (`manage_sales`, `void_sales`, `view_sales`, sin métodos `PUT`/`PATCH`/`DELETE`).
-   - Búsqueda por `codigoBarras` en catálogo de productos.
-5. **C4·T5 (Concurrencia RN-SC8):**
-   - Cuatro casos de concurrencia: dos ventas simultáneas de la última unidad, prevención de deadlock por orden inverso, 10 ventas simultáneas sobre 3 unidades y anulación concurrente.
-   - Verificaciones por mutación validadas con 200 repeticiones.
+1. **C5·T1 (Esquema de BD para Recuentos):**
+   - Migración `20260929000001_comercial_recuentos.sql` (`recuentos`, `recuentos_detalle`, `uq_recuento_borrador` parcial por tenant, `uq_recuento_lote`, `chk_recuento_aplicado_completo`, FKs compuestas `(id, tenant_id)`, FK diferida `movimientos_stock_recuento_tenant_fkey` con `ON DELETE RESTRICT`, RLS SELECT con `manage_stock`).
+2. **C5·T2 (RPCs `ajustar_existencia`, `bloquear_lote`, `desbloquear_lote`, `registrar_devolucion`):**
+   - Migración `20260929000002_comercial_ajustes_rpcs.sql`.
+   - Helper `motivo_valido(p_motivo)`: validación estricta de motivo no nulo con `length(trim(motivo)) >= 10`.
+   - `ajustar_existencia`: `ORDER BY lote_id FOR UPDATE`, respeta decimales de unidad, `RN-AJ7` (lote vencido solo admite `merma_vencimiento`), auditoría `inventory`.
+   - `bloquear_lote` y `desbloquear_lote`: gestión de estado con preservación de `motivo_bloqueo` histórico (`RN-LO7`).
+   - `registrar_devolucion`: acumulación de devoluciones previas por línea (`RN-AJ4`), derivación de no revendibles a lote `bloqueado` con `lote_padre_id` (`RN-AJ5`), y compensación de caja en sesión abierta (`egreso_devolucion`).
+3. **C5·T3 (RPC `aplicar_recuento`):**
+   - Migración `20260929000003_comercial_aplicar_recuento_rpc.sql`.
+   - `RN-AJ3`: congelamiento de `cantidad_sistema` al momento exacto de aplicar. Detección de desvíos con `COUNT_STALE` y detalle JSON de lotes modificados en el interín, exigiendo confirmación explícita (`p_confirmar_desvios`).
+   - `RN-AJ6`: irreversibilidad total de recuentos aplicados.
+   - Bloqueo determinístico de lotes `ORDER BY lote_id FOR UPDATE` y agrupación atómica bajo un único `operacion_id`. Omisión de asientos sin diferencia (diferencia 0).
+4. **C5·T4 (Services, Controllers y Endpoints):**
+   - `AjustesService` y routers Hono (`ajustesRouter`, `lotesAjustesRouter`, `recuentosRouter`, `devolucionesRouter`) en `supabase/functions/api/src/modules/ajustes/`.
+   - Mapeo de errores de dominio y DTOs con Zod schemas.
+   - Integración al guardrail estático de aislamiento multi-tenant (`tenant-filter-guardrail.test.ts`).
 
 ---
 
 ## 2. Resultados de las Suites de Tests
 
 ### 2.1. Suite Unitaria (`npm test` / Vitest Unit)
-- **57 archivos pasados (801 tests passed, 0 skipped, 0 failed)**
-- Archivos clave de C4:
-  - `tests/unit/ventas.service.test.ts`: **9 passed** (RN-VT1 >100k sweep, RN-VT2, RN-VT7, RN-CJ1, RN-MV6, scoping por permisos, no-read de existencias, no N+1).
-  - `tests/unit/ventas.controller.test.ts`: **15 passed** (matriz de permisos y roles admin/vet/recep, 403 MODULE_NOT_LICENSED, RN-SC1 ignores tenantId, inmutabilidad estructural).
-  - `tests/unit/caja.service.test.ts`: **7 passed** (incluyendo RN-CJ3 de cuenta corriente y cálculo de saldo teórico al vuelo).
-  - `tests/unit/tenant-filter-guardrail.test.ts`: **25 passed** (incluyendo detección y escaneo automático de `ventas.service.ts`).
+- **59 archivos pasados (833 tests passed, 0 skipped, 0 failed)**
+- Archivos clave de C5:
+  - `tests/unit/ajustes.service.test.ts`: **19 passed** (mapeo exhaustivo de errores RPC a códigos de dominio, DTOs camelCase, validación de borrador en recuentos, llamadas RPC con parámetros tenant/user).
+  - `tests/unit/ajustes.controller.test.ts`: **13 passed** (gates de autenticación, autorización por permisos `manage_stock` / `manage_sales`, módulos `stock` / `ventas`, validación Zod de motivos y DTOs).
+  - `tests/unit/tenant-filter-guardrail.test.ts`: **25 passed** (descubrimiento automático de `src/modules/ajustes/` y verificación de `.eq('tenant_id', ...)` en todas las consultas del service).
 
 ### 2.2. Typecheck (`npm run typecheck`)
 - **0 errores** en API (`supabase/functions/api/tsconfig.json`) y Web (`web/tsconfig.json`).
 
 ### 2.3. Suite de Integración (`npm run test:integration`)
-- **24 archivos pasados (348 tests passed, 0 skipped, 0 failed)**
+- **25 archivos pasados (384 tests passed, 0 skipped, 0 failed)**
 - Desglose por archivo:
-  1. `tests/integration/ventas.integration.test.ts`: **19 passed** (RN-VT3, unicidad numero_operacion, FKs compuestas RN-SC2, RN-VT8, RN-VT6, RN-LO6, RN-LO4, RN-PR9, RN-PR10, pagos, alerta stock mínimo, RN-VT4, RN-VT5, RN-MV9, y los 4 casos de RN-SC8).
-  2. `tests/integration/caja.integration.test.ts`: **12 passed**
-  3. `tests/integration/catalogo-comercial.integration.test.ts`: **9 passed**
-  4. `tests/integration/stock.integration.test.ts`: **14 passed**
-  5. `tests/integration/compras.integration.test.ts`: **14 passed**
-  6. `tests/integration/comercial-licenciamiento.integration.test.ts`: **7 passed**
-  7. `tests/integration/rls.test.ts`: **57 passed**
-  8. `tests/integration/grants.integration.test.ts`: **43 passed**
-  9. `tests/integration/aislamiento-api.integration.test.ts`: **28 passed**
-  10. `tests/integration/guarderia.integration.test.ts`: **27 passed**
-  11. `tests/integration/vacunacion.integration.test.ts`: **21 passed**
-  12. `tests/integration/dashboard.integration.test.ts`: **15 passed**
-  13. `tests/integration/mascotas.integration.test.ts`: **13 passed**
-  14. `tests/integration/hardening-authenticated.integration.test.ts`: **13 passed**
-  15. `tests/integration/historial-storage.integration.test.ts`: **11 passed**
-  16. `tests/integration/auth.integration.test.ts`: **9 passed**
-  17. `tests/integration/modulos.integration.test.ts`: **8 passed**
-  18. `tests/integration/admin.integration.test.ts`: **6 passed**
-  19. `tests/integration/eutanasia.integration.test.ts`: **6 passed**
-  20. `tests/integration/vacunacion-avisos.integration.test.ts`: **4 passed**
-  21. `tests/integration/notificaciones-cron.integration.test.ts`: **3 passed**
-  22. `tests/integration/auditoria-retencion.integration.test.ts`: **3 passed**
-  23. `tests/integration/turnos.integration.test.ts`: **3 passed**
-  24. `tests/integration/doctores.integration.test.ts`: **3 passed**
+  1. `tests/integration/ajustes.integration.test.ts`: **21 passed**
+     - C5·T1: 6 tests (restricciones DB, unicidad de borrador, integridad referencial compuesta cross-tenant, CASCADE vs RESTRICT).
+     - C5·T2: 8 tests (RN-AJ1 validación motivo en todos los RPCs, RN-AJ2 compensación en kárdex vs inmutabilidad, RN-AJ4 acumulador de devoluciones, RN-AJ5 lotes bloqueados excluidos de FEFO, RN-AJ7 mermas de vencimiento, RN-LO7 ajustes sobre lotes bloqueados, persistencia de motivo de bloqueo).
+     - C5·T3: 7 tests (RN-AJ3 congelamiento de sistema en aplicación con detección de `COUNT_STALE` y reajuste con confirmación, sin desvíos, preservación de ventas previas en kárdex, RN-AJ6 irreversibilidad, recuentos vacíos, agrupación por `operacion_id`, omisión de asientos con diferencia cero).
+  2. `tests/integration/rls.test.ts`: **60 passed** (incluye RLS de `recuentos` y `recuentos_detalle`).
+  3. `tests/integration/grants.integration.test.ts`: **55 passed** (incluye verificación de ejecución acotada a `service_role` para `ajustar_existencia`, `bloquear_lote`, `desbloquear_lote`, `registrar_devolucion`, `aplicar_recuento`, `motivo_valido`).
+  4. `tests/integration/ventas.integration.test.ts`: **19 passed**
+  5. `tests/integration/caja.integration.test.ts`: **12 passed**
+  6. `tests/integration/catalogo-comercial.integration.test.ts`: **9 passed**
+  7. `tests/integration/stock.integration.test.ts`: **14 passed**
+  8. `tests/integration/compras.integration.test.ts`: **14 passed**
+  9. `tests/integration/comercial-licenciamiento.integration.test.ts`: **7 passed**
+  10. `tests/integration/aislamiento-api.integration.test.ts`: **28 passed**
+  11. `tests/integration/guarderia.integration.test.ts`: **27 passed**
+  12. `tests/integration/vacunacion.integration.test.ts`: **21 passed**
+  13. `tests/integration/dashboard.integration.test.ts`: **15 passed**
+  14. `tests/integration/mascotas.integration.test.ts`: **13 passed**
+  15. `tests/integration/hardening-authenticated.integration.test.ts`: **13 passed**
+  16. `tests/integration/historial-storage.integration.test.ts`: **11 passed**
+  17. `tests/integration/auth.integration.test.ts`: **9 passed**
+  18. `tests/integration/modulos.integration.test.ts`: **8 passed**
+  19. `tests/integration/admin.integration.test.ts`: **6 passed**
+  20. `tests/integration/eutanasia.integration.test.ts`: **6 passed**
+  21. `tests/integration/vacunacion-avisos.integration.test.ts`: **4 passed**
+  22. `tests/integration/notificaciones-cron.integration.test.ts`: **3 passed**
+  23. `tests/integration/auditoria-retencion.integration.test.ts`: **3 passed**
+  24. `tests/integration/turnos.integration.test.ts`: **3 passed**
+  25. `tests/integration/doctores.integration.test.ts`: **3 passed**
 
 ---
 
 ## 3. Matriz de Reglas de Negocio (`MATRIZ_RN_TESTS_COMERCIAL.md`)
 
 - **Total RN en alcance:** 90
-- **Total RN en ✅ (cumplidas con tests en verde):** 65 (100% de las etapas C1 a C4)
-- **Total RN PENDIENTES:** 20 (C5 Ajustes: 7, C6 Fraccionamiento: 13)
-- **Total RN en N/A (se activan en C7·T1):** 5 (C7 Consumo Clínico)
+- **Total RN en ✅ (cumplidas con tests en verde):** 72 (100% de las etapas C1 a C5)
+- **Total RN PENDIENTES:** 13 (C6 Fraccionamiento: RN-FR1 a RN-FR13)
+- **Total RN en N/A (se activan en C7·T1):** 5 (C7 Consumo Clínico: RN-CC1 a RN-CC5)
 
 ---
 
-## 4. Verificaciones por Mutación Registradas
+## 4. Verificaciones por Mutación y Hallazgos Registrados
 
-1. **RN-VT1 (IVA por diferencia vs por separado):**
-   - Al mutar `descomponerLinea` para calcular neto e IVA por separado (`round(precio * 0.21, 2)`), el test falló en el precio **$0.05** ($0.04 neto + $0.01 IVA = $0.05 vs $0.0105 redondeado incorrectamente).
-2. **RN-VT5 (Anulación en sesión cerrada hacia sesión abierta actual):**
-   - Al mutar `anular_venta` para imputar el egreso en la sesión cerrada original, el test falló con `CASH_SESSION_CLOSED` (imposibilidad de registrar movimientos en sesión cerrada).
-3. **RN-SC8 (Concurrencia de descuento de stock sin FOR UPDATE):**
-   - Al remover el bloqueo `FOR UPDATE` y permitir carrera directa entre lecturas y escrituras, el test falló en la **repetición 0** con violación del CHECK de existencia no negativa (`new row for relation "existencias_lote" violates check constraint "existencias_lote_cantidad_check"`), demostrando que la serialización `FOR UPDATE ORDER BY lote_id` es indispensable para evitar sobreventas bajo concurrencia.
+1. **RN-AJ4 (Acumulación de devoluciones previas):**
+   - Al simular una mutación eliminando `v_ya_devuelto` (comparando únicamente `v_item.cantidad > v_linea.cantidad`), dos devoluciones consecutivas de 3 unidades sobre una venta original de 5 unidades pasaron ambas erróneamente. Con la acumulación real, la segunda devolución falló correctamente con `RETURN_EXCEEDS_SOLD` (3 + 3 = 6 > 5).
+2. **RN-AJ3 (Detección de ventas concurrentes durante recuentos):**
+   - Al abrir un recuento con existencia 10 y registrar una venta intermedia de 3 unidades, el RPC detectó el desvío y retornó `COUNT_STALE` con el detalle JSON del lote afectado (`cantidadVistaPorElUsuario: 10`, `cantidadActual: 7`). Al confirmar el desvío, generó el ajuste exacto (+3 unidades) llevando el stock al conteo físico (10) sin sobrescribir ni revertir la venta previa.
+3. **RN-AJ5 (Aislamiento de lotes no revendibles en FEFO):**
+   - Las devoluciones marcadas como no revendibles crearon lotes en estado `bloqueado` con `lote_padre_id` apuntando al lote vendido original. La consulta de candidatos FEFO (`estado = 'disponible'`) ignoró estrictamente estos lotes devueltos.

@@ -102,7 +102,7 @@ no arranque, esas cinco RN efectivamente no están en el alcance de ninguna tand
 | RN-LO4 | C2·T4 | ✅ | `tests/unit/stock.service.test.ts` | Lote vencido rechazado **para los tres roles, incluido admin**. Se reverifica en C4·T2 and C6·T1. |
 | RN-LO5 | C2·T4 | ✅ | `tests/unit/stock.service.test.ts` | 2026-01, 2026-03 y `NULL` → sugiere enero; dos de igual vencimiento dan orden estable. |
 | RN-LO6 | C4·T2 | ✅ | `tests/integration/ventas.integration.test.ts` | Sin motivo falla; con motivo, el movimiento queda con `fefo_respetado=false` y el texto. |
-| RN-LO7 | C2·T4 | ✅ | `tests/unit/stock.service.test.ts` | Bloquear un lote y vender falla. El bloqueo/desbloqueo se implementa en C5·T2. |
+| RN-LO7 | C2·T4 + C5·T2 | ✅ | `tests/unit/stock.service.test.ts`<br>`tests/integration/ajustes.integration.test.ts` | Bloquear un lote y vender falla. El bloqueo/desbloqueo se implementa en C5·T2. |
 | RN-LO8 | C2·T5 | ✅ | `tests/integration/stock.integration.test.ts` | Lote a 30 días con umbral 60 genera notificación y **permite** la venta. |
 
 ## RN-CM — Compras (C2)
@@ -164,13 +164,13 @@ no arranque, esas cinco RN efectivamente no están en el alcance de ninguna tand
 
 | RN | Tanda | Estado | Archivo previsto | Caso |
 |---|---|---|---|---|
-| RN-AJ1 | C5·T2 | PENDIENTE | `tests/integration/ajustes.integration.test.ts` | Sin motivo falla; con `"error"` (5 caracteres) falla; con motivo descriptivo funciona. |
-| RN-AJ2 | C5·T2 | PENDIENTE | `tests/unit/ajustes.service.test.ts` | No existe ruta de anulación de movimiento; el ajuste compensatorio queda visible en el historial del lote. |
-| RN-AJ3 | C5·T3 | PENDIENTE | `tests/integration/ajustes.integration.test.ts` | Abrir recuento, vender del lote contado, aplicar sin confirmar → advertencia con los lotes movidos; con confirmación → el ajuste usa la cantidad al momento de aplicar. |
-| RN-AJ4 | C5·T2 | PENDIENTE | `tests/integration/ajustes.integration.test.ts` | Vender 5, devolver 3, devolver 3 → falla la segunda. |
-| RN-AJ5 | C5·T2 | PENDIENTE | `tests/integration/ajustes.integration.test.ts` | La devolución no revendible crea o usa un lote `bloqueado` con motivo, y ese lote no aparece entre los candidatos FEFO. |
-| RN-AJ6 | C5·T3 | PENDIENTE | `tests/integration/ajustes.integration.test.ts` | Aplicar dos veces el mismo recuento falla. |
-| RN-AJ7 | C5·T2 | PENDIENTE | `tests/integration/ajustes.integration.test.ts` | Con lote vencido, la merma por vencimiento funciona y cualquier otra salida falla. |
+| RN-AJ1 | C5·T2 | ✅ | `tests/integration/ajustes.integration.test.ts` | Sin motivo falla; con `"error"` (5 caracteres) falla; con motivo descriptivo funciona. |
+| RN-AJ2 | C5·T2 | ✅ | `tests/integration/ajustes.integration.test.ts` | No existe ruta de anulación de movimiento; el ajuste compensatorio queda visible en el historial del lote. |
+| RN-AJ3 | C5·T3 | ✅ | `tests/integration/ajustes.integration.test.ts` | Abrir recuento, vender del lote contado, aplicar sin confirmar → advertencia con los lotes movidos; con confirmación → el ajuste usa la cantidad al momento de aplicar. |
+| RN-AJ4 | C5·T2 | ✅ | `tests/integration/ajustes.integration.test.ts` | Vender 5, devolver 3, devolver 3 → falla la segunda. |
+| RN-AJ5 | C5·T2 | ✅ | `tests/integration/ajustes.integration.test.ts` | La devolución no revendible crea o usa un lote `bloqueado` con motivo, y ese lote no aparece entre los candidatos FEFO. |
+| RN-AJ6 | C5·T3 | ✅ | `tests/integration/ajustes.integration.test.ts` | Aplicar dos veces el mismo recuento falla. |
+| RN-AJ7 | C5·T2 | ✅ | `tests/integration/ajustes.integration.test.ts` | Con lote vencido, la merma por vencimiento funciona y cualquier otra salida falla. |
 
 ## RN-CC — Consumo clínico, receta y trazabilidad (C7)
 
@@ -207,7 +207,7 @@ del fixture de volumen versionado:
 | RN | Tanda | Estado | Archivo previsto | Caso |
 |---|---|---|---|---|
 | RN-SC1 | C1·T5 | ✅ | `tests/unit/tenant-filter-guardrail.test.ts` (**G1**)<br>`tests/unit/productos.controller.test.ts`<br>`tests/unit/proveedores.controller.test.ts`<br>`tests/integration/aislamiento-api.integration.test.ts` | Guardrail G1 con su assert de cobertura sobre los services del módulo + enviar `tenantId` en el body no cambia el tenant afectado. Se reverifica en cada etapa. |
-| RN-SC2 | C1·T3 + C2·T1 + C4·T1 | ✅ | `tests/integration/aislamiento-api.integration.test.ts` | Insertar con `service_role` una fila cuyo `x_id` pertenece a otro tenant falla **por FK compuesta**, no por validación de aplicación. |
+| RN-SC2 | C1·T3 + C2·T1 + C4·T1 + C5·T1 | ✅ | `tests/integration/aislamiento-api.integration.test.ts`<br>`tests/integration/ajustes.integration.test.ts` | Insertar con `service_role` una fila cuyo `x_id` pertenece a otro tenant falla **por FK compuesta**, no por validación de aplicación. |
 | RN-SC3 | C1·T5 | ✅ | `tests/integration/grants.integration.test.ts` (**G3**) | Bloque que **enumera** las funciones creadas por las migraciones del módulo y verifica `has_function_privilege('anon'\|'authenticated', …) = false` para todas. Una función nueva entra sola al alcance. |
 | RN-SC4 | C1·T3 | ✅ | `tests/integration/rls.test.ts` | Con dos tenants sembrados, ninguna consulta de A devuelve filas de B en las tablas del módulo. **Bloqueante desde la primera etapa.** Se extiende en cada migración. |
 | RN-SC5 | C1·T5 | ✅ | `tests/unit/productos.service.test.ts`<br>`tests/unit/proveedores.service.test.ts` | Por tipo de operación, verificar el asiento con su `module`; si la operación falla, no queda asiento huérfano. Se reverifica en cada etapa. |

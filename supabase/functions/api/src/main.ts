@@ -51,6 +51,12 @@ import {
 import { comprasRouter } from "./modules/compras/compras.controller.ts";
 import { cajaRouter } from "./modules/caja/caja.controller.ts";
 import { ventasRouter } from "./modules/ventas/ventas.controller.ts";
+import {
+  ajustesRouter,
+  lotesAjustesRouter,
+  recuentosRouter,
+  devolucionesRouter,
+} from "./modules/ajustes/ajustes.controller.ts";
 
 const app = new Hono().basePath("/api/v1");
 
@@ -120,6 +126,12 @@ app.route("/caja", cajaRouter);
 
 // ─── Ventas (módulo vendible ventas — Etapa C4) ───────────────────────────────
 app.route("/ventas", ventasRouter);
+
+// ─── Ajustes, Recuentos y Devoluciones (módulos stock / ventas — Etapa C5) ─────
+app.route("/ajustes", ajustesRouter);
+app.route("/lotes", lotesAjustesRouter); // aditivo: /:id/bloquear y /:id/desbloquear
+app.route("/recuentos", recuentosRouter);
+app.route("/devoluciones", devolucionesRouter);
 
 // ─── Doctores + Horarios de Atención (Transversal — Etapa 4) ───────────────────
 // Doctores: ABM (listar/editar) bajo manage_users.
