@@ -1059,4 +1059,320 @@ describeIntegration("C4·T2: RPC registrar_venta", () => {
   });
 });
 
+describeIntegration("C4·T3: RPC anular_venta", () => {
+  let tAId = "";
+  let uAId = "";
+  let cAId = "";
+  let sAId = "";
+  let pAId = "";
+  let svAId = "";
+  let mpEfectivoId = "";
+
+  beforeAll(async () => {
+    const fixture = await crearFixtureVentas(serviceDb, "VT_T3");
+    tAId = fixture.tenantId;
+    uAId = fixture.usuarioId;
+    cAId = fixture.cajaId;
+    sAId = fixture.sesionId;
+    pAId = fixture.productoId;
+    svAId = fixture.servicioId;
+
+    const { data: mpE } = await serviceDb
+      .from("medios_pago")
+      .select("id")
+      .eq("codigo", "efectivo")
+      .single();
+    mpEfectivoId = mpE!.id;
+  });
+
+  afterAll(async () => {
+    if (!serviceDb || !tAId) return;
+    if (uAId) await borrarUsuarioAuth(uAId);
+    await serviceDb.from("notificaciones").delete().eq("tenant_id", tAId);
+    await serviceDb.from("ventas_pagos").delete().eq("tenant_id", tAId);
+    await serviceDb.from("movimientos_stock").delete().eq("tenant_id", tAId);
+    await serviceDb.from("existencias_lote").delete().eq("tenant_id", tAId);
+    await serviceDb.from("lotes").delete().eq("tenant_id", tAId);
+    await serviceDb.from("ventas_items").delete().eq("tenant_id", tAId);
+    await serviceDb.from("movimientos_caja").delete().eq("tenant_id", tAId);
+    await serviceDb.from("ventas").delete().eq("tenant_id", tAId);
+    await serviceDb.from("sesiones_caja").delete().eq("tenant_id", tAId);
+    await serviceDb.from("cajas").delete().eq("tenant_id", tAId);
+    await serviceDb.from("servicios").delete().eq("tenant_id", tAId);
+    await serviceDb.from("productos").delete().eq("tenant_id", tAId);
+    await serviceDb.from("contadores_tenant").delete().eq("tenant_id", tAId);
+    await serviceDb.from("registros_auditoria").delete().eq("tenant_id", tAId);
+    await serviceDb.from("tenants").delete().eq("id", tAId);
+  });
+
+  async function sembrarStock(
+    tenantId: string,
+    productoId: string,
+    cantidad: number,
+    options?: {
+      fechaVencimiento?: string | null;
+      codigoLote?: string;
+      bloqueado?: boolean;
+      costo?: number;
+    }
+  ) {
+    const { data: l, error: errL } = await serviceDb
+      .from("lotes")
+      .insert({
+        tenant_id: tenantId,
+        producto_id: productoId,
+        codigo_lote: options?.codigoLote ?? `LOTE-${Date.now()}-${Math.floor(Math.random() * 10000)}`,
+        fecha_vencimiento: options?.fechaVencimiento ?? "2028-12-31",
+        estado: options?.bloqueado ? "bloqueado" : "disponible",
+        motivo_bloqueo: options?.bloqueado ? "Bloqueado para test" : null,
+        costo_unitario_neto: options?.costo ?? 500,
+        costo_unitario_efectivo: options?.costo ?? 500,
+        origen: "inicial",
+        usuario_id: uAId,
+      })
+      .select("id")
+      .single();
+    if (errL || !l) throw new Error(`Error sembrando lote: ${errL?.message}`);
+    const loteId = l.id as string;
+
+    const { error: errM } = await serviceDb.from("movimientos_stock").insert({
+      tenant_id: tenantId,
+      operacion_id: crypto.randomUUID(),
+      tipo: "entrada_inicial",
+      producto_id: productoId,
+      lote_id: loteId,
+      cantidad: cantidad,
+      costo_unitario: options?.costo ?? 500,
+      costo_total: (options?.costo ?? 500) * cantidad,
+      usuario_id: uAId,
+    });
+    if (errM) throw new Error(`Error insertando stock inicial: ${errM?.message}`);
+
+    return loteId;
+  }
+
+  it("RN-VT4: anular una venta restituye existencias y dinero sin borrar registros", async () => {
+    const { data: um } = await serviceDb.from("unidades_medida").select("id").eq("codigo", "unidad").single();
+    const { data: p } = await serviceDb
+      .from("productos")
+      .insert({
+        tenant_id: tAId,
+        codigo: `ANUL-${Date.now()}`,
+        nombre: "Producto Anulacion Test",
+        unidad_medida_id: um!.id,
+        precio_venta: 1000,
+        alicuota_iva: 21.00,
+        activo: true,
+        es_vendible: true,
+      })
+      .select("id")
+      .single();
+    const prodId = p!.id;
+
+    // Crear 2 lotes: Lote 1 con 2 unidades (vence antes), Lote 2 con 5 unidades (vence después)
+    const l1 = await sembrarStock(tAId, prodId, 2, { fechaVencimiento: "2027-01-01", costo: 400 });
+    const l2 = await sembrarStock(tAId, prodId, 5, { fechaVencimiento: "2027-06-01", costo: 450 });
+
+    // Vender 3 unidades (tomará 2 de L1 y 1 de L2)
+    const { data: vData, error: errVenta } = await serviceDb.rpc("registrar_venta", {
+      p_tenant_id: tAId,
+      p_usuario_id: uAId,
+      p_sesion_caja_id: sAId,
+      p_cliente_id: null,
+      p_condicion_pago: "contado",
+      p_items: [{ tipoItem: "producto", productoId: prodId, cantidad: 3 }],
+      p_pagos: [{ medioPagoId: mpEfectivoId, importe: 3000 }],
+    });
+    expect(errVenta).toBeNull();
+    const ventaId = vData[0].venta_id;
+
+    // Verificar existencias antes de anular: L1 = 0, L2 = 4
+    const { data: extPostVenta } = await serviceDb
+      .from("existencias_lote")
+      .select("lote_id, cantidad")
+      .in("lote_id", [l1, l2]);
+    expect(Number(extPostVenta?.find((e) => e.lote_id === l1)?.cantidad)).toBe(0);
+    expect(Number(extPostVenta?.find((e) => e.lote_id === l2)?.cantidad)).toBe(4);
+
+    // Anular con motivo corto -> rechazo
+    const { error: errMotivoCorto } = await serviceDb.rpc("anular_venta", {
+      p_tenant_id: tAId,
+      p_usuario_id: uAId,
+      p_venta_id: ventaId,
+      p_sesion_caja_id: sAId,
+      p_motivo: "error", // < 10 chars
+    });
+    expect(errMotivoCorto?.message).toContain("ANULATION_REASON_REQUIRED");
+
+    // Anular con motivo válido
+    const motivoAnulacion = "Devolución por producto defectuoso solicitada por cliente";
+    const { data: anulData, error: errAnul } = await serviceDb.rpc("anular_venta", {
+      p_tenant_id: tAId,
+      p_usuario_id: uAId,
+      p_venta_id: ventaId,
+      p_sesion_caja_id: sAId,
+      p_motivo: motivoAnulacion,
+    });
+    expect(errAnul).toBeNull();
+    expect(anulData[0].estado).toBe("anulada");
+
+    // 1. Verificar estado de la venta
+    const { data: vRow } = await serviceDb
+      .from("ventas")
+      .select("estado, anulada_at, motivo_anulacion, anulada_por_usuario_id")
+      .eq("id", ventaId)
+      .single();
+    expect(vRow!.estado).toBe("anulada");
+    expect(vRow!.motivo_anulacion).toBe(motivoAnulacion);
+    expect(vRow!.anulada_por_usuario_id).toBe(uAId);
+    expect(vRow!.anulada_at).not.toBeNull();
+
+    // 2. Verificar existencias restauradas: L1 = 2, L2 = 5
+    const { data: extPostAnul } = await serviceDb
+      .from("existencias_lote")
+      .select("lote_id, cantidad")
+      .in("lote_id", [l1, l2]);
+    expect(Number(extPostAnul?.find((e) => e.lote_id === l1)?.cantidad)).toBe(2);
+    expect(Number(extPostAnul?.find((e) => e.lote_id === l2)?.cantidad)).toBe(5);
+
+    // 3. Verificar movimientos de stock compensatorios (entrada_devolucion)
+    const { data: movsStock } = await serviceDb
+      .from("movimientos_stock")
+      .select("tipo, lote_id, cantidad, costo_unitario, motivo")
+      .eq("tenant_id", tAId)
+      .order("created_at", { ascending: false });
+
+    const devL1 = movsStock?.find((m) => m.tipo === "entrada_devolucion" && m.lote_id === l1);
+    const devL2 = movsStock?.find((m) => m.tipo === "entrada_devolucion" && m.lote_id === l2);
+    expect(devL1).toBeDefined();
+    expect(Number(devL1!.cantidad)).toBe(2);
+    expect(Number(devL1!.costo_unitario)).toBe(400);
+    expect(devL1!.motivo).toBe(motivoAnulacion);
+
+    expect(devL2).toBeDefined();
+    expect(Number(devL2!.cantidad)).toBe(1);
+    expect(Number(devL2!.costo_unitario)).toBe(450);
+    expect(devL2!.motivo).toBe(motivoAnulacion);
+
+    // 4. Verificar movimiento de caja compensatorio (egreso_devolucion)
+    const { data: movsCaja } = await serviceDb
+      .from("movimientos_caja")
+      .select("tipo, importe, motivo, venta_id, sesion_caja_id")
+      .eq("venta_id", ventaId)
+      .eq("tipo", "egreso_devolucion");
+    expect(movsCaja).toHaveLength(1);
+    expect(Number(movsCaja![0].importe)).toBe(3000);
+    expect(movsCaja![0].motivo).toBe(motivoAnulacion);
+    expect(movsCaja![0].sesion_caja_id).toBe(sAId);
+
+    // 5. Reintentar anulación -> SALE_ALREADY_ANNULLED
+    const { error: errReanular } = await serviceDb.rpc("anular_venta", {
+      p_tenant_id: tAId,
+      p_usuario_id: uAId,
+      p_venta_id: ventaId,
+      p_sesion_caja_id: sAId,
+      p_motivo: "Segundo intento de anulación",
+    });
+    expect(errReanular?.message).toContain("SALE_ALREADY_ANNULLED");
+  });
+
+  it("RN-VT5: la anulación de una venta vieja impacta en la sesión actual, no en la cerrada", async () => {
+    // 1. Crear Venta V1 en Sesión 1
+    const { data: vData1, error: errV1 } = await serviceDb.rpc("registrar_venta", {
+      p_tenant_id: tAId,
+      p_usuario_id: uAId,
+      p_sesion_caja_id: sAId, // Sesión 1
+      p_cliente_id: null,
+      p_condicion_pago: "contado",
+      p_items: [
+        {
+          tipoItem: "servicio",
+          servicioId: svAId,
+          cantidad: 1,
+          precioUnitario: 2500,
+        },
+      ],
+      p_pagos: [{ medioPagoId: mpEfectivoId, importe: 2500 }],
+    });
+    expect(errV1).toBeNull();
+    const ventaId1 = vData1[0].venta_id;
+
+    // 2. Cerrar Sesión 1
+    const { error: errCierre1 } = await serviceDb
+      .from("sesiones_caja")
+      .update({
+        estado: "cerrada",
+        cierre_usuario_id: uAId,
+        cierre_at: new Date().toISOString(),
+        saldo_teorico_efectivo: 3500,
+        efectivo_contado: 3500,
+        diferencia: 0,
+      })
+      .eq("id", sAId);
+    expect(errCierre1).toBeNull();
+
+    // 3. Abrir Sesión 2 en la misma caja
+    const { data: s2, error: errS2 } = await serviceDb
+      .from("sesiones_caja")
+      .insert({
+        tenant_id: tAId,
+        caja_id: cAId,
+        estado: "abierta",
+        apertura_usuario_id: uAId,
+        saldo_inicial: 1000,
+      })
+      .select("id")
+      .single();
+    expect(errS2).toBeNull();
+    const sesion2Id = s2!.id;
+
+    // 4. Anular V1 pasando la sesión 2 abierta
+    const { data: anulData, error: errAnul } = await serviceDb.rpc("anular_venta", {
+      p_tenant_id: tAId,
+      p_usuario_id: uAId,
+      p_venta_id: ventaId1,
+      p_sesion_caja_id: sesion2Id, // Sesión 2 (actual)
+      p_motivo: "Cliente devuelve servicio por reprogramacion total",
+    });
+    expect(errAnul).toBeNull();
+
+    // 5. Comprobar que el egreso_devolucion pertenece a la sesión 2
+    const { data: movEgreso } = await serviceDb
+      .from("movimientos_caja")
+      .select("id, sesion_caja_id, tipo, importe")
+      .eq("venta_id", ventaId1)
+      .eq("tipo", "egreso_devolucion")
+      .single();
+    expect(movEgreso!.sesion_caja_id).toBe(sesion2Id);
+    expect(movEgreso!.sesion_caja_id).not.toBe(sAId);
+
+    // 6. Comprobar que en la sesión 1 cerrada NO hay movimientos de tipo egreso_devolucion para esta venta
+    const { data: movsS1 } = await serviceDb
+      .from("movimientos_caja")
+      .select("id, tipo")
+      .eq("sesion_caja_id", sAId)
+      .eq("venta_id", ventaId1)
+      .eq("tipo", "egreso_devolucion");
+    expect(movsS1).toHaveLength(0);
+  });
+
+  it("RN-MV9: la anulación genera movimientos nuevos y no borra los originales", async () => {
+    // Verificar que en movimientos_stock siguen existiendo los movimientos de salida_venta originales
+    const { data: salidas } = await serviceDb
+      .from("movimientos_stock")
+      .select("id, tipo")
+      .eq("tenant_id", tAId)
+      .eq("tipo", "salida_venta");
+    expect(salidas!.length).toBeGreaterThan(0);
+
+    const { data: devoluciones } = await serviceDb
+      .from("movimientos_stock")
+      .select("id, tipo")
+      .eq("tenant_id", tAId)
+      .eq("tipo", "entrada_devolucion");
+    expect(devoluciones!.length).toBeGreaterThan(0);
+  });
+});
+
+
 
