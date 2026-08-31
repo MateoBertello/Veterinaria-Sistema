@@ -44,8 +44,8 @@ no arranque, esas cinco RN efectivamente no están en el alcance de ninguna tand
 
 | Estado al corte de la planificación | Cantidad |
 |---|:-:|
-| ✅ con test que pasa | 49 |
-| `PENDIENTE` | 36 |
+| ✅ con test que pasa | 65 |
+| `PENDIENTE` | 20 |
 | `N/A` — se activan en C7·T1 | 5 |
 
 ---
@@ -213,4 +213,4 @@ del fixture de volumen versionado:
 | RN-SC5 | C1·T5 | ✅ | `tests/unit/productos.service.test.ts`<br>`tests/unit/proveedores.service.test.ts` | Por tipo de operación, verificar el asiento con su `module`; si la operación falla, no queda asiento huérfano. Se reverifica en cada etapa. |
 | RN-SC6 | C1·T1 | ✅ | `tests/unit/audit-modulo-enum.test.ts` (**G2**) | Todo `module:` de `recordAudit` existe en el ENUM `modulo_auditoria` **y** en el tipo `AuditModule`. La dirección TS es nueva y es la que hoy falta. |
 | RN-SC7 | C1·T5 | ✅ | `tests/unit/productos.controller.test.ts`<br>`tests/unit/proveedores.controller.test.ts` | Matriz rol × endpoint con el 403 esperado; módulo no contratado → `MODULE_NOT_LICENSED`. Se reverifica en cada etapa. |
-| RN-SC8 | C4·T5 | PENDIENTE | `tests/integration/ventas.integration.test.ts` | Dos `.rpc("registrar_venta")` en `Promise.all` sobre un lote con existencia 1, con `rpcReallyRan()`, N repeticiones (default 50). Una tiene éxito y la otra falla con `INSUFFICIENT_STOCK`; **nunca las dos**. |
+| RN-SC8 | C4·T5 | ✅ | `tests/integration/ventas.integration.test.ts` | Dos `.rpc("registrar_venta")` en `Promise.all` sobre un lote con existencia 1, con `rpcReallyRan()`, N repeticiones (default 50). Una tiene éxito y la otra falla con `INSUFFICIENT_STOCK`; **nunca las dos**. |

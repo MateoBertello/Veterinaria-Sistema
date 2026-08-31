@@ -448,6 +448,11 @@ describeIntegration("C4·T2: RPC registrar_venta", () => {
   let mpTransferenciaId = "";
 
   beforeAll(async () => {
+    if (!serviceDb) {
+      serviceDb = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
+        auth: { persistSession: false, autoRefreshToken: false },
+      });
+    }
     const fixture = await crearFixtureVentas(serviceDb, "VT_T2");
     tAId = fixture.tenantId;
     uAId = fixture.usuarioId;
@@ -1069,6 +1074,11 @@ describeIntegration("C4·T3: RPC anular_venta", () => {
   let mpEfectivoId = "";
 
   beforeAll(async () => {
+    if (!serviceDb) {
+      serviceDb = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
+        auth: { persistSession: false, autoRefreshToken: false },
+      });
+    }
     const fixture = await crearFixtureVentas(serviceDb, "VT_T3");
     tAId = fixture.tenantId;
     uAId = fixture.usuarioId;
@@ -1373,6 +1383,361 @@ describeIntegration("C4·T3: RPC anular_venta", () => {
     expect(devoluciones!.length).toBeGreaterThan(0);
   });
 });
+
+describeIntegration("C4·T5: Concurrencia sobre Stock Crítico (RN-SC8)", () => {
+  let tAId = "";
+  let uAId = "";
+  let cAId = "";
+  let mpEfectivoId = "";
+  let umId = "";
+
+  beforeAll(async () => {
+    if (!serviceDb) {
+      serviceDb = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
+        auth: { persistSession: false, autoRefreshToken: false },
+      });
+    }
+    const fixture = await crearFixtureVentas(serviceDb, "VT_T5");
+    tAId = fixture.tenantId;
+    uAId = fixture.usuarioId;
+    cAId = fixture.cajaId;
+
+    const { data: mpE } = await serviceDb
+      .from("medios_pago")
+      .select("id")
+      .eq("codigo", "efectivo")
+      .single();
+    mpEfectivoId = mpE!.id;
+
+    const { data: um } = await serviceDb
+      .from("unidades_medida")
+      .select("id")
+      .eq("codigo", "unidad")
+      .single();
+    umId = um!.id;
+  });
+
+  afterAll(async () => {
+    if (!serviceDb || !tAId) return;
+    if (uAId) await borrarUsuarioAuth(uAId);
+    await serviceDb.from("notificaciones").delete().eq("tenant_id", tAId);
+    await serviceDb.from("ventas_pagos").delete().eq("tenant_id", tAId);
+    await serviceDb.from("movimientos_stock").delete().eq("tenant_id", tAId);
+    await serviceDb.from("existencias_lote").delete().eq("tenant_id", tAId);
+    await serviceDb.from("lotes").delete().eq("tenant_id", tAId);
+    await serviceDb.from("ventas_items").delete().eq("tenant_id", tAId);
+    await serviceDb.from("movimientos_caja").delete().eq("tenant_id", tAId);
+    await serviceDb.from("ventas").delete().eq("tenant_id", tAId);
+    await serviceDb.from("sesiones_caja").delete().eq("tenant_id", tAId);
+    await serviceDb.from("cajas").delete().eq("tenant_id", tAId);
+    await serviceDb.from("servicios").delete().eq("tenant_id", tAId);
+    await serviceDb.from("productos").delete().eq("tenant_id", tAId);
+    await serviceDb.from("contadores_tenant").delete().eq("tenant_id", tAId);
+    await serviceDb.from("registros_auditoria").delete().eq("tenant_id", tAId);
+    await serviceDb.from("tenants").delete().eq("id", tAId);
+  });
+
+  type RpcResult = { data: any; error: { message: string } | null };
+
+  function rpcReallyRan(error: { message: string } | null): boolean {
+    return !/could not find|schema cache/i.test(error?.message ?? "");
+  }
+
+  function esExito(r: RpcResult): boolean {
+    return r.error === null && Array.isArray(r.data) && r.data.length === 1;
+  }
+
+  const REPS = Number(process.env["CONCURRENCY_REPS"] ?? 50);
+
+  async function sembrarProductoConExistencia(cantidad: number, options?: { precio?: number }) {
+    const { data: p, error: errP } = await serviceDb
+      .from("productos")
+      .insert({
+        tenant_id: tAId,
+        codigo: `PROD-CC-${Date.now()}-${Math.floor(Math.random() * 100000)}`,
+        nombre: `Producto Concurrencia ${Date.now()}-${Math.floor(Math.random() * 100000)}`,
+        unidad_medida_id: umId,
+        precio_venta: options?.precio ?? 1000,
+        alicuota_iva: 21.00,
+        activo: true,
+        es_vendible: true,
+      })
+      .select("id")
+      .single();
+    if (errP || !p) throw new Error(`Error creando producto: ${errP?.message}`);
+    const productoId = p.id as string;
+
+    const { data: l, error: errL } = await serviceDb
+      .from("lotes")
+      .insert({
+        tenant_id: tAId,
+        producto_id: productoId,
+        codigo_lote: `LOT-CC-${Date.now()}-${Math.floor(Math.random() * 100000)}`,
+        fecha_vencimiento: "2028-12-31",
+        estado: "disponible",
+        costo_unitario_neto: 500,
+        costo_unitario_efectivo: 500,
+        origen: "inicial",
+        usuario_id: uAId,
+      })
+      .select("id")
+      .single();
+    if (errL || !l) throw new Error(`Error creando lote: ${errL?.message}`);
+    const loteId = l.id as string;
+
+    const { error: errM } = await serviceDb.from("movimientos_stock").insert({
+      tenant_id: tAId,
+      operacion_id: crypto.randomUUID(),
+      tipo: "entrada_inicial",
+      producto_id: productoId,
+      lote_id: loteId,
+      cantidad: cantidad,
+      costo_unitario: 500,
+      costo_total: 500 * cantidad,
+      usuario_id: uAId,
+    });
+    if (errM) throw new Error(`Error insertando movimiento inicial: ${errM?.message}`);
+
+    return { productoId, loteId };
+  }
+
+  async function abrirSesion() {
+    const { data: c, error: errC } = await serviceDb
+      .from("cajas")
+      .insert({
+        tenant_id: tAId,
+        nombre: `Caja CC ${Date.now()}-${Math.floor(Math.random() * 100000)}`,
+      })
+      .select("id")
+      .single();
+    if (errC || !c) throw new Error(`Error creando caja: ${errC?.message}`);
+    const cajaId = c.id as string;
+
+    const { data: s, error: errS } = await serviceDb
+      .from("sesiones_caja")
+      .insert({
+        tenant_id: tAId,
+        caja_id: cajaId,
+        estado: "abierta",
+        apertura_usuario_id: uAId,
+        saldo_inicial: 1000,
+      })
+      .select("id")
+      .single();
+    if (errS || !s) throw new Error(`Error abriendo sesion: ${errS?.message}`);
+    return s.id as string;
+  }
+
+  async function cerrarYLimpiar(sesionId: string) {
+    const { data: s } = await serviceDb.from("sesiones_caja").select("caja_id").eq("id", sesionId).single();
+    await serviceDb.from("movimientos_caja").delete().eq("sesion_caja_id", sesionId);
+    await serviceDb.from("ventas").delete().eq("sesion_caja_id", sesionId);
+    await serviceDb.from("sesiones_caja").delete().eq("id", sesionId);
+    if (s?.caja_id) {
+      await serviceDb.from("cajas").delete().eq("id", s.caja_id);
+    }
+  }
+
+  function ventaRpcParams(sesionId: string, productoId: string, cantidad: number, precioUnitario = 1000) {
+    const total = precioUnitario * cantidad;
+    return {
+      p_tenant_id: tAId,
+      p_usuario_id: uAId,
+      p_sesion_caja_id: sesionId,
+      p_cliente_id: null,
+      p_condicion_pago: "contado",
+      p_items: [
+        {
+          tipoItem: "producto",
+          productoId: productoId,
+          cantidad: cantidad,
+          precioUnitario: precioUnitario,
+        },
+      ],
+      p_pagos: [
+        {
+          medioPagoId: mpEfectivoId,
+          importe: total,
+        },
+      ],
+    };
+  }
+
+  function ventaMultiItem(sesionId: string, prods: Array<{ productoId: string; cantidad: number; precioUnitario?: number }>) {
+    let total = 0;
+    const items = prods.map((p) => {
+      const pu = p.precioUnitario ?? 1000;
+      total += pu * p.cantidad;
+      return {
+        tipoItem: "producto",
+        productoId: p.productoId,
+        cantidad: p.cantidad,
+        precioUnitario: pu,
+      };
+    });
+
+    return {
+      p_tenant_id: tAId,
+      p_usuario_id: uAId,
+      p_sesion_caja_id: sesionId,
+      p_cliente_id: null,
+      p_condicion_pago: "contado",
+      p_items: items,
+      p_pagos: [
+        {
+          medioPagoId: mpEfectivoId,
+          importe: total,
+        },
+      ],
+    };
+  }
+
+  it("RN-SC8: dos ventas SIMULTÁNEAS de la última unidad → gana exactamente una", async () => {
+    for (let i = 0; i < REPS; i++) {
+      const { productoId, loteId } = await sembrarProductoConExistencia(1);
+      const sesion = await abrirSesion();
+
+      const [r1, r2] = await Promise.all([
+        serviceDb.rpc("registrar_venta", ventaRpcParams(sesion, productoId, 1)),
+        serviceDb.rpc("registrar_venta", ventaRpcParams(sesion, productoId, 1)),
+      ]) as [RpcResult, RpcResult];
+
+      expect(rpcReallyRan(r1.error)).toBe(true);
+      expect(rpcReallyRan(r2.error)).toBe(true);
+
+      const exitos = [r1, r2].filter(esExito);
+      const fallos = [r1, r2].filter((r) => r.error !== null);
+
+      expect(exitos, `repetición ${i}: se esperaba exactamente 1 éxito`).toHaveLength(1);
+      expect(fallos, `repetición ${i}: se esperaba exactamente 1 fallo`).toHaveLength(1);
+      expect(fallos[0].error?.message ?? "").toContain("INSUFFICIENT_STOCK");
+
+      // GARANTÍA DURA contra la base: no se vendió una unidad que no existía.
+      const { data: exist } = await serviceDb
+        .from("existencias_lote")
+        .select("cantidad")
+        .eq("tenant_id", tAId)
+        .eq("lote_id", loteId)
+        .single();
+      expect(Number(exist?.cantidad), `repetición ${i}: existencia negativa o mal`).toBe(0);
+
+      // Y exactamente UNA venta registrada.
+      const { count } = await serviceDb
+        .from("ventas")
+        .select("id", { count: "exact", head: true })
+        .eq("tenant_id", tAId)
+        .eq("sesion_caja_id", sesion);
+      expect(count, `repetición ${i}: se registraron ${count} ventas`).toBe(1);
+
+      await cerrarYLimpiar(sesion);
+    }
+  }, 300_000);
+
+  it("RN-SC8: dos ventas que tocan los mismos lotes en orden inverso no se deadlockean", async () => {
+    for (let i = 0; i < REPS; i++) {
+      const { productoId: pA } = await sembrarProductoConExistencia(10);
+      const { productoId: pB } = await sembrarProductoConExistencia(10);
+      const sesion = await abrirSesion();
+
+      const [r1, r2] = await Promise.all([
+        serviceDb.rpc("registrar_venta", ventaMultiItem(sesion, [{ productoId: pA, cantidad: 1 }, { productoId: pB, cantidad: 1 }])),
+        serviceDb.rpc("registrar_venta", ventaMultiItem(sesion, [{ productoId: pB, cantidad: 1 }, { productoId: pA, cantidad: 1 }])),
+      ]) as [RpcResult, RpcResult];
+
+      expect(rpcReallyRan(r1.error)).toBe(true);
+      expect(rpcReallyRan(r2.error)).toBe(true);
+
+      expect([r1, r2].filter(esExito), `repetición ${i}`).toHaveLength(2);
+
+      for (const r of [r1, r2]) {
+        expect(r.error?.message ?? "", `repetición ${i}: deadlock detectado`).not.toMatch(/deadlock|40P01/i);
+      }
+
+      await cerrarYLimpiar(sesion);
+    }
+  }, 300_000);
+
+  it("RN-SC8: 10 ventas simultáneas sobre existencia 3 → exactamente 3 tienen éxito", async () => {
+    const { productoId, loteId } = await sembrarProductoConExistencia(3);
+    const sesion = await abrirSesion();
+
+    const resultados = await Promise.all(
+      Array.from({ length: 10 }, () =>
+        serviceDb.rpc("registrar_venta", ventaRpcParams(sesion, productoId, 1))
+      )
+    ) as RpcResult[];
+
+    resultados.forEach((r, i) => expect(rpcReallyRan(r.error), `llamada ${i}`).toBe(true));
+    expect(resultados.filter(esExito)).toHaveLength(3);
+    expect(resultados.filter((r) => r.error !== null)).toHaveLength(7);
+
+    const { data } = await serviceDb
+      .from("existencias_lote")
+      .select("cantidad")
+      .eq("tenant_id", tAId)
+      .eq("lote_id", loteId)
+      .single();
+    expect(Number(data?.cantidad)).toBe(0);
+
+    await cerrarYLimpiar(sesion);
+  }, 120_000);
+
+  it("RN-SC8: dos anulaciones simultáneas de la misma venta → una sola compensa", async () => {
+    const { productoId, loteId } = await sembrarProductoConExistencia(1);
+    const sesion = await abrirSesion();
+
+    const { data: vData, error: errVenta } = await serviceDb.rpc(
+      "registrar_venta",
+      ventaRpcParams(sesion, productoId, 1)
+    );
+    expect(errVenta).toBeNull();
+    const ventaId = vData[0].venta_id;
+
+    // Verificar stock 0
+    const { data: ext0 } = await serviceDb
+      .from("existencias_lote")
+      .select("cantidad")
+      .eq("lote_id", loteId)
+      .single();
+    expect(Number(ext0?.cantidad)).toBe(0);
+
+    // Dos anulaciones en paralelo
+    const [r1, r2] = await Promise.all([
+      serviceDb.rpc("anular_venta", {
+        p_tenant_id: tAId,
+        p_usuario_id: uAId,
+        p_venta_id: ventaId,
+        p_sesion_caja_id: sesion,
+        p_motivo: "Anulación concurrente intento 1",
+      }),
+      serviceDb.rpc("anular_venta", {
+        p_tenant_id: tAId,
+        p_usuario_id: uAId,
+        p_venta_id: ventaId,
+        p_sesion_caja_id: sesion,
+        p_motivo: "Anulación concurrente intento 2",
+      }),
+    ]) as [RpcResult, RpcResult];
+
+    expect(rpcReallyRan(r1.error)).toBe(true);
+    expect(rpcReallyRan(r2.error)).toBe(true);
+    expect([r1, r2].filter(esExito)).toHaveLength(1);
+    const fallos = [r1, r2].filter((r) => r.error !== null);
+    expect(fallos).toHaveLength(1);
+    expect(fallos[0].error?.message).toContain("SALE_ALREADY_ANNULLED");
+
+    // Existencia restaurada exactamente a 1 (no a 2)
+    const { data: extFinal } = await serviceDb
+      .from("existencias_lote")
+      .select("cantidad")
+      .eq("lote_id", loteId)
+      .single();
+    expect(Number(extFinal?.cantidad)).toBe(1);
+
+    await cerrarYLimpiar(sesion);
+  }, 120_000);
+});
+
 
 
 
