@@ -12,6 +12,18 @@ const tenantB = "22222222-2222-2222-2222-222222222222";
 describeIntegration("C8: Reportes Comerciales y Fixture de Volumen", () => {
   beforeAll(async () => {
     serviceDb = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
+    const { data: prod } = await serviceDb
+      .from("productos")
+      .select("id")
+      .eq("tenant_id", tenantA)
+      .limit(1);
+
+    if (!prod || prod.length === 0) {
+      const { execSync } = await import("child_process");
+      const path = await import("path");
+      const seedPath = path.resolve(process.cwd(), "supabase/seeds/comercial_volumen_seed.sql");
+      execSync(`docker exec -i supabase_db_Veterinaria-Sistema psql -U postgres -d postgres < "${seedPath}"`);
+    }
   });
 
   it("RN-MV6 / C8·T1: valorizacionAFecha reconstruye inventario desde el libro mayor a distintas fechas", async () => {

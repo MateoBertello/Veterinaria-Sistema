@@ -45,7 +45,7 @@ export const RegistrarVentaSchema = z.object({
 export type RegistrarVentaDto = z.infer<typeof RegistrarVentaSchema>;
 
 export const AnularVentaSchema = z.object({
-  sesionCajaId: z.string().uuid(),
+  sesionCajaId: z.string().uuid().nullish(),
   motivo:       z.string().trim().min(10, "El motivo de anulación debe tener al menos 10 caracteres").max(500),
 });
 

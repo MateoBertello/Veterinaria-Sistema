@@ -764,6 +764,9 @@ export const ConversionService = {
       if (error?.code === "23505") {
         throw new DomainError(ErrorCode.VALIDATION_ERROR, 409, "Ya existe una conversión entre estos productos");
       }
+      if (error?.code === "23503") {
+        throw new DomainError(ErrorCode.PRODUCT_NOT_FOUND, 404, "Producto no encontrado");
+      }
       if (error?.code === "23514") {
         throw new DomainError(ErrorCode.VALIDATION_ERROR, 422, "Conversión inválida o autorreferencial");
       }

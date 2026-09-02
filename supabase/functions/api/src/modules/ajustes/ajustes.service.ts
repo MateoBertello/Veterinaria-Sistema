@@ -62,6 +62,12 @@ export function mapAjusteRpcError(err: { message: string; code?: string } | null
     }
     return new DomainError(ErrorCode.COUNT_STALE, 409, "Existen lotes cuya existencia cambió desde que se abrió el recuento", details);
   }
+  if (msg.includes("RETURN_WITHOUT_SALE")) {
+    return new DomainError(ErrorCode.RETURN_WITHOUT_SALE, 404, "Venta no encontrada");
+  }
+  if (msg.includes("SALE_ALREADY_VOIDED")) {
+    return new DomainError(ErrorCode.SALE_ALREADY_VOIDED, 409, "La venta ya se encuentra anulada");
+  }
   if (msg.includes("SALE_NOT_FOUND")) {
     return new DomainError(ErrorCode.SALE_NOT_FOUND, 404, "Venta no encontrada");
   }
@@ -169,7 +175,7 @@ export const AjustesService = {
         estado: "borrador",
         observaciones: dto.observaciones ?? null,
       })
-      .select("id, numero, estado, observaciones, created_at")
+      .select("id, fecha, estado, observaciones, created_at")
       .single();
 
     if (error) {
@@ -178,7 +184,7 @@ export const AjustesService = {
 
     return {
       id: data.id,
-      numero: data.numero,
+      fecha: data.fecha,
       estado: data.estado,
       observaciones: data.observaciones,
       createdAt: data.created_at,
@@ -198,7 +204,7 @@ export const AjustesService = {
       .from("recuentos")
       .select(
         `
-        id, numero, estado, observaciones, created_at, aplicado_at,
+        id, fecha, estado, observaciones, created_at, aplicado_at,
         usuario:usuarios!recuentos_usuario_tenant_fkey(id, full_name),
         aplicado_por:usuarios!recuentos_aplicador_tenant_fkey(id, full_name)
       `,
@@ -220,7 +226,7 @@ export const AjustesService = {
 
     const recuentos = (data ?? []).map((r: any) => ({
       id: r.id,
-      numero: r.numero,
+      fecha: r.fecha,
       estado: r.estado,
       observaciones: r.observaciones,
       createdAt: r.created_at,
@@ -248,7 +254,7 @@ export const AjustesService = {
     const { data: recuento, error: errRec } = await db
       .from("recuentos")
       .select(`
-        id, numero, estado, observaciones, created_at, aplicado_at,
+        id, fecha, estado, observaciones, created_at, aplicado_at,
         usuario:usuarios!recuentos_usuario_tenant_fkey(id, full_name),
         aplicado_por:usuarios!recuentos_aplicador_tenant_fkey(id, full_name)
       `)
@@ -279,7 +285,7 @@ export const AjustesService = {
 
     return {
       id: recuento.id,
-      numero: recuento.numero,
+      fecha: recuento.fecha,
       estado: recuento.estado,
       observaciones: recuento.observaciones,
       createdAt: recuento.created_at,
@@ -436,10 +442,12 @@ export const AjustesService = {
 
     const row = Array.isArray(data) ? data[0] : data;
     return {
-      devolucionId: row.devolucion_id,
+      devolucionId: row.devolucion_id ?? row.operacion_id,
       operacionId: row.operacion_id,
-      itemsDevueltos: row.items_devueltos,
-      reintegroTotal: Number(row.reintegro_total),
+      itemsDevueltos: row.items_devueltos ?? row.movimientos_generados,
+      reintegroTotal: Number(row.reintegro_total ?? row.importe_reintegrado ?? 0),
+      movimientosGenerados: row.movimientos_generados,
+      importeReintegrado: Number(row.importe_reintegrado ?? row.reintegro_total ?? 0),
     };
   },
 };

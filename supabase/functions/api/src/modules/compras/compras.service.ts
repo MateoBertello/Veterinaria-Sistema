@@ -99,7 +99,7 @@ export class ComprasService {
         id, fecha, comprobante_proveedor_tipo, comprobante_proveedor_numero,
         total_neto, total_iva, total, estado, genera_egreso_caja, observaciones,
         created_at, updated_at,
-        proveedor:proveedores(id, razon_social, cuit_rut)
+        proveedor:proveedores(id, razon_social, cuit)
       `,
         { count: "exact" },
       )
@@ -153,7 +153,7 @@ export class ComprasService {
         id, fecha, comprobante_proveedor_tipo, comprobante_proveedor_numero,
         total_neto, total_iva, total, estado, genera_egreso_caja, observaciones,
         created_at, updated_at,
-        proveedor:proveedores(id, razon_social, cuit_rut),
+        proveedor:proveedores(id, razon_social, cuit),
         items:compras_items(
           id, producto_id, cantidad, costo_unitario_neto, alicuota_iva,
           codigo_lote, fecha_vencimiento, importe_neto, importe_iva, importe_total,

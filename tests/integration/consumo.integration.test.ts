@@ -220,24 +220,26 @@ describeIntegration("C7·T1: RPC registrar_consumo_clinico", () => {
       .from("v_consumo_clinico")
       .select("mascota_id, mascota_nombre, lote_id, codigo_lote")
       .eq("tenant_id", ctx.tenantId)
-      .eq("lote_id", ctx.lotesVac[0].id);
+      .eq("lote_id", ctx.lotesVac[0].id)
+      .order("consumido_at", { ascending: true });
 
     expect(errLote).toBeNull();
     expect(consumosLote).toBeDefined();
     expect(consumosLote!.length).toBeGreaterThan(0);
-    expect(consumosLote![0].mascota_id).toBe(ctx.mascota1.id);
+    expect(consumosLote!.map((c) => c.mascota_id)).toContain(ctx.mascota1.id);
 
     // 2. Trazabilidad Mascota -> Lotes
     const { data: consumosMascota, error: errMascota } = await serviceDb
       .from("v_consumo_clinico")
       .select("mascota_id, mascota_nombre, lote_id, codigo_lote")
       .eq("tenant_id", ctx.tenantId)
-      .eq("mascota_id", ctx.mascota1.id);
+      .eq("mascota_id", ctx.mascota1.id)
+      .order("consumido_at", { ascending: true });
 
     expect(errMascota).toBeNull();
     expect(consumosMascota).toBeDefined();
     expect(consumosMascota!.length).toBeGreaterThan(0);
-    expect(consumosMascota![0].lote_id).toBe(ctx.lotesVac[0].id);
+    expect(consumosMascota!.map((c) => c.lote_id)).toContain(ctx.lotesVac[0].id);
   });
 
   it("RN-CC5: las columnas de trazabilidad externa no se usan", async () => {

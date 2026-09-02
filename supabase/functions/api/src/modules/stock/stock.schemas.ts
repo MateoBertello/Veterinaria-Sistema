@@ -10,8 +10,8 @@ export const listarLotesQuerySchema = z.object({
 });
 
 export const candidatosFefoQuerySchema = z.object({
-  productoId: z.string().uuid("productoId debe ser un UUID válido"),
-  cantidad: z.coerce.number().positive("La cantidad debe ser mayor a 0"),
+  productoId: z.string().uuid("productoId debe ser un UUID válido").optional(),
+  cantidad: z.coerce.number().positive("La cantidad debe ser mayor a 0").optional(),
 });
 
 export const kardexQuerySchema = z.object({
