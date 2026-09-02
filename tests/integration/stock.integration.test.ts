@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { SUPABASE_URL, SERVICE_ROLE_KEY, describeIntegration } from "./_env.ts";
-import { crearUsuarioAuth, borrarUsuarioAuth } from "./_teardown.ts";
+import { borrarUsuarioAuth, crearUsuarioAuth, limpiarTenant } from "./_teardown.ts";
 import { StockService } from "../../supabase/functions/api/src/modules/stock/stock.service.ts";
 
 globalThis.WebSocket = class FakeWebSocket {} as any;
@@ -148,21 +148,13 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  if (!serviceDb || !tenantAId) return;
-  await serviceDb.from("movimientos_stock").delete().eq("tenant_id", tenantAId);
-  await serviceDb.from("existencias_lote").delete().eq("tenant_id", tenantAId);
-  await serviceDb.from("lotes").delete().eq("tenant_id", tenantAId);
-  await serviceDb.from("ventas_items").delete().eq("tenant_id", tenantAId);
-  await serviceDb.from("ventas").delete().eq("tenant_id", tenantAId);
-  await serviceDb.from("sesiones_caja").delete().eq("tenant_id", tenantAId);
-  await serviceDb.from("cajas").delete().eq("tenant_id", tenantAId);
-  await serviceDb.from("compras_items").delete().eq("tenant_id", tenantAId);
-  await serviceDb.from("compras").delete().eq("tenant_id", tenantAId);
-  await serviceDb.from("productos").delete().eq("tenant_id", tenantAId);
-  await serviceDb.from("proveedores").delete().eq("tenant_id", tenantAId);
-  await serviceDb.from("usuarios").delete().eq("tenant_id", tenantAId);
-  await serviceDb.from("tenants").delete().eq("id", tenantAId);
-  if (usuarioAId) await borrarUsuarioAuth(usuarioAId);
+  if (!serviceDb) return;
+    // Antes: borrado a mano tabla por tabla, ignorando todos los errores. Dos
+    // fallas garantizadas — `movimientos_stock` lo rechaza siempre el trigger de
+    // inmutabilidad, y el DELETE de `tenants` también, por la misma cascada — y
+    // ninguna se veía. `limpiarTenant` usa la vía legítima (`dar_de_baja_tenant`)
+    // y revienta si el tenant sobrevive.
+  await limpiarTenant(serviceDb, tenantAId);
 });
 
 describeIntegration("C2·T1 — Libro mayor, lotes y existencias_lote (Base de datos)", () => {

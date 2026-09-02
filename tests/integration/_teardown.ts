@@ -68,6 +68,9 @@ export async function borrarUsuarioAuth(userId: string): Promise<void> {
  * es un no-op, así que correr la lista entera es seguro aunque la suite no
  * siembre todas las entidades.
  */
+// Ya no se recorre para borrar (ver `limpiarTenant`): queda como el mapa
+// hijo → padre de las dependencias del tenant, que es lo que explica por qué la
+// cascada de `dar_de_baja_tenant()` alcanza y en qué orden se resuelve.
 export const ORDEN_BORRADO_TABLAS_NEGOCIO = [
   "plan_vacunacion", "adjuntos_medicos", "historial_clinico", "turnos",
   "estadias", "cambios_propietario", "notificaciones", "registros_auditoria",
@@ -153,17 +156,66 @@ export async function catalogoDelTenant(
   return { especieId, razaId, tipoVacunaId };
 }
 
-/** Borra un tenant de prueba entero: tablas de negocio en orden, el tenant y sus cuentas de Auth. */
+/**
+ * Borra un tenant de prueba entero: tablas de negocio, la fila de `tenants` y
+ * sus cuentas de Auth. **Revienta si no puede limpiar.**
+ *
+ * POR QUÉ REVIENTA AHORA Y ANTES NO
+ *
+ * Esta función ignoraba el `error` de cada `.delete()` y el de `tenants`. Con el
+ * Módulo Comercial eso dejó de ser una imprudencia teórica: los dos libros
+ * mayores (`movimientos_stock`, `movimientos_caja`) tienen un trigger
+ * `BEFORE DELETE` que hacía fallar la cascada de `tenants` SIEMPRE, así que
+ * ninguna suite que tocara stock o caja borraba nunca su clínica. El síntoma no
+ * era un rojo sino 168 tenants residuales acumulados y, con ellos, cuentas de
+ * Auth huérfanas que rompían la corrida siguiente por email duplicado — un rojo
+ * en un test que no tenía nada que ver con lo que se estaba tocando.
+ *
+ * Un teardown que no puede limpiar y no avisa es peor que uno que no existe:
+ * esconde el problema y lo cobra en la corrida siguiente. Ahora corta acá, con
+ * el error de Postgres, y además VERIFICA que la fila se haya ido.
+ *
+ * CÓMO BORRA
+ *
+ * Por `dar_de_baja_tenant()` (20261027000003), que es la vía legítima: borra la
+ * fila de `tenants` y deja que la cascada arrastre todo. Los libros mayores solo
+ * pueden irse ahí — con la clínica viva el trigger de inmutabilidad los sigue
+ * frenando, que es exactamente lo que tiene que hacer.
+ *
+ * El borrado explícito tabla por tabla que hacía antes YA NO SE PUEDE hacer:
+ * `movimientos_stock` referencia `mascotas`, `historial_clinico`,
+ * `plan_vacunacion`, `productos` y `lotes` con ON DELETE RESTRICT, y el libro
+ * mayor no se puede sacar de en medio hasta que se borre el tenant. Cualquier
+ * DELETE suelto sobre esas tablas aborta. Queda un solo orden posible y es el
+ * que impone la cascada.
+ *
+ * `ORDEN_BORRADO_TABLAS_NEGOCIO` se conserva como documentación del árbol de
+ * dependencias hijo → padre, que sigue siendo la referencia para entender por
+ * qué la cascada alcanza.
+ */
 export async function limpiarTenant(serviceDb: SupabaseClient, tenantId: string | undefined | null): Promise<void> {
   if (!tenantId) return;
 
   const { data: usuarios } = await serviceDb.from("usuarios").select("id").eq("tenant_id", tenantId);
   const usuarioIds = (usuarios ?? []).map((u) => (u as { id: string }).id);
 
-  for (const tabla of ORDEN_BORRADO_TABLAS_NEGOCIO) {
-    await serviceDb.from(tabla).delete().eq("tenant_id", tenantId);
+  const { error: errBaja } = await serviceDb.rpc("dar_de_baja_tenant", { p_tenant_id: tenantId });
+  if (errBaja) {
+    throw new Error(
+      `limpiarTenant(${tenantId}): dar_de_baja_tenant falló — ${errBaja.code}: ${errBaja.message}. ` +
+      "El tenant queda residual y su cuenta de Auth huérfana va a romper la corrida siguiente.",
+    );
   }
-  await serviceDb.from("tenants").delete().eq("id", tenantId);
+
+  // Comprobación real: que la RPC no devuelva error no prueba que la fila se
+  // haya ido. Sin esto volveríamos al silencio de antes, un nivel más arriba.
+  const { data: sobreviviente } = await serviceDb
+    .from("tenants").select("id").eq("id", tenantId).maybeSingle();
+  if (sobreviviente) {
+    throw new Error(
+      `limpiarTenant(${tenantId}): la fila de tenants sigue existiendo después de dar_de_baja_tenant.`,
+    );
+  }
 
   for (const uid of usuarioIds) await borrarUsuarioAuth(uid);
 }

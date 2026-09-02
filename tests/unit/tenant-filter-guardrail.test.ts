@@ -189,6 +189,60 @@ describe("extractSchemaFromMigrations", () => {
     const { allTables } = extractSchemaFromMigrations([{ name: "x.sql", content: sql }]);
     expect(allTables.has("fantasma")).toBe(false);
   });
+
+  // ── Vistas ────────────────────────────────────────────────────────────────
+  // Antes de la auditoría del Módulo Comercial el esquema salía SOLO de
+  // CREATE/ALTER TABLE. Las 7 vistas comerciales quedaban fuera del alcance del
+  // guardrail, y con ellas las 12 consultas de los Services que las leen.
+
+  it("detecta una vista que expone tenant_id (CREATE OR REPLACE VIEW)", () => {
+    const sql = `
+      CREATE OR REPLACE VIEW public.v_margen AS
+      SELECT v.tenant_id, v.id, v.total
+      FROM ventas v
+      WHERE v.estado = 'registrada';
+    `;
+    const { allTables, tenantTables } = extractSchemaFromMigrations([{ name: "x.sql", content: sql }]);
+    expect(allTables.has("v_margen")).toBe(true);
+    expect(tenantTables.has("v_margen")).toBe(true);
+  });
+
+  it("detecta también la forma CREATE VIEW a secas y la materializada", () => {
+    const sql = `
+      CREATE VIEW v_uno AS SELECT tenant_id FROM t;
+      CREATE MATERIALIZED VIEW v_dos AS SELECT tenant_id FROM t;
+    `;
+    const { tenantTables } = extractSchemaFromMigrations([{ name: "x.sql", content: sql }]);
+    expect(tenantTables.has("v_uno")).toBe(true);
+    expect(tenantTables.has("v_dos")).toBe(true);
+  });
+
+  it("una vista sin tenant_id queda en allTables pero NO exige filtro", () => {
+    const sql = `CREATE VIEW v_global AS SELECT id, nombre FROM unidades_medida;`;
+    const { allTables, tenantTables } = extractSchemaFromMigrations([{ name: "x.sql", content: sql }]);
+    expect(allTables.has("v_global")).toBe(true);
+    expect(tenantTables.has("v_global")).toBe(false);
+  });
+
+  it("no se le escapa el cierre de la vista por un ';' dentro de un literal", () => {
+    // Si el motor cortara el cuerpo en el ';' del literal, v_con_punto_y_coma
+    // quedaría sin su tenant_id y saldría del alcance del guardrail.
+    const sql = `
+      CREATE VIEW v_con_punto_y_coma AS
+      SELECT 'a;b'::text AS etiqueta, x.tenant_id FROM x;
+      CREATE VIEW v_siguiente AS SELECT id FROM y;
+    `;
+    const { tenantTables, allTables } = extractSchemaFromMigrations([{ name: "x.sql", content: sql }]);
+    expect(tenantTables.has("v_con_punto_y_coma")).toBe(true);
+    expect(allTables.has("v_siguiente")).toBe(true);
+    expect(tenantTables.has("v_siguiente")).toBe(false);
+  });
+
+  it("ignora un CREATE VIEW comentado con --", () => {
+    const sql = `-- CREATE VIEW v_fantasma AS SELECT tenant_id FROM t;`;
+    const { allTables } = extractSchemaFromMigrations([{ name: "x.sql", content: sql }]);
+    expect(allTables.has("v_fantasma")).toBe(false);
+  });
 });
 
 describe("esquema real del proyecto", () => {
@@ -210,6 +264,23 @@ describe("esquema real del proyecto", () => {
     ];
     for (const tabla of esperadas) {
       expect(schema.tenantTables.has(tabla), `se esperaba que "${tabla}" tuviera tenant_id`).toBe(true);
+    }
+  });
+
+  it("las 7 vistas comerciales están en el alcance del guardrail", () => {
+    // Sin esto, un `.from("v_...")` sin `.eq("tenant_id", ...)` en un Service
+    // pasa desapercibido: es exactamente lo que encontró la auditoría.
+    const vistas = [
+      "v_lotes_por_vencer", "v_items_vendidos", "v_margen_venta",
+      "v_costo_fraccionamiento", "v_stock_familia_unidad_base",
+      "v_consumo_clinico", "v_atenciones_sin_consumo",
+    ];
+    for (const vista of vistas) {
+      expect(
+        schema.tenantTables.has(vista),
+        `La vista "${vista}" no quedó en el esquema derivado del DDL: el guardrail no va a ` +
+        `exigir el filtro de tenant en las consultas que la leen.`,
+      ).toBe(true);
     }
   });
 

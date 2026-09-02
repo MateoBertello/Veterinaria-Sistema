@@ -18,8 +18,13 @@ describeIntegration("C7·T1: RPC registrar_consumo_clinico", () => {
   });
 
   afterAll(async () => {
+    // `limpiarTenant(serviceDb, tenantId)`: le faltaba el primer argumento, así
+    // que el tenantId caía en el parámetro del cliente, `tenantId` quedaba
+    // undefined y la función salía por su guarda inicial. El teardown de esta
+    // suite no borró nunca nada. No lo agarró el typecheck porque
+    // `npm run typecheck` cubre `supabase/functions/api` y `web`, no `tests/`.
     if (ctx?.tenantId) {
-      await limpiarTenant(ctx.tenantId);
+      await limpiarTenant(serviceDb, ctx.tenantId);
     }
   });
 

@@ -388,7 +388,7 @@ export const ReportesService = {
         descuento_importe,
         total,
         created_at,
-        usuarios!ventas_usuario_id_fkey(id, full_name, username)
+        usuarios!ventas_usuario_tenant_fkey(id, full_name, username)
       `)
       .eq("tenant_id", ctx.tenantId)
       .eq("estado", "registrada");
@@ -471,8 +471,8 @@ export const ReportesService = {
         efectivo_contado,
         diferencia,
         cajas!sesiones_caja_caja_tenant_fkey(id, nombre),
-        usuario_apertura:usuarios!sesiones_caja_apertura_usuario_id_fkey(id, full_name),
-        usuario_cierre:usuarios!sesiones_caja_cierre_usuario_id_fkey(id, full_name)
+        usuario_apertura:usuarios!sesiones_caja_apertura_usuario_tenant_fkey(id, full_name),
+        usuario_cierre:usuarios!sesiones_caja_cierre_usuario_tenant_fkey(id, full_name)
       `)
       .eq("tenant_id", ctx.tenantId);
 
