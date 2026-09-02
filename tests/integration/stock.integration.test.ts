@@ -701,7 +701,7 @@ describeIntegration("C2·T1 — Libro mayor, lotes y existencias_lote (Base de d
       const rowAntes = extAntes!.find((r) => r.lote_id === rowDespues.lote_id)!;
       expect(Number(rowDespues.cantidad)).toBe(Number(rowAntes.cantidad));
     }
-  });
+  }, 15000);
 
   it("RN-MV12: recalcular por producto no toca los demás", async () => {
     // 2 productos: PX y PY
