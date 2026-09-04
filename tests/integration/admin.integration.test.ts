@@ -91,6 +91,11 @@ afterAll(async () => {
   for (const tid of createdTenantIds) await limpiarTenant(serviceDb, tid);
   // Borrar el super admin.
   await borrarUsuarioAuthPorEmail("super@admin-test.com");
+  // Y la cuenta de contacto del tenant dado de alta por RN-SA2: `TenantService.crear`
+  // la crea con `inviteUserByEmail`, así que existe en auth.users pero NO tiene fila
+  // en `usuarios` — `limpiarTenant` recorre tablas de negocio y no la ve. Sin esto
+  // sobrevive a cada corrida. Es la misma clase de huérfana de Auth que motivó H3.
+  await borrarUsuarioAuthPorEmail("alta@test.com");
 });
 
 // ─── Aislamiento ────────────────────────────────────────────────────────────

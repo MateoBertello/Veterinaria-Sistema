@@ -142,15 +142,18 @@ cualquier error.
 
 ---
 
-## §4.7 — `numero_operacion` se asigna al final del RPC
+## §4.7 — `numero_operacion` se asigna después del descuento de stock
 
 **Decía:** §4.7 definía el formato del identificador de operación para transacciones comerciales (ventas, compras, movimientos) generado habitualmente al inicio del procesamiento.
 
 **Dice ahora:**
 * El identificador `numero_operacion` en `ventas` es un `BIGINT` correlativo por tenant, gestionado atómicamente en la tabla `contadores_tenant` (con clave `(tenant_id, 'venta')`). La entidad `compras` no posee dicha columna.
-* La asignación del número correlativo se realiza **estrictamente al final del RPC transaccional**, una vez concluidas con éxito todas las validaciones de negocio, bloqueos de concurrencia (`FOR UPDATE` en lotes y existencias), cálculo exacto de subtotales e IVA por línea, y registro de asientos en el libro mayor.
+* La asignación del número correlativo se realiza **después del bucle FEFO de descuento de stock y antes del registro de los pagos en caja**, no al final del RPC. En `20261028000003_venta_numeracion_al_final.sql`, la secuencia real es: la venta se inserta con `numero_operacion = NULL` (paso 5, líneas 285–321; por eso la línea 6 de esa misma migración le saca el `NOT NULL` a la columna), se recorren los ítems descontando stock y escribiendo `movimientos_stock` (paso 6, líneas 323–491), recién ahí se incrementa `contadores_tenant` y se hace `UPDATE ventas SET numero_operacion` (paso 7, líneas 493–505), y después se insertan `ventas_pagos` y `movimientos_caja` (paso 8, líneas 507–538), se evalúan las alertas de stock mínimo (paso 9) y se asienta la auditoría (paso 10).
+* Entre la numeración y el retorno del RPC quedan validaciones que todavía pueden abortar la transacción: `VALIDATION_ERROR` si el `medioPagoId` de un pago no existe (línea 516) y `PAYMENT_REFERENCE_REQUIRED` por RN-CJ9 si falta la referencia de un medio que la exige (línea 521). La numeración **no** está después de "todas las validaciones de negocio".
 
-**Por qué.** Si la secuencia numérica se consume al inicio de la transacción y la operación resulta rechazada (por ejemplo, por stock insuficiente bajo concurrencia `INSUFFICIENT_STOCK`, o saldo inválido), el número queda consumido y se produce un hueco (gap) irreversible en la correlatividad temporal de las operaciones del tenant. Asignarlo inmediatamente antes del `COMMIT` o retorno del RPC garantiza numeración estrictamente contigua y sin saltos por fallos de validación o concurrencia.
+**Por qué.** El motivo es acortar el tiempo de lock, y está escrito en el propio RPC: el comentario del paso 5 dice *"sin numero_operacion para no serializar"* (línea 285). El `UPDATE contadores_tenant ... SET valor = valor + 1` toma un lock de fila sobre `(tenant_id, 'venta')` que no se libera hasta el `COMMIT`; mientras esté tomado, toda otra venta del mismo tenant se serializa detrás de esa fila. El bucle FEFO es la parte cara de la transacción —`SELECT ... FOR UPDATE` sobre las existencias de cada lote (paso 3, líneas 243–253) más un `INSERT` en `movimientos_stock` por lote asignado—, así que hacer la numeración después del bucle deja el contador tomado sólo durante los pasos 7 a 10 en vez de durante toda la venta. En la versión anterior (`20260922000002_comercial_registrar_venta_rpc.sql`, paso 5, líneas 281–289) la numeración iba antes del `INSERT` de la venta y de todo el descuento de stock, y el contador quedaba bloqueado de punta a punta.
+
+**Lo que no es el motivo.** No es evitar gaps. `contadores_tenant` es una tabla, no una `SEQUENCE`: el incremento es un `UPDATE` transaccional, así que un `RAISE` posterior lo revierte junto con el resto de la operación, esté la numeración donde esté. El RPC no tiene ningún bloque `EXCEPTION`, de modo que cualquier `RAISE` aborta la transacción entera y ni la venta ni el número sobreviven. La contigüidad la da que el contador viva en una tabla; la posición del paso 7 no compra contigüidad, compra concurrencia. (Con `nextval()` el argumento del gap sí valdría —una secuencia no revierte—, pero acá no se usa una secuencia.)
 
 **Implementación:** `20261028000003_venta_numeracion_al_final.sql`. Cobertura en `tests/integration/ventas.integration.test.ts`.
 
@@ -190,3 +193,9 @@ cualquier error.
 **Por qué.** Un falso verde en un test de controller que mockea el Service oculta roturas graves en la lógica de negocio o en la base de datos. Mantener la frontera arquitectónica rigurosa asegura que cada suite valide lo que realmente le compete: transporte en controllers, lógica en services, e integridad transaccional y RLS en la base de datos.
 
 **Implementación:** Estructura modular en `supabase/functions/api/src/modules/` y cobertura diferenciada entre suites unitarias e integrales.
+
+---
+
+## Deuda anotada — `movimientos_stock.mascota_id` se escribe y no se lee
+
+`registrar_venta` y `registrar_consumo_clinico` escriben `movimientos_stock.mascota_id` (48 de 618 filas no nulas en la base de volumen) y ninguna consulta del sistema lo lee: la trazabilidad por mascota se resuelve por `v_consumo_clinico`, que proyecta `mascota_id` desde `historial_clinico.pet_id` y llega a los movimientos por `idx_mov_historial`. `idx_mov_mascota` se eliminó con razón en `20261029000001_eliminar_idx_mov_mascota_sin_consumidor.sql` —no lo usaba ningún plan—, pero queda anotado que un reporte futuro de trazabilidad por mascota que consulte `movimientos_stock` directo, en vez de la vista, quedaría sin índice. No se corrige ahora: no hay consumidor todavía.

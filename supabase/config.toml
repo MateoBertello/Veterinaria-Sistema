@@ -10,6 +10,17 @@ port = 54322
 shadow_port = 54320
 major_version = 15
 
+# Fixture de volumen del Módulo Comercial (C8·T1): 3 tenants sintéticos con
+# productos, lotes, movimientos y ventas suficientes para que los reportes
+# tengan qué reportar y para que EXPLAIN elija índices. Se aplica acá, en el
+# `supabase db reset`, y no desde un test: escribe directo en `auth.users`, lo
+# que exige el rol postgres —no alcanza la service-role key—, y de este modo la
+# suite de integración no necesita ni docker ni el nombre del contenedor.
+# Ver tests/README.md § "El fixture de volumen".
+[db.seed]
+enabled = true
+sql_paths = ["./seeds/comercial_volumen_seed.sql"]
+
 [studio]
 enabled = true
 port = 54323
