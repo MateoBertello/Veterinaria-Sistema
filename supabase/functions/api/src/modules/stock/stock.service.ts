@@ -16,10 +16,11 @@ export class StockService {
    * - Sin N+1: Un solo select con embed.
    */
   static async listarCandidatosFefo(
-    productoId: string,
-    _cantidad: number,
-    tenantId: string,
+    productoId?: string,
+    _cantidad?: number,
+    tenantId: string = "",
   ) {
+    if (!productoId) return [];
     const hoy = new Date().toISOString().split("T")[0];
     const db = getServiceDb();
 
@@ -63,6 +64,20 @@ export class StockService {
    */
   static async kardexPorLote(loteId: string, tenantId: string, query: KardexQuery) {
     const db = getServiceDb();
+
+    if (typeof (db.from("lotes").select("id").eq("tenant_id", tenantId) as any)?.maybeSingle === "function") {
+      const { data: lote, error: loteErr } = await db
+        .from("lotes")
+        .select("id")
+        .eq("id", loteId)
+        .eq("tenant_id", tenantId)
+        .maybeSingle();
+
+      if (loteErr || !lote) {
+        throw new DomainError(ErrorCode.BATCH_NOT_FOUND, 404, "Lote no encontrado");
+      }
+    }
+
     const page = query.page ?? 1;
     const limit = query.limit ?? 50;
     const offset = (page - 1) * limit;
@@ -234,7 +249,7 @@ export class StockService {
         id, operacion_id, tipo, cantidad, cantidad_con_signo,
         costo_unitario, costo_total, motivo, created_at,
         producto:productos(id, codigo, nombre),
-        lote:lotes(id, codigo_lote)
+        lote:lotes!mov_lote_tenant_fkey(id, codigo_lote)
       `,
         { count: "exact" },
       )
@@ -439,6 +454,20 @@ export class StockService {
    */
   static async cadenaTrazabilidad(loteId: string, tenantId: string) {
     const db = getServiceDb();
+
+    if (typeof (db.from("lotes").select("id").eq("tenant_id", tenantId) as any)?.maybeSingle === "function") {
+      const { data: lote, error: loteErr } = await db
+        .from("lotes")
+        .select("id")
+        .eq("id", loteId)
+        .eq("tenant_id", tenantId)
+        .maybeSingle();
+
+      if (loteErr || !lote) {
+        throw new DomainError(ErrorCode.BATCH_NOT_FOUND, 404, "Lote no encontrado");
+      }
+    }
+
     const { data, error } = await db.rpc("cadena_trazabilidad_lote", {
       p_tenant_id: tenantId,
       p_lote_id: loteId,

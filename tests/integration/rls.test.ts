@@ -11,9 +11,10 @@
 
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { execSync } from "node:child_process";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { SUPABASE_URL, SUPABASE_ANON_KEY, SERVICE_ROLE_KEY, describeIntegration } from "./_env.ts";
-import { crearUsuarioAuth, borrarUsuarioAuth } from "./_teardown.ts";
+import { crearUsuarioAuth, limpiarTenant } from "./_teardown.ts";
 
 globalThis.WebSocket = class FakeWebSocket {} as any;
 
@@ -58,19 +59,10 @@ beforeAll(async () => {
     auth: { persistSession: false },
   });
 
-  // Limpieza defensiva de ejecuciones previas
+  // Limpieza defensiva de ejecuciones previas, por la misma vía que el teardown.
   for (const cuit of ["30-11111111-1", "30-22222222-2"]) {
     const { data: prev } = await serviceDb.from("tenants").select("id").eq("cuit_rut", cuit);
-    for (const row of prev ?? []) {
-      await serviceDb.from("movimientos_stock").delete().eq("tenant_id", row.id);
-      await serviceDb.from("existencias_lote").delete().eq("tenant_id", row.id);
-      await serviceDb.from("lotes").delete().eq("tenant_id", row.id);
-      await serviceDb.from("producto_conversiones").delete().eq("tenant_id", row.id);
-      await serviceDb.from("productos").delete().eq("tenant_id", row.id);
-      await serviceDb.from("familias_producto").delete().eq("tenant_id", row.id);
-      await serviceDb.from("proveedores").delete().eq("tenant_id", row.id);
-      await serviceDb.from("tenants").delete().eq("id", row.id);
-    }
+    for (const row of prev ?? []) await limpiarTenant(serviceDb, row.id);
   }
 
   const cuitA = `30-${Date.now().toString().slice(-6)}11-1`;
@@ -214,30 +206,13 @@ beforeAll(async () => {
 afterAll(async () => {
   if (!serviceDb) return;
 
-  const adminHeaders = {
-    "Authorization": `Bearer ${SERVICE_ROLE_KEY}`,
-    "apikey": SERVICE_ROLE_KEY,
-  };
-
-  // Borrado explícito hijo → padre de las tablas comerciales antes de borrar tenants
-  for (const tid of [tenantAId, tenantBId]) {
-    if (!tid) continue;
-    await serviceDb.from("movimientos_stock").delete().eq("tenant_id", tid);
-    await serviceDb.from("existencias_lote").delete().eq("tenant_id", tid);
-    await serviceDb.from("lotes").delete().eq("tenant_id", tid);
-    await serviceDb.from("producto_conversiones").delete().eq("tenant_id", tid);
-    await serviceDb.from("productos").delete().eq("tenant_id", tid);
-    await serviceDb.from("familias_producto").delete().eq("tenant_id", tid);
-    await serviceDb.from("proveedores").delete().eq("tenant_id", tid);
-  }
-
-  // CASCADE en tenants elimina todo lo demás.
-  if (tenantAId) await serviceDb.from("tenants").delete().eq("id", tenantAId);
-  if (tenantBId) await serviceDb.from("tenants").delete().eq("id", tenantBId);
-
-  // Ahora sí, las cuentas de auth.
-  if (userAId) await fetch(`${SUPABASE_URL}/auth/v1/admin/users/${userAId}`, { method: "DELETE", headers: adminHeaders });
-  if (userBId) await fetch(`${SUPABASE_URL}/auth/v1/admin/users/${userBId}`, { method: "DELETE", headers: adminHeaders });
+  // Antes: borrado a mano hijo → padre, ignorando todos los errores. El primer
+  // DELETE de la lista (`movimientos_stock`) lo rechaza siempre el trigger de
+  // inmutabilidad, y el DELETE de `tenants` también por la misma cascada, así
+  // que esta suite no borró nunca sus dos clínicas — sumaban dos residuales por
+  // corrida. `limpiarTenant` usa la vía legítima (`dar_de_baja_tenant`), borra
+  // también las cuentas de Auth y revienta si el tenant sobrevive.
+  for (const tid of [tenantAId, tenantBId]) await limpiarTenant(serviceDb, tid);
 });
 
 // ─── Guard: skip si no hay credenciales ──────────────────────────────────────
@@ -1502,3 +1477,243 @@ describe("C5·T1 / RN-SC4: Aislamiento RLS de Recuentos y Recuentos Detalle", ()
 });
 
 
+
+// ─────────────────────────────────────────────────────────────────────────────
+// RLS-Vistas — las 7 vistas comerciales
+//
+// POR QUÉ EXISTE ESTE BLOQUE
+//
+// Hasta la auditoría del Módulo Comercial este archivo probaba 30 tablas y CERO
+// vistas, y las 7 vistas comerciales se habían creado sin `security_invoker`.
+// Una vista sin esa opción se ejecuta con los privilegios de SU DUEÑO (aquí
+// `postgres`, que tiene BYPASSRLS), no con los de quien la consulta: la RLS de
+// las tablas de abajo NO se aplica. Como además `authenticated` tenía SELECT
+// sobre las 7, cualquier usuario logueado de cualquier clínica podía pedirlas
+// por PostgREST directo y leer las filas de TODAS las demás. No hacía falta un
+// bug en ningún Service: la fuga estaba en la definición de la vista.
+//
+// El control de abajo es el que define si el hardening sirvió: se siembra el
+// tenant A con datos que aparecen en las 7 vistas y se consulta con el JWT del
+// tenant B, filtrando explícitamente por el tenant_id de A. Esperado: cero
+// filas ajenas, siempre.
+//
+// El segundo test cubre la otra mitad del hardening (el REVOKE). Son dos
+// controles distintos a propósito: `security_invoker` hace que la vista respete
+// la RLS, y el REVOKE hace que ni siquiera se pueda pedir. Si mañana alguien
+// re-otorga el SELECT, el primer test sigue en verde (la RLS lo cubre) y este
+// se pone rojo — que es exactamente la señal que se quiere.
+// ─────────────────────────────────────────────────────────────────────────────
+
+function obtenerVistasPublicas(): string[] {
+  const sql = "select relname from pg_class join pg_namespace on pg_namespace.oid = pg_class.relnamespace where relkind='v' and nspname='public';";
+  try {
+    const cmd = process.env.DATABASE_URL
+      ? `psql "${process.env.DATABASE_URL}" -t -A -c "${sql}"`
+      : `docker exec -i supabase_db_Veterinaria-Sistema psql -U postgres -d postgres -t -A -c "${sql}"`;
+    return execSync(cmd, { encoding: "utf8" }).trim().split("\n").map((s) => s.trim()).filter(Boolean);
+  } catch {
+    const cmd = `PGPASSWORD=postgres psql -h 127.0.0.1 -p 54322 -U postgres -d postgres -t -A -c "${sql}"`;
+    return execSync(cmd, { encoding: "utf8" }).trim().split("\n").map((s) => s.trim()).filter(Boolean);
+  }
+}
+
+describeIntegration("RLS-Vistas / RN-SC4: las vistas públicas no filtran datos de otro tenant", () => {
+  /** Filas que el tenant A tiene en cada vista. Se llena en el beforeAll. */
+  const filasDeA: Record<string, number> = {};
+  let vistasPublicas: string[] = [];
+
+  /**
+   * Insert del fixture que NO puede fallar en silencio. Sin esto, un valor de
+   * enum equivocado (pasó: `origen: "fraccionamiento"` en vez de "conversion")
+   * deja la vista vacía y el control de aislamiento da verde por falta de
+   * datos. El chequeo de conteo de abajo es la red; esto es el diagnóstico.
+   */
+  async function sembrar<T = { id: string }>(tabla: string, fila: Record<string, unknown> | Array<Record<string, unknown>>): Promise<T> {
+    const { data, error } = await serviceDb.from(tabla).insert(fila as never).select("*");
+    if (error) throw new Error(`Fixture RLS-Vistas: no se pudo sembrar ${tabla}: ${error.message}`);
+    return (data?.[0] ?? {}) as T;
+  }
+
+  beforeAll(async () => {
+    if (skipIfNoCredentials() || !tenantAId || !userAId) return;
+
+    vistasPublicas = obtenerVistasPublicas();
+    expect(vistasPublicas.length).toBeGreaterThan(0);
+
+    const { data: u } = await serviceDb.from("unidades_medida").select("id").eq("codigo", "unidad").single();
+    const unidadId = (u as { id: string })?.id;
+
+    const sufijo = `${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+
+
+    // ── Catálogo: familia + producto padre + producto hijo (fraccionamiento) ──
+    const fam = await sembrar("familias_producto", {
+      tenant_id: tenantAId, nombre: `Fam Vistas A ${sufijo}`, unidad_base_id: unidadId,
+    });
+
+    const prodPadre = await sembrar("productos", {
+      tenant_id: tenantAId, codigo: `PROD-VISTA-PADRE-${sufijo}`, nombre: "Prod Vistas Padre",
+      unidad_medida_id: unidadId, familia_id: fam.id,
+    });
+    const prodHijo = await sembrar("productos", {
+      tenant_id: tenantAId, codigo: `PROD-VISTA-HIJO-${sufijo}`, nombre: "Prod Vistas Hijo",
+      unidad_medida_id: unidadId, familia_id: fam.id,
+    });
+
+    await sembrar("producto_conversiones", {
+      tenant_id: tenantAId, producto_origen_id: prodPadre.id, producto_destino_id: prodHijo.id,
+      factor_teorico: 10,
+    });
+
+    // ── Lotes: el padre CON vencimiento (v_lotes_por_vencer) y el hijo ────────
+    const vencimiento = new Date(Date.now() + 30 * 24 * 3600 * 1000).toISOString().slice(0, 10);
+    const lotePadre = await sembrar("lotes", {
+      tenant_id: tenantAId, producto_id: prodPadre.id, codigo_lote: `LOTE-VISTA-P-${sufijo}`,
+      fecha_vencimiento: vencimiento, costo_unitario_neto: 100, costo_unitario_efectivo: 100,
+      origen: "compra", usuario_id: userAId,
+    });
+    const loteHijo = await sembrar("lotes", {
+      tenant_id: tenantAId, producto_id: prodHijo.id, codigo_lote: `LOTE-VISTA-H-${sufijo}`,
+      fecha_vencimiento: vencimiento, costo_unitario_neto: 12, costo_unitario_efectivo: 12,
+      origen: "conversion", lote_padre_id: lotePadre.id, usuario_id: userAId,
+    });
+
+    // Existencia inicial (v_lotes_por_vencer, v_stock_familia_unidad_base)
+    await sembrar("movimientos_stock", {
+      tenant_id: tenantAId, operacion_id: crypto.randomUUID(), tipo: "entrada_inicial",
+      producto_id: prodPadre.id, lote_id: lotePadre.id, cantidad: 100,
+      costo_unitario: 100, costo_total: 10000, usuario_id: userAId,
+    });
+
+    // ── Fraccionamiento: una operación con salida + entrada (v_costo_fraccionamiento) ──
+    const opFrac = crypto.randomUUID();
+    await sembrar("movimientos_stock", [
+      {
+        tenant_id: tenantAId, operacion_id: opFrac, tipo: "salida_conversion",
+        producto_id: prodPadre.id, lote_id: lotePadre.id, cantidad: 1,
+        costo_unitario: 100, costo_total: 100, lote_destino_id: loteHijo.id, usuario_id: userAId,
+      },
+      {
+        tenant_id: tenantAId, operacion_id: opFrac, tipo: "entrada_conversion",
+        producto_id: prodHijo.id, lote_id: loteHijo.id, cantidad: 9,
+        costo_unitario: 11.1111, costo_total: 100, usuario_id: userAId,
+      },
+    ]);
+
+    // ── Historial clínico: uno CON consumo y otro SIN (las dos vistas de C7) ──
+    const { data: esp } = await serviceDb.from("especies").select("id").eq("tenant_id", tenantAId).limit(1);
+    const especieId = esp?.[0]?.id;
+
+    const cli = await sembrar<{ id: string; full_name: string }>("clientes", {
+      tenant_id: tenantAId, full_name: `Cliente Vistas A ${sufijo}`, phone: "1122334455",
+    });
+
+    const masc = await sembrar("mascotas", {
+      tenant_id: tenantAId, name: "Mascota Vistas A", client_id: cli.id,
+      especie_id: especieId, sex: "Macho", tamano: "Mediano",
+    });
+
+    const historialBase = {
+      tenant_id: tenantAId, pet_id: masc.id, professional_id: userAId,
+      date: new Date().toISOString().slice(0, 10), description: "Atención de prueba",
+      client_id_at_time: cli.id, client_name_at_time: cli.full_name,
+    };
+
+    const hcConConsumo = await sembrar("historial_clinico", { ...historialBase, event_type: "Consulta" });
+    // Segundo evento SIN consumo asociado → v_atenciones_sin_consumo
+    await sembrar("historial_clinico", { ...historialBase, event_type: "Control" });
+
+    await sembrar("movimientos_stock", {
+      tenant_id: tenantAId, operacion_id: crypto.randomUUID(), tipo: "consumo_clinico",
+      producto_id: prodPadre.id, lote_id: lotePadre.id, cantidad: 2,
+      costo_unitario: 100, costo_total: 200,
+      historial_id: hcConConsumo.id, mascota_id: masc.id, usuario_id: userAId,
+    });
+
+    // ── Venta: caja + sesión + venta + item (v_items_vendidos, v_margen_venta) ──
+    const caja = await sembrar("cajas", { tenant_id: tenantAId, nombre: `Caja Vistas ${sufijo}` });
+    const sesion = await sembrar("sesiones_caja", {
+      tenant_id: tenantAId, caja_id: caja.id, apertura_usuario_id: userAId, saldo_inicial: 0,
+    });
+    const venta = await sembrar("ventas", {
+      tenant_id: tenantAId, numero_operacion: 900000 + Math.floor(Math.random() * 90000),
+      sesion_caja_id: sesion.id, subtotal_neto: 200, total_iva: 42, total: 242,
+      estado: "registrada", usuario_id: userAId,
+    });
+    await sembrar("ventas_items", {
+      tenant_id: tenantAId, venta_id: venta.id, tipo_item: "producto", producto_id: prodPadre.id,
+      descripcion_snapshot: "Prod Vistas Padre", cantidad: 2, precio_unitario: 121,
+      alicuota_iva: 21, neto_unitario: 100, iva_unitario: 21, importe_total: 242,
+      costo_unitario_efectivo: 100,
+    });
+
+    // Se registra cuántas filas tiene A en cada vista: si alguna quedara en 0,
+    // el test de aislamiento daría verde sin haber probado nada.
+    for (const vista of vistasPublicas) {
+      const { count } = await serviceDb
+        .from(vista)
+        .select("*", { count: "exact", head: true })
+        .eq("tenant_id", tenantAId);
+      filasDeA[vista] = count ?? 0;
+    }
+  }, 60_000);
+
+  it("el fixture siembra datos del tenant A en las vistas comerciales del fixture (si no, el test siguiente no probaría nada)", () => {
+    if (skipIfNoCredentials()) return;
+    const vistasDelFixture = [
+      "v_lotes_por_vencer",
+      "v_items_vendidos",
+      "v_margen_venta",
+      "v_costo_fraccionamiento",
+      "v_stock_familia_unidad_base",
+      "v_consumo_clinico",
+      "v_atenciones_sin_consumo",
+    ];
+    for (const vista of vistasDelFixture) {
+      if (vistasPublicas.includes(vista)) {
+        expect(
+          filasDeA[vista],
+          `La vista ${vista} no tiene ninguna fila del tenant A: el control de aislamiento de abajo ` +
+          `daría verde por falta de datos, no por estar aislada.`,
+        ).toBeGreaterThan(0);
+      }
+    }
+  });
+
+  it("BLOQUEANTE: el usuario B no obtiene NI UNA fila del tenant A en ninguna vista pública", async () => {
+    if (skipIfNoCredentials()) return;
+    const db = userClient(jwtB);
+
+    // Se recorren todas las vistas públicas leídas del catálogo
+    const fugas: string[] = [];
+    for (const vista of vistasPublicas) {
+      const { data } = await db.from(vista).select("tenant_id").eq("tenant_id", tenantAId);
+      if ((data ?? []).length > 0) fugas.push(`${vista} (${(data ?? []).length} fila/s)`);
+    }
+
+    expect(
+      fugas,
+      `FUGA CROSS-TENANT: estas vistas le devolvieron filas del tenant A a un usuario del ` +
+      `tenant B: ${fugas.join(", ")}. Una vista sin security_invoker = true corre con los ` +
+      `privilegios de su dueño (postgres, BYPASSRLS) y no aplica la RLS de las tablas de abajo.`,
+    ).toEqual([]);
+  });
+
+  it("BLOQUEANTE: authenticated no tiene SELECT sobre ninguna vista pública", async () => {
+    if (skipIfNoCredentials()) return;
+    const db = userClient(jwtA);
+
+    const legibles: string[] = [];
+    for (const vista of vistasPublicas) {
+      const { error } = await db.from(vista).select("tenant_id").limit(1);
+      if (error?.code !== "42501") legibles.push(`${vista} (${error?.code ?? "sin error"})`);
+    }
+
+    expect(
+      legibles,
+      `Estas vistas siguen siendo legibles por el rol authenticated: ${legibles.join(", ")}. ` +
+      `Las vistas se consultan por la API con service_role; ningún JWT de usuario ` +
+      `debería poder pedirlas por PostgREST directo (§4.13 de la adenda).`,
+    ).toEqual([]);
+  });
+});

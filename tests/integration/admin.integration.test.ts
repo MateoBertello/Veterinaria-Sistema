@@ -15,7 +15,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import app from "../../supabase/functions/api/src/main.ts";
 import { SUPABASE_URL, SUPABASE_ANON_KEY, SERVICE_ROLE_KEY, describeIntegration } from "./_env.ts";
-import { adminHeaders, crearUsuarioAuth, limpiarTenant } from "./_teardown.ts";
+import { adminHeaders, borrarUsuarioAuthPorEmail, crearUsuarioAuth, limpiarTenant } from "./_teardown.ts";
 
 function skipIfNoCredentials(): boolean {
   if (!SUPABASE_URL || !SERVICE_ROLE_KEY || !SUPABASE_ANON_KEY) {
@@ -90,9 +90,12 @@ afterAll(async () => {
   if (!serviceDb) return;
   for (const tid of createdTenantIds) await limpiarTenant(serviceDb, tid);
   // Borrar el super admin.
-  const { data: list } = await serviceDb.auth.admin.listUsers();
-  const sa = list?.users?.find((u) => u.email === "super@admin-test.com");
-  if (sa) await fetch(`${SUPABASE_URL}/auth/v1/admin/users/${sa.id}`, { method: "DELETE", headers: adminHeaders() });
+  await borrarUsuarioAuthPorEmail("super@admin-test.com");
+  // Y la cuenta de contacto del tenant dado de alta por RN-SA2: `TenantService.crear`
+  // la crea con `inviteUserByEmail`, así que existe en auth.users pero NO tiene fila
+  // en `usuarios` — `limpiarTenant` recorre tablas de negocio y no la ve. Sin esto
+  // sobrevive a cada corrida. Es la misma clase de huérfana de Auth que motivó H3.
+  await borrarUsuarioAuthPorEmail("alta@test.com");
 });
 
 // ─── Aislamiento ────────────────────────────────────────────────────────────

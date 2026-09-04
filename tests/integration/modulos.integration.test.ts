@@ -23,7 +23,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import app from "../../supabase/functions/api/src/main.ts";
 import { SUPABASE_URL, SUPABASE_ANON_KEY, SERVICE_ROLE_KEY, describeIntegration } from "./_env.ts";
-import { adminHeaders, crearUsuarioAuth, limpiarTenant } from "./_teardown.ts";
+import { adminHeaders, borrarUsuarioAuthPorEmail, crearUsuarioAuth, limpiarTenant } from "./_teardown.ts";
 
 function skipIfNoCredentials(): boolean {
   if (!SUPABASE_URL || !SERVICE_ROLE_KEY || !SUPABASE_ANON_KEY) {
@@ -119,9 +119,7 @@ beforeAll(async () => {
 afterAll(async () => {
   if (!serviceDb) return;
   for (const tid of createdTenantIds) await limpiarTenant(serviceDb, tid);
-  const { data: list } = await serviceDb.auth.admin.listUsers();
-  const sa = list?.users?.find((u) => u.email === "super@modtest.com");
-  if (sa) await fetch(`${SUPABASE_URL}/auth/v1/admin/users/${sa.id}`, { method: "DELETE", headers: adminHeaders() });
+  await borrarUsuarioAuthPorEmail("super@modtest.com");
 });
 
 // ─── Aislamiento ────────────────────────────────────────────────────────────

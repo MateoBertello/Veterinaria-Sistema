@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { SUPABASE_URL, SERVICE_ROLE_KEY, describeIntegration } from "./_env.ts";
-import { crearUsuarioAuth, borrarUsuarioAuth } from "./_teardown.ts";
+import { crearUsuarioAuth, limpiarTenant } from "./_teardown.ts";
 
 globalThis.WebSocket = class FakeWebSocket {} as any;
 
@@ -195,11 +195,6 @@ describeIntegration("C5·T1: Restricciones de base de datos para Recuentos", () 
     clienteBId = fixtureB.clienteId;
     productoBId = fixtureB.productoId;
     loteBId = fixtureB.loteId;
-  });
-
-  afterAll(async () => {
-    if (usuarioAId) await borrarUsuarioAuth(usuarioAId);
-    if (usuarioBId) await borrarUsuarioAuth(usuarioBId);
   });
 
   it("un recuento aplicado no puede quedar sin autor", async () => {
@@ -1408,3 +1403,17 @@ describeIntegration("C5·T3: RPC aplicar_recuento", () => {
   });
 });
 
+// Teardown de TODO el archivo, no de un describe.
+//
+// Los tres `describeIntegration` de acá comparten `tenantAId`/`tenantBId`, que
+// siembra el `beforeAll` del primero. La limpieza tiene que correr al final del
+// archivo: dentro del primer describe borraría las clínicas que los otros dos
+// todavía usan.
+//
+// Antes esto solo borraba las dos cuentas de Auth y dejaba los tenants enteros
+// —dos clínicas residuales por corrida—, y ni las cuentas se iban: `usuarios`
+// las referencia y el DELETE de Auth se cae con un 23503 que nadie miraba.
+afterAll(async () => {
+  if (!serviceDb) return;
+  for (const tid of [tenantAId, tenantBId]) await limpiarTenant(serviceDb, tid);
+});

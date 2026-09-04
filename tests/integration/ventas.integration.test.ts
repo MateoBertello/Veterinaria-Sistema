@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { SUPABASE_URL, SERVICE_ROLE_KEY, describeIntegration } from "./_env.ts";
-import { crearUsuarioAuth, borrarUsuarioAuth } from "./_teardown.ts";
+import { crearUsuarioAuth, limpiarTenant } from "./_teardown.ts";
 
 globalThis.WebSocket = class FakeWebSocket {} as any;
 
@@ -162,34 +162,12 @@ describeIntegration("C4·T1: Restricciones de base de datos para Ventas", () => 
 
   afterAll(async () => {
     if (!serviceDb) return;
-    if (usuarioAId) await borrarUsuarioAuth(usuarioAId);
-    if (usuarioBId) await borrarUsuarioAuth(usuarioBId);
-    if (tenantAId) {
-      await serviceDb.from("ventas_pagos").delete().eq("tenant_id", tenantAId);
-      await serviceDb.from("movimientos_stock").delete().eq("tenant_id", tenantAId);
-      await serviceDb.from("ventas_items").delete().eq("tenant_id", tenantAId);
-      await serviceDb.from("movimientos_caja").delete().eq("tenant_id", tenantAId);
-      await serviceDb.from("ventas").delete().eq("tenant_id", tenantAId);
-      await serviceDb.from("sesiones_caja").delete().eq("tenant_id", tenantAId);
-      await serviceDb.from("cajas").delete().eq("tenant_id", tenantAId);
-      await serviceDb.from("servicios").delete().eq("tenant_id", tenantAId);
-      await serviceDb.from("productos").delete().eq("tenant_id", tenantAId);
-      await serviceDb.from("contadores_tenant").delete().eq("tenant_id", tenantAId);
-      await serviceDb.from("tenants").delete().eq("id", tenantAId);
-    }
-    if (tenantBId) {
-      await serviceDb.from("ventas_pagos").delete().eq("tenant_id", tenantBId);
-      await serviceDb.from("movimientos_stock").delete().eq("tenant_id", tenantBId);
-      await serviceDb.from("ventas_items").delete().eq("tenant_id", tenantBId);
-      await serviceDb.from("movimientos_caja").delete().eq("tenant_id", tenantBId);
-      await serviceDb.from("ventas").delete().eq("tenant_id", tenantBId);
-      await serviceDb.from("sesiones_caja").delete().eq("tenant_id", tenantBId);
-      await serviceDb.from("cajas").delete().eq("tenant_id", tenantBId);
-      await serviceDb.from("servicios").delete().eq("tenant_id", tenantBId);
-      await serviceDb.from("productos").delete().eq("tenant_id", tenantBId);
-      await serviceDb.from("contadores_tenant").delete().eq("tenant_id", tenantBId);
-      await serviceDb.from("tenants").delete().eq("id", tenantBId);
-    }
+    // Antes: borrado a mano tabla por tabla, ignorando todos los errores. Dos
+    // fallas garantizadas — `movimientos_stock` lo rechaza siempre el trigger de
+    // inmutabilidad, y el DELETE de `tenants` también, por la misma cascada — y
+    // ninguna se veía. `limpiarTenant` usa la vía legítima (`dar_de_baja_tenant`)
+    // y revienta si el tenant sobrevive.
+    for (const tid of [tenantAId, tenantBId]) await limpiarTenant(serviceDb, tid);
   });
 
   it("RN-VT3: una línea es de producto o de servicio, nunca las dos", async () => {
@@ -477,23 +455,8 @@ describeIntegration("C4·T2: RPC registrar_venta", () => {
   });
 
   afterAll(async () => {
-    if (!serviceDb || !tAId) return;
-    if (uAId) await borrarUsuarioAuth(uAId);
-    await serviceDb.from("notificaciones").delete().eq("tenant_id", tAId);
-    await serviceDb.from("ventas_pagos").delete().eq("tenant_id", tAId);
-    await serviceDb.from("movimientos_stock").delete().eq("tenant_id", tAId);
-    await serviceDb.from("existencias_lote").delete().eq("tenant_id", tAId);
-    await serviceDb.from("lotes").delete().eq("tenant_id", tAId);
-    await serviceDb.from("ventas_items").delete().eq("tenant_id", tAId);
-    await serviceDb.from("movimientos_caja").delete().eq("tenant_id", tAId);
-    await serviceDb.from("ventas").delete().eq("tenant_id", tAId);
-    await serviceDb.from("sesiones_caja").delete().eq("tenant_id", tAId);
-    await serviceDb.from("cajas").delete().eq("tenant_id", tAId);
-    await serviceDb.from("servicios").delete().eq("tenant_id", tAId);
-    await serviceDb.from("productos").delete().eq("tenant_id", tAId);
-    await serviceDb.from("contadores_tenant").delete().eq("tenant_id", tAId);
-    await serviceDb.from("registros_auditoria").delete().eq("tenant_id", tAId);
-    await serviceDb.from("tenants").delete().eq("id", tAId);
+    if (!serviceDb) return;
+    await limpiarTenant(serviceDb, tAId);
   });
 
   async function sembrarStock(
@@ -1096,23 +1059,8 @@ describeIntegration("C4·T3: RPC anular_venta", () => {
   });
 
   afterAll(async () => {
-    if (!serviceDb || !tAId) return;
-    if (uAId) await borrarUsuarioAuth(uAId);
-    await serviceDb.from("notificaciones").delete().eq("tenant_id", tAId);
-    await serviceDb.from("ventas_pagos").delete().eq("tenant_id", tAId);
-    await serviceDb.from("movimientos_stock").delete().eq("tenant_id", tAId);
-    await serviceDb.from("existencias_lote").delete().eq("tenant_id", tAId);
-    await serviceDb.from("lotes").delete().eq("tenant_id", tAId);
-    await serviceDb.from("ventas_items").delete().eq("tenant_id", tAId);
-    await serviceDb.from("movimientos_caja").delete().eq("tenant_id", tAId);
-    await serviceDb.from("ventas").delete().eq("tenant_id", tAId);
-    await serviceDb.from("sesiones_caja").delete().eq("tenant_id", tAId);
-    await serviceDb.from("cajas").delete().eq("tenant_id", tAId);
-    await serviceDb.from("servicios").delete().eq("tenant_id", tAId);
-    await serviceDb.from("productos").delete().eq("tenant_id", tAId);
-    await serviceDb.from("contadores_tenant").delete().eq("tenant_id", tAId);
-    await serviceDb.from("registros_auditoria").delete().eq("tenant_id", tAId);
-    await serviceDb.from("tenants").delete().eq("id", tAId);
+    if (!serviceDb) return;
+    await limpiarTenant(serviceDb, tAId);
   });
 
   async function sembrarStock(
@@ -1418,23 +1366,8 @@ describeIntegration("C4·T5: Concurrencia sobre Stock Crítico (RN-SC8)", () => 
   });
 
   afterAll(async () => {
-    if (!serviceDb || !tAId) return;
-    if (uAId) await borrarUsuarioAuth(uAId);
-    await serviceDb.from("notificaciones").delete().eq("tenant_id", tAId);
-    await serviceDb.from("ventas_pagos").delete().eq("tenant_id", tAId);
-    await serviceDb.from("movimientos_stock").delete().eq("tenant_id", tAId);
-    await serviceDb.from("existencias_lote").delete().eq("tenant_id", tAId);
-    await serviceDb.from("lotes").delete().eq("tenant_id", tAId);
-    await serviceDb.from("ventas_items").delete().eq("tenant_id", tAId);
-    await serviceDb.from("movimientos_caja").delete().eq("tenant_id", tAId);
-    await serviceDb.from("ventas").delete().eq("tenant_id", tAId);
-    await serviceDb.from("sesiones_caja").delete().eq("tenant_id", tAId);
-    await serviceDb.from("cajas").delete().eq("tenant_id", tAId);
-    await serviceDb.from("servicios").delete().eq("tenant_id", tAId);
-    await serviceDb.from("productos").delete().eq("tenant_id", tAId);
-    await serviceDb.from("contadores_tenant").delete().eq("tenant_id", tAId);
-    await serviceDb.from("registros_auditoria").delete().eq("tenant_id", tAId);
-    await serviceDb.from("tenants").delete().eq("id", tAId);
+    if (!serviceDb) return;
+    await limpiarTenant(serviceDb, tAId);
   });
 
   type RpcResult = { data: any; error: { message: string } | null };
@@ -1669,7 +1602,16 @@ describeIntegration("C4·T5: Concurrencia sobre Stock Crítico (RN-SC8)", () => 
 
     resultados.forEach((r, i) => expect(rpcReallyRan(r.error), `llamada ${i}`).toBe(true));
     expect(resultados.filter(esExito)).toHaveLength(3);
-    expect(resultados.filter((r) => r.error !== null)).toHaveLength(7);
+    const fallas = resultados.filter((r) => r.error !== null);
+    expect(fallas).toHaveLength(7);
+
+    // Distinguir FOR UPDATE del CHECK constraint: ninguna llamada perdedora puede
+    // fallar por error de CHECK de la base, sino por INSUFFICIENT_STOCK lanzado por el RPC
+    for (const [i, f] of fallas.entries()) {
+      const msg = f.error?.message ?? "";
+      expect(msg, `llamada ${i}: falló con error de CHECK de base en vez de lock`).not.toMatch(/existencias_lote_cantidad_check|violates check constraint/i);
+      expect(msg, `llamada ${i}: debe fallar por INSUFFICIENT_STOCK`).toMatch(/INSUFFICIENT_STOCK/);
+    }
 
     const { data } = await serviceDb
       .from("existencias_lote")

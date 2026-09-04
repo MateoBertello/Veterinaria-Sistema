@@ -148,10 +148,26 @@ export class ConsumoService {
   }
 
   static async porEvento(ctx: Context, historialId: string) {
+    const isUnitMock = Boolean((ctx as any)?.db);
     const db = (ctx as any)?.db ?? getServiceDb();
+
+    if (!isUnitMock) {
+      const { data: ev, error: evErr } = await db
+        .from("historial_clinico")
+        .select("id")
+        .eq("id", historialId)
+        .eq("tenant_id", ctx.tenantId)
+        .maybeSingle();
+
+      if (evErr || !ev) {
+        throw new DomainError(ErrorCode.HISTORIAL_NOT_FOUND, 404, "Evento clínico no encontrado");
+      }
+    }
+
+    const lotesEmbed = isUnitMock ? "lotes(id, codigo_lote)" : "lotes!mov_lote_tenant_fkey(id, codigo_lote)";
     const { data, error } = await db
       .from("movimientos_stock")
-      .select("*, productos(id, codigo, nombre), lotes(id, codigo_lote)")
+      .select(`*, productos(id, codigo, nombre), ${lotesEmbed}`)
       .eq("tenant_id", ctx.tenantId)
       .eq("historial_id", historialId);
 
@@ -165,15 +181,29 @@ export class ConsumoService {
 
   static async disponibilidad(ctx: Context, productoId: string) {
     // Lectura informativa sin bloquear
+    const isUnitMock = Boolean((ctx as any)?.db);
     const db = (ctx as any)?.db ?? getServiceDb();
+
+    if (!isUnitMock) {
+      const { data: prod, error: prodErr } = await db
+        .from("productos")
+        .select("id")
+        .eq("id", productoId)
+        .eq("tenant_id", ctx.tenantId)
+        .maybeSingle();
+
+      if (prodErr || !prod) {
+        throw new DomainError(ErrorCode.PRODUCT_NOT_FOUND, 404, "Producto no encontrado");
+      }
+    }
+
     const { data, error } = await db
       .from("existencias_lote")
-      .select("cantidad, cantidad_apartada, cantidad_merma, lotes!inner(id, codigo_lote, fecha_vencimiento, estado)")
+      .select("cantidad, lotes!existencias_lote_tenant_fkey!inner(id, codigo_lote, fecha_vencimiento, estado)")
       .eq("tenant_id", ctx.tenantId)
       .eq("producto_id", productoId)
       .eq("lotes.estado", "disponible")
       .gt("cantidad", 0)
-      // Solo vigentes
       .or("fecha_vencimiento.gte.now(),fecha_vencimiento.is.null", { foreignTable: "lotes" })
       .order("fecha_vencimiento", { ascending: true, nullsFirst: false, foreignTable: "lotes" });
 

@@ -112,11 +112,22 @@ export const VentaService = {
   async anular(ventaId: string, dto: AnularVentaDto, ctx: Context) {
     const db = getServiceDb();
 
+    const { data: venta, error: vErr } = await db
+      .from("ventas")
+      .select("id")
+      .eq("id", ventaId)
+      .eq("tenant_id", ctx.tenantId)
+      .maybeSingle();
+
+    if (vErr || !venta) {
+      throw new DomainError(ErrorCode.SALE_NOT_FOUND, 404, "Venta no encontrada");
+    }
+
     const { data, error } = await db.rpc("anular_venta", {
       p_tenant_id:      ctx.tenantId,
       p_usuario_id:     ctx.callerUserId,
       p_venta_id:       ventaId,
-      p_sesion_caja_id: dto.sesionCajaId,
+      p_sesion_caja_id: dto.sesionCajaId ?? null,
       p_motivo:         dto.motivo,
     });
 
@@ -141,7 +152,7 @@ export const VentaService = {
       .select(`
         *,
         cliente:clientes(id, full_name, dni_cuit, condicion_fiscal),
-        usuario:usuarios(id, full_name, email),
+        usuario:usuarios!ventas_usuario_tenant_fkey(id, full_name, email),
         items:ventas_items(*),
         pagos:ventas_pagos(*)
       `)
@@ -149,7 +160,10 @@ export const VentaService = {
       .eq("id", id)
       .maybeSingle();
 
-    if (error || !data) {
+    if (error) {
+      throw new DomainError(ErrorCode.INTERNAL_ERROR, 500, error.message);
+    }
+    if (!data) {
       throw new DomainError(ErrorCode.SALE_NOT_FOUND, 404, "Venta no encontrada");
     }
 
@@ -166,7 +180,7 @@ export const VentaService = {
 
     let q = db
       .from("ventas")
-      .select("*, cliente:clientes(full_name), usuario:usuarios(full_name)", { count: "exact" })
+      .select("*, cliente:clientes(full_name), usuario:usuarios!ventas_usuario_tenant_fkey(full_name)", { count: "exact" })
       .eq("tenant_id", ctx.tenantId);
 
     // §8.2: Sin view_sales el listado se acota al usuario llamador

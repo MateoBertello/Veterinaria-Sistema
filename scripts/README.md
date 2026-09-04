@@ -193,6 +193,48 @@ node scripts/super-admins.mjs revoke viejo@leo.vet
 node scripts/super-admins.mjs list
 ```
 
+## Deploy de la API a producción (`deploy-api.sh`)
+
+`supabase functions deploy api` empaqueta **los archivos que hay en disco**, no
+los del commit en el que creés estar parado. Con un módulo a medio desarrollar
+en el working tree, un deploy corrido desde la raíz del repo lo sube a
+producción — con Services que consultan tablas y valores de ENUM que las
+migraciones pendientes todavía no crearon allá. Ya pasó una vez (2026-09-04:
+`stock` y `ventas` se subieron sin querer).
+
+`scripts/deploy-api.sh` nunca despliega el working tree: materializa el commit
+pedido en un `git worktree` descartable y despliega desde ahí.
+
+```bash
+export SUPABASE_PROJECT_REF=<project-ref>
+
+scripts/deploy-api.sh                      # despliega origin/main
+scripts/deploy-api.sh --dry-run            # corre las guardas y no despliega
+scripts/deploy-api.sh --ref <commit|rama>  # otro punto de despliegue
+```
+
+Antes de subir nada corre dos guardas sobre el commit, y si alguna falla no
+despliega:
+
+1. **Módulos sin lanzar.** Busca los identificadores bloqueados (`stock` y
+   `ventas` por defecto) en todo `supabase/functions/api/src`. Alcanza con que
+   aparezcan en `main.ts`, en `requireModule` o en un enum de Zod. Se agregan
+   más con `--block <modulo>`; para liberar uno, sacalo del array
+   `BLOQUEADOS` del script.
+2. **El código no puede ir adelante del esquema.** Compara la migración más
+   nueva del commit contra la más nueva aplicada en el remoto
+   (`supabase migration list --linked`). Es la guarda general: cubre el caso
+   que la primera no ve. Se omite con `--skip-schema-check`.
+
+Al terminar hace un smoke test: `/health` tiene que dar **200** y `/especies`
+**401** (401, no 404 — prueba que la ruta existe y está detrás de
+`tenantContext`). Si no da eso, el deploy no tomó.
+
+> **`db push` es aparte y no lo hace este script.** Aplica *todas* las
+> migraciones pendientes, sin selector. Con módulos en desarrollo en el árbol,
+> revisá siempre `supabase migration list --linked` y `supabase db push --dry-run`
+> antes de correrlo.
+
 ## Errores comunes (troubleshooting)
 
 Estos síntomas parecen "login roto" pero casi siempre son del entorno local:

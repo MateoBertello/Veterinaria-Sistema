@@ -18,8 +18,13 @@ describeIntegration("C7·T1: RPC registrar_consumo_clinico", () => {
   });
 
   afterAll(async () => {
+    // `limpiarTenant(serviceDb, tenantId)`: le faltaba el primer argumento, así
+    // que el tenantId caía en el parámetro del cliente, `tenantId` quedaba
+    // undefined y la función salía por su guarda inicial. El teardown de esta
+    // suite no borró nunca nada. No lo agarró el typecheck porque
+    // `npm run typecheck` cubre `supabase/functions/api` y `web`, no `tests/`.
     if (ctx?.tenantId) {
-      await limpiarTenant(ctx.tenantId);
+      await limpiarTenant(serviceDb, ctx.tenantId);
     }
   });
 
@@ -207,6 +212,34 @@ describeIntegration("C7·T1: RPC registrar_consumo_clinico", () => {
       p_receta_id: fakeReceta
     });
     expect(okError).toBeNull();
+  });
+
+  it("RN-CC4: trazabilidad bidireccional lote ↔ mascota", async () => {
+    // 1. Trazabilidad Lote -> Mascotas
+    const { data: consumosLote, error: errLote } = await serviceDb
+      .from("v_consumo_clinico")
+      .select("mascota_id, mascota_nombre, lote_id, codigo_lote")
+      .eq("tenant_id", ctx.tenantId)
+      .eq("lote_id", ctx.lotesVac[0].id)
+      .order("consumido_at", { ascending: true });
+
+    expect(errLote).toBeNull();
+    expect(consumosLote).toBeDefined();
+    expect(consumosLote!.length).toBeGreaterThan(0);
+    expect(consumosLote!.map((c) => c.mascota_id)).toContain(ctx.mascota1.id);
+
+    // 2. Trazabilidad Mascota -> Lotes
+    const { data: consumosMascota, error: errMascota } = await serviceDb
+      .from("v_consumo_clinico")
+      .select("mascota_id, mascota_nombre, lote_id, codigo_lote")
+      .eq("tenant_id", ctx.tenantId)
+      .eq("mascota_id", ctx.mascota1.id)
+      .order("consumido_at", { ascending: true });
+
+    expect(errMascota).toBeNull();
+    expect(consumosMascota).toBeDefined();
+    expect(consumosMascota!.length).toBeGreaterThan(0);
+    expect(consumosMascota!.map((c) => c.lote_id)).toContain(ctx.lotesVac[0].id);
   });
 
   it("RN-CC5: las columnas de trazabilidad externa no se usan", async () => {

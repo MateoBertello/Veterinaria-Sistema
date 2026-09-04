@@ -146,6 +146,26 @@ interface TenantFixture {
   especieId:     string;
   razaId:        string;
   tipoVacunaId:  string;
+  // ── Módulo Comercial (Etapas C1..C8) ──────────────────────────────────────
+  // El CLAUDE.md obliga a sumar a esta matriz TODA entidad de negocio nueva. El
+  // módulo entero se había mergeado sin una sola entidad acá, así que ninguno de
+  // sus ~60 endpoints tenía prueba de aislamiento por el camino real de la API.
+  familiaId:          string;
+  productoId:         string;
+  productoDerivadoId: string;
+  conversionId:       string;
+  proveedorId:        string;
+  loteId:             string;
+  compraId:           string;
+  compraItemId:       string;
+  cajaId:             string;
+  sesionCajaId:       string;
+  ventaId:            string;
+  ventaItemId:        string;
+  recuentoId:         string;
+  /** Catálogos globales: no son del tenant, pero hacen falta para armar bodies válidos. */
+  unidadMedidaId:     string;
+  medioPagoId:        string;
 }
 
 // Fechas futuras fijas: nada de `new Date()` para que la suite no dependa del día
@@ -159,10 +179,31 @@ const FECHA_VACUNA  = "2099-12-15";
 // validación y nunca llegaba al control de aislamiento — verde vacío. Ayer en
 // UTC siempre está en el pasado, corra la suite el día que corra.
 const AYER = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10);
+// Lotes del fixture comercial: vencimiento lejano para que nada rebote por
+// vencido antes de llegar al control de tenant.
+const FECHA_VENCIMIENTO = "2099-06-30";
 
 let serviceDb: SupabaseClient;
 let A: TenantFixture;
 let B: TenantFixture;
+
+/**
+ * Insert de fixture que no puede fallar en silencio.
+ *
+ * El guard de ids vacíos al final de `provisionTenant` avisa QUE algo faltó,
+ * pero no POR QUÉ. Con esto el mensaje trae el error de Postgres. Estrenado
+ * sembrando el módulo comercial: un insert masivo de dos productos donde la
+ * segunda fila omitía `es_consumible_clinico` — PostgREST unifica las claves de
+ * un bulk insert y la mandaba como null contra una columna NOT NULL.
+ */
+async function insertarFixture<T = { id: string }>(
+  tabla: string,
+  filas: Record<string, unknown> | Array<Record<string, unknown>>,
+): Promise<T[]> {
+  const { data, error } = await serviceDb.from(tabla).insert(filas as never).select("*");
+  if (error) throw new Error(`Fixture: no se pudo sembrar ${tabla}: ${error.message}`);
+  return (data ?? []) as T[];
+}
 
 /**
  * Aprovisiona un tenant `premium` (historial + turnos + guardería licenciados)
@@ -289,10 +330,124 @@ async function provisionTenant(sufijo: string): Promise<TenantFixture> {
     .select("id").single();
   const planVacId = plan?.id as string;
 
+  // ─── Módulo Comercial ───────────────────────────────────────────────────────
+  // Una fila de cada entidad, con existencia real, para que los endpoints de la
+  // matriz tengan a qué apuntar. Se siembra con service role igual que el resto.
+
+  const { data: unidad } = await serviceDb
+    .from("unidades_medida").select("id").eq("codigo", "unidad").single();
+  const unidadMedidaId = unidad?.id as string;
+
+  const { data: medio } = await serviceDb
+    .from("medios_pago").select("id").eq("codigo", "efectivo").single();
+  const medioPagoId = medio?.id as string;
+
+  const [familia] = await insertarFixture("familias_producto",
+    { tenant_id: tenantId, nombre: `Familia ${sufijo}`, unidad_base_id: unidadMedidaId });
+  const familiaId = familia?.id as string;
+
+  // Las dos filas llevan EXACTAMENTE las mismas claves: PostgREST unifica las
+  // columnas de un insert masivo y una clave ausente en una fila viaja como
+  // null (ver `insertarFixture`).
+  const productos = await insertarFixture("productos", [
+    { tenant_id: tenantId, codigo: `PROD-${sufijo}`, nombre: `Producto ${sufijo}`,
+      unidad_medida_id: unidadMedidaId, familia_id: familiaId,
+      es_consumible_clinico: true, precio_venta: 500, costo_reposicion: 100 },
+    { tenant_id: tenantId, codigo: `DERIV-${sufijo}`, nombre: `Derivado ${sufijo}`,
+      unidad_medida_id: unidadMedidaId, familia_id: familiaId,
+      es_consumible_clinico: true, precio_venta: 60, costo_reposicion: 12 },
+  ]);
+  const productoId         = productos[0]?.id as string;
+  const productoDerivadoId = productos[1]?.id as string;
+
+  const [conversion] = await insertarFixture("producto_conversiones",
+    { tenant_id: tenantId, producto_origen_id: productoId,
+      producto_destino_id: productoDerivadoId, factor_teorico: 10 });
+  const conversionId = conversion?.id as string;
+
+  const [proveedor] = await insertarFixture("proveedores",
+    { tenant_id: tenantId, razon_social: `Proveedor ${sufijo}`,
+      cuit: `30-1234567-${sufijo === "AISLA" ? 1 : 2}` });
+  const proveedorId = proveedor?.id as string;
+
+  const [lote] = await insertarFixture("lotes", {
+    tenant_id: tenantId, producto_id: productoId, codigo_lote: `LOTE-${sufijo}`,
+    fecha_vencimiento: FECHA_VENCIMIENTO, costo_unitario_neto: 100,
+    costo_unitario_efectivo: 100, origen: "compra", proveedor_id: proveedorId,
+    usuario_id: userId,
+  });
+  const loteId = lote?.id as string;
+
+  // Existencia real: sin esto los endpoints de consumo/venta/fraccionamiento
+  // rebotarían por falta de stock ANTES de mirar el tenant — verde vacío.
+  await insertarFixture("movimientos_stock", {
+    tenant_id: tenantId, operacion_id: crypto.randomUUID(), tipo: "entrada_inicial",
+    producto_id: productoId, lote_id: loteId, cantidad: 1000,
+    costo_unitario: 100, costo_total: 100000, usuario_id: userId,
+  });
+
+  // Compra en BORRADOR: es el estado en el que los endpoints de edición e
+  // ítems son operables, así que un rechazo solo puede venir del aislamiento.
+  const [compra] = await insertarFixture("compras", {
+    tenant_id: tenantId, proveedor_id: proveedorId, fecha: "2026-02-01",
+    estado: "borrador", usuario_id: userId,
+    comprobante_proveedor_tipo: "Factura A", comprobante_proveedor_numero: `0001-${sufijo}`,
+  });
+  const compraId = compra?.id as string;
+
+  const [compraItem] = await insertarFixture("compras_items", {
+    tenant_id: tenantId, compra_id: compraId, producto_id: productoId,
+    cantidad: 10, costo_unitario_neto: 100, alicuota_iva: 21,
+    importe_neto: 1000, importe_iva: 210, importe_total: 1210,
+  });
+  const compraItemId = compraItem?.id as string;
+
+  const [caja] = await insertarFixture("cajas", { tenant_id: tenantId, nombre: `Caja ${sufijo}` });
+  const cajaId = caja?.id as string;
+
+  // Sesión ABIERTA: los endpoints de movimiento y cierre exigen ese estado.
+  const [sesion] = await insertarFixture("sesiones_caja",
+    { tenant_id: tenantId, caja_id: cajaId, apertura_usuario_id: userId, saldo_inicial: 1000 });
+  const sesionCajaId = sesion?.id as string;
+
+  await insertarFixture("movimientos_caja", {
+    tenant_id: tenantId, sesion_caja_id: sesionCajaId, tipo: "ingreso_manual",
+    medio_pago_id: medioPagoId, importe: 500, motivo: `Ingreso inicial ${sufijo}`,
+    usuario_id: userId,
+  });
+
+  const [venta] = await insertarFixture("ventas", {
+    tenant_id: tenantId, numero_operacion: 1, sesion_caja_id: sesionCajaId,
+    cliente_id: clienteId, subtotal_neto: 1000, total_iva: 210, total: 1210,
+    estado: "registrada", usuario_id: userId,
+  });
+  const ventaId = venta?.id as string;
+
+  const [ventaItem] = await insertarFixture("ventas_items", {
+    tenant_id: tenantId, venta_id: ventaId, tipo_item: "producto", producto_id: productoId,
+    descripcion_snapshot: `Producto ${sufijo}`, cantidad: 2, precio_unitario: 605,
+    alicuota_iva: 21, neto_unitario: 500, iva_unitario: 105, importe_total: 1210,
+    costo_unitario_efectivo: 100,
+  });
+  const ventaItemId = ventaItem?.id as string;
+
+  // Recuento en BORRADOR (uq_recuento_borrador: uno solo por tenant).
+  const [recuento] = await insertarFixture("recuentos",
+    { tenant_id: tenantId, usuario_id: userId, estado: "borrador",
+      observaciones: `Recuento ${sufijo}` });
+  const recuentoId = recuento?.id as string;
+
+  await insertarFixture("recuentos_detalle", {
+    tenant_id: tenantId, recuento_id: recuentoId, lote_id: loteId, cantidad_contada: 1000,
+  });
+
   const fixture: TenantFixture = {
     tenantId, jwt, userId, rolAdminId, rolVetId, clienteId, clienteAltId,
     mascotaId, servicioId, servicioLibreId, doctorId, horarioId, turnoId,
     estadiaId, eventoId, planVacId, ...catalogo,
+    familiaId, productoId, productoDerivadoId, conversionId, proveedorId,
+    loteId, compraId, compraItemId, cajaId, sesionCajaId, ventaId, ventaItemId,
+    recuentoId, unidadMedidaId, medioPagoId,
   };
 
   // Un id vacío no puede pasar en silencio: la URL queda como
@@ -327,25 +482,48 @@ afterAll(async () => {
 // ─── Utilidades de aserción ───────────────────────────────────────────────────
 
 /** Tablas de negocio del tenant A cuyo contenido no puede cambiar por un pedido de B. */
-const TABLAS_SNAPSHOT = [
-  "clientes", "mascotas", "servicios", "doctores", "horarios_doctor",
-  "turnos", "estadias", "historial_clinico", "plan_vacunacion", "usuarios",
+const TABLAS_SNAPSHOT: ReadonlyArray<readonly [tabla: string, orden: string]> = [
+  ["clientes", "id"], ["mascotas", "id"], ["servicios", "id"], ["doctores", "id"],
+  ["horarios_doctor", "id"], ["turnos", "id"], ["estadias", "id"],
+  ["historial_clinico", "id"], ["plan_vacunacion", "id"], ["usuarios", "id"],
   // Catálogos clínicos: entidades de negocio del tenant desde
   // 20260827000001_catalogos_por_tenant.sql, así que entran a la matriz.
-  "especies", "razas", "tipos_vacuna",
+  ["especies", "id"], ["razas", "id"], ["tipos_vacuna", "id"],
   // Qué vacuna aplica a qué especie (20260828000001_vacunas_por_especie.sql).
   // Entra por la misma regla del CLAUDE.md: toda entidad de negocio nueva se
   // suma acá. Y no es cosmético — de esta tabla depende qué se le puede
   // inyectar a un animal, así que una escritura cruzada no es solo un dato
   // ajeno: habilita una vacuna equivocada en la clínica de al lado.
-  "especie_tipo_vacuna",
+  ["especie_tipo_vacuna", "especie_id,tipo_vacuna_id"],
+
+  // ── Módulo Comercial (Etapas C1..C8) ────────────────────────────────────────
+  // Ni una de estas tablas estaba en la matriz: el módulo entero se mergeó sin
+  // que ningún test verificara que una escritura de B no toca las filas de A.
+  // La segunda posición es la columna de orden — `existencias_lote` no tiene
+  // `id` (su PK es `lote_id`) y un `.order("id")` sobre ella devolvía error, o
+  // sea una foto vacía a ambos lados de la comparación: verde garantizado sin
+  // haber mirado nada.
+  ["familias_producto", "id"], ["productos", "id"], ["producto_conversiones", "id"],
+  ["proveedores", "id"], ["lotes", "id"], ["movimientos_stock", "id"],
+  ["existencias_lote", "lote_id"],
+  ["compras", "id"], ["compras_items", "id"],
+  ["cajas", "id"], ["sesiones_caja", "id"], ["movimientos_caja", "id"],
+  ["ventas", "id"], ["ventas_items", "id"], ["ventas_pagos", "id"],
+  ["recuentos", "id"], ["recuentos_detalle", "id"],
 ] as const;
 
 /** Foto ordenada y estable de todas las filas de A, para comparar antes/después. */
 async function snapshotTenant(tenantId: string): Promise<Record<string, string>> {
   const foto: Record<string, string> = {};
-  for (const tabla of TABLAS_SNAPSHOT) {
-    const { data } = await serviceDb.from(tabla).select("*").eq("tenant_id", tenantId).order("id");
+  for (const [tabla, orden] of TABLAS_SNAPSHOT) {
+    let query = serviceDb.from(tabla).select("*").eq("tenant_id", tenantId);
+    for (const col of orden.split(",").map((c) => c.trim())) {
+      query = query.order(col);
+    }
+    const { data, error } = await query;
+    // Un error acá deja la foto en "[]" a ambos lados y la comparación pasa sin
+    // haber mirado la tabla. Se corta en vez de dar ese verde.
+    if (error) throw new Error(`snapshotTenant: no se pudo fotografiar "${tabla}": ${error.message}`);
     foto[tabla] = JSON.stringify(data ?? []);
   }
   return foto;
@@ -595,21 +773,34 @@ describeIntegration("A3 — consultas con service role que no filtraban por tena
     // que un turno de B puede apuntar a un servicio de A. El guard corría con
     // service role y contaba turnos de TODAS las clínicas: el turno de B
     // bloqueaba la baja del servicio de A (y confirmaba su existencia de rebote).
-    const { error: insertError } = await serviceDb.from("turnos").insert({
+    const { data: turnoCruzado, error: insertError } = await serviceDb.from("turnos").insert({
       tenant_id: B.tenantId, client_id: B.clienteId, pet_id: B.mascotaId,
       servicio_id: A.servicioLibreId, doctor_id: null, date: FECHA_TURNO,
       start_time: "15:00", end_time: "15:30", status: "Confirmado",
       reason: "Turno de B contra un servicio de A",
-    });
+    }).select("id").single();
     expect(insertError, "no se pudo sembrar el turno cruzado").toBeNull();
 
-    const res = await callApp(`/servicios/${A.servicioLibreId}/estado`, {
-      method: "PATCH", jwt: A.jwt, body: { activo: false },
-    });
-    const body = await res.json() as { success: boolean; data?: { activo: boolean } };
+    try {
+      const res = await callApp(`/servicios/${A.servicioLibreId}/estado`, {
+        method: "PATCH", jwt: A.jwt, body: { activo: false },
+      });
+      const body = await res.json() as { success: boolean; data?: { activo: boolean } };
 
-    expect(res.status, "el turno de otra clínica bloqueó la baja").toBe(200);
-    expect(body.data?.activo).toBe(false);
+      expect(res.status, "el turno de otra clínica bloqueó la baja").toBe(200);
+      expect(body.data?.activo).toBe(false);
+    } finally {
+      // Este turno es el ÚNICO dato cruzado que la suite siembra a propósito, y
+      // hay que sacarlo acá mismo. Si sobrevive, el teardown no puede dar de
+      // baja al tenant A: `servicios` no se libera mientras un turno de B lo
+      // referencie (`turnos_servicio_id_fkey` es RESTRICT), y el turno de B solo
+      // se va con B. El orden de purga pasaría a importar, que es justo lo que
+      // no queremos que un teardown tenga que adivinar.
+      // El `finally` es deliberado: si el assert de arriba falla, el turno se
+      // limpia igual y el rojo queda en ESTE test en vez de reaparecer como un
+      // error de teardown en la corrida siguiente.
+      if (turnoCruzado?.id) await serviceDb.from("turnos").delete().eq("id", turnoCruzado.id);
+    }
   });
 
   it("RN-SEC6: el rol que decide LAST_ADMIN se lee del propio tenant", async () => {
@@ -1075,6 +1266,80 @@ describeIntegration("Integridad cross-tenant en la BASE (FK compuestas, no solo 
     expect(error?.code).toBe("23503");
   });
 
+  it("RN-SC2: ninguna tabla comercial acepta un usuario_id de OTRO tenant (FK compuesta)", async () => {
+    if (skipIfNoCredentials() || !A?.tenantId || !B?.tenantId) return;
+
+    // Las 12 columnas que apuntan a `usuarios`. Hasta la corrección de la
+    // auditoría eran FKs SIMPLES (`REFERENCES usuarios(id)`), así que un
+    // usuario_id de otra clínica entraba sin que la base dijera nada: quedaba
+    // firmando un asiento del libro mayor, una venta o una sesión de caja.
+    // Se insertan filas de A firmadas por el usuario de B, con service role
+    // (sin Service de por medio): el único control que puede frenarlas es la FK.
+    const filasDeAFirmadasPorB: Array<{ nombre: string; tabla: string; fila: Record<string, unknown> }> = [
+      { nombre: "lotes.usuario_id", tabla: "lotes", fila: {
+        tenant_id: A.tenantId, producto_id: A.productoId, codigo_lote: "LOTE-CROSS",
+        costo_unitario_neto: 1, costo_unitario_efectivo: 1, origen: "compra", usuario_id: B.userId } },
+      { nombre: "movimientos_stock.usuario_id", tabla: "movimientos_stock", fila: {
+        tenant_id: A.tenantId, operacion_id: crypto.randomUUID(), tipo: "entrada_ajuste",
+        producto_id: A.productoId, lote_id: A.loteId, cantidad: 1, usuario_id: B.userId } },
+      { nombre: "movimientos_stock.profesional_prescriptor_id", tabla: "movimientos_stock", fila: {
+        tenant_id: A.tenantId, operacion_id: crypto.randomUUID(), tipo: "entrada_ajuste",
+        producto_id: A.productoId, lote_id: A.loteId, cantidad: 1, usuario_id: A.userId,
+        profesional_prescriptor_id: B.userId } },
+      { nombre: "compras.usuario_id", tabla: "compras", fila: {
+        tenant_id: A.tenantId, proveedor_id: A.proveedorId, fecha: "2026-03-01", usuario_id: B.userId } },
+      // Sesión CERRADA a propósito: `uq_sesion_caja_abierta` es un índice único
+      // parcial sobre (tenant_id, caja_id) WHERE estado = 'abierta', y la caja de
+      // A ya tiene su sesión abierta. Una fila 'abierta' rebotaría por 23505
+      // antes de llegar a la FK, y el test estaría probando el índice, no el
+      // aislamiento.
+      { nombre: "sesiones_caja.apertura_usuario_id", tabla: "sesiones_caja", fila: {
+        tenant_id: A.tenantId, caja_id: A.cajaId, apertura_usuario_id: B.userId, saldo_inicial: 0,
+        estado: "cerrada", cierre_at: "2026-03-01T12:00:00Z", cierre_usuario_id: A.userId,
+        saldo_teorico_efectivo: 0, efectivo_contado: 0, diferencia: 0 } },
+      { nombre: "sesiones_caja.cierre_usuario_id", tabla: "sesiones_caja", fila: {
+        tenant_id: A.tenantId, caja_id: A.cajaId, apertura_usuario_id: A.userId, saldo_inicial: 0,
+        estado: "cerrada", cierre_at: "2026-03-01T12:00:00Z", cierre_usuario_id: B.userId,
+        saldo_teorico_efectivo: 0, efectivo_contado: 0, diferencia: 0 } },
+      { nombre: "movimientos_caja.usuario_id", tabla: "movimientos_caja", fila: {
+        tenant_id: A.tenantId, sesion_caja_id: A.sesionCajaId, tipo: "ingreso_manual",
+        medio_pago_id: A.medioPagoId, importe: 1, usuario_id: B.userId } },
+      { nombre: "ventas.usuario_id", tabla: "ventas", fila: {
+        tenant_id: A.tenantId, numero_operacion: 9001, sesion_caja_id: A.sesionCajaId,
+        usuario_id: B.userId } },
+      { nombre: "ventas.anulada_por_usuario_id", tabla: "ventas", fila: {
+        tenant_id: A.tenantId, numero_operacion: 9002, sesion_caja_id: A.sesionCajaId,
+        usuario_id: A.userId, estado: "anulada", anulada_at: "2026-03-01T12:00:00Z",
+        anulada_por_usuario_id: B.userId, motivo_anulacion: "Anulada desde otra clínica" } },
+      { nombre: "recuentos.usuario_id", tabla: "recuentos", fila: {
+        tenant_id: A.tenantId, usuario_id: B.userId, estado: "aplicado",
+        aplicado_at: "2026-03-01T12:00:00Z", aplicado_por_usuario_id: A.userId } },
+      { nombre: "recuentos.aplicado_por_usuario_id", tabla: "recuentos", fila: {
+        tenant_id: A.tenantId, usuario_id: A.userId, estado: "aplicado",
+        aplicado_at: "2026-03-01T12:00:00Z", aplicado_por_usuario_id: B.userId } },
+      { nombre: "ventas_items.profesional_prescriptor_id", tabla: "ventas_items", fila: {
+        tenant_id: A.tenantId, venta_id: A.ventaId, tipo_item: "producto", producto_id: A.productoId,
+        descripcion_snapshot: "Cross", cantidad: 1, precio_unitario: 1, alicuota_iva: 21,
+        neto_unitario: 1, iva_unitario: 0, importe_total: 1,
+        profesional_prescriptor_id: B.userId } },
+    ];
+
+    const aceptadas: string[] = [];
+    for (const caso of filasDeAFirmadasPorB) {
+      const { error } = await serviceDb.from(caso.tabla).insert(caso.fila as never);
+      // 23503 = foreign_key_violation. Se exige ESE código: un rechazo por un
+      // CHECK o un NOT NULL probaría otra cosa y dejaría el agujero abierto.
+      if (error?.code !== "23503") {
+        aceptadas.push(`${caso.nombre} → ${error ? `${error.code}: ${error.message}` : "ACEPTADA (sin error)"}`);
+      }
+    }
+
+    expect(
+      aceptadas,
+      `Estas columnas aceptaron un usuario_id de otro tenant sin violar ninguna FK:\n${aceptadas.join("\n")}`,
+    ).toEqual([]);
+  });
+
   it("RN-SC2: un movimiento de A no puede referenciar un lote de B", async () => {
     if (skipIfNoCredentials() || !A?.tenantId || !B?.tenantId) return;
 
@@ -1203,4 +1468,267 @@ describeIntegration("Un tenant recién creado nace con catálogo utilizable", ()
       await limpiarTenant(serviceDb, tenantId);
     }
   }, 60_000);
+});
+
+// ─── 6. MÓDULO COMERCIAL — la matriz que faltaba entera ───────────────────────
+//
+// El CLAUDE.md ("Los tests de aislamiento bloqueantes son dos…") obliga a sumar
+// a esta suite TODA entidad de negocio nueva. El Módulo Comercial se mergeó a lo
+// largo de ocho etapas sin una sola entidad ni un solo endpoint acá: ~60
+// endpoints de 10 módulos cuyo aislamiento por el camino real (HTTP → controller
+// → Service → DB) no verificaba nadie. El guardrail estático
+// (`tests/unit/tenant-filter-guardrail.test.ts`) chequea que el `.eq("tenant_id",
+// ...)` ESTÉ; esto chequea que el valor sea el correcto, que es lo que aquél no
+// puede ver.
+
+describeIntegration("Aislamiento por API — COMERCIAL: B no lee entidades de A", () => {
+  it("ningún GET al detalle de una entidad comercial de A responde 2xx con el JWT de B", async () => {
+    if (skipIfNoCredentials() || !A?.jwt || !B?.jwt) return;
+
+    const lecturas: Intento[] = [
+      { nombre: "producto",             method: "GET", path: `/productos/${A.productoId}` },
+      { nombre: "familia de producto",  method: "GET", path: `/familias-producto/${A.familiaId}` },
+      { nombre: "conversión",           method: "GET", path: `/producto-conversiones/${A.conversionId}` },
+      { nombre: "proveedor",            method: "GET", path: `/proveedores/${A.proveedorId}` },
+      { nombre: "lote",                 method: "GET", path: `/lotes/${A.loteId}` },
+      { nombre: "kardex del lote",      method: "GET", path: `/lotes/${A.loteId}/kardex` },
+      { nombre: "trazabilidad del lote", method: "GET", path: `/lotes/${A.loteId}/trazabilidad` },
+      { nombre: "compra",               method: "GET", path: `/compras/${A.compraId}` },
+      { nombre: "sesión de caja",       method: "GET", path: `/caja/sesiones/${A.sesionCajaId}` },
+      { nombre: "resumen de sesión",    method: "GET", path: `/caja/sesiones/${A.sesionCajaId}/resumen` },
+      { nombre: "venta",                method: "GET", path: `/ventas/${A.ventaId}` },
+      { nombre: "recuento",             method: "GET", path: `/recuentos/${A.recuentoId}` },
+      { nombre: "consumos del evento",  method: "GET", path: `/consumos/evento/${A.eventoId}` },
+      { nombre: "disponibilidad del producto", method: "GET",
+        path: `/consumos/disponibilidad?productoId=${A.productoId}` },
+      { nombre: "sugerir vencimiento",  method: "GET",
+        path: `/fraccionamiento/sugerir-vencimiento?loteOrigenId=${A.loteId}&productoDestinoId=${A.productoDerivadoId}` },
+    ];
+
+    const filtrados: string[] = [];
+    for (const intento of lecturas) {
+      const { status, code } = await esperarRechazo(intento);
+      if (status < 400) filtrados.push(`${intento.nombre} → ${status}`);
+      verificarMotivo(intento, status, code);
+    }
+
+    expect(filtrados, "entidades comerciales de A legibles con el JWT de B").toEqual([]);
+  });
+
+  it("ningún listado ni reporte comercial de B contiene datos de A", async () => {
+    if (skipIfNoCredentials() || !A?.jwt || !B?.jwt) return;
+
+    // Además del id, se busca el NOMBRE de la entidad de A: varios reportes
+    // agregan por producto/usuario y devuelven la descripción, no siempre el id.
+    const listados: Array<{ nombre: string; path: string; agujas: string[] }> = [
+      { nombre: "productos",         path: "/productos?limit=100",         agujas: [A.productoId, "PROD-AISLA"] },
+      { nombre: "familias",          path: "/familias-producto?limit=100", agujas: [A.familiaId, "Familia AISLA"] },
+      { nombre: "conversiones",      path: "/producto-conversiones?limit=100", agujas: [A.conversionId] },
+      { nombre: "proveedores",       path: "/proveedores?limit=100",       agujas: [A.proveedorId, "Proveedor AISLA"] },
+      { nombre: "lotes",             path: "/lotes?limit=100",             agujas: [A.loteId, "LOTE-AISLA"] },
+      { nombre: "movimientos stock", path: "/movimientos-stock?limit=100", agujas: [A.loteId, A.productoId] },
+      { nombre: "existencias",       path: "/existencias?limit=100",       agujas: [A.loteId, A.productoId] },
+      { nombre: "valorización",      path: "/existencias/valorizacion",    agujas: [A.productoId] },
+      { nombre: "lotes por vencer",  path: "/lotes/candidatos",            agujas: [A.loteId] },
+      { nombre: "compras",           path: "/compras?limit=100",           agujas: [A.compraId] },
+      { nombre: "cajas",             path: "/caja/cajas",                  agujas: [A.cajaId, "Caja AISLA"] },
+      { nombre: "sesiones de caja",  path: "/caja/sesiones?limit=100",     agujas: [A.sesionCajaId] },
+      { nombre: "ventas",            path: "/ventas?limit=100",            agujas: [A.ventaId] },
+      { nombre: "margen de ventas",  path: "/ventas/reportes/margen",      agujas: [A.ventaId, A.productoId] },
+      { nombre: "ítems vendidos",    path: "/ventas/reportes/items-vendidos", agujas: [A.ventaId, A.productoId] },
+      { nombre: "recuentos",         path: "/recuentos?limit=100",         agujas: [A.recuentoId] },
+      { nombre: "historial fraccionamiento", path: "/fraccionamiento/historial?limit=100", agujas: [A.productoId] },
+      // Reportes de la Etapa C8: los nueve.
+      { nombre: "rep. valorización a fecha", path: "/reportes/valorizacion-fecha", agujas: [A.productoId] },
+      { nombre: "rep. rotación",             path: "/reportes/rotacion",           agujas: [A.productoId] },
+      { nombre: "rep. fraccionamiento",      path: "/reportes/fraccionamiento",    agujas: [A.productoId] },
+      { nombre: "rep. consumo profesional",  path: "/reportes/consumo-profesional", agujas: [A.userId] },
+      { nombre: "rep. consumo especie",      path: "/reportes/consumo-especie",    agujas: [A.especieId] },
+      { nombre: "rep. rentabilidad",         path: "/reportes/rentabilidad",       agujas: [A.productoId] },
+      { nombre: "rep. ventas por usuario",   path: "/reportes/ventas-usuario",     agujas: [A.userId] },
+      { nombre: "rep. ventas por sesión",    path: "/reportes/ventas-sesion",      agujas: [A.sesionCajaId] },
+      { nombre: "rep. ventas por medio de pago", path: "/reportes/ventas-medio-pago", agujas: [A.ventaId] },
+    ];
+
+    const contaminados: string[] = [];
+    for (const l of listados) {
+      const res  = await callApp(l.path, { jwt: B.jwt });
+      const body = await res.json() as { success: boolean; data?: unknown; error?: { code?: string } };
+      expect(res.status, `${l.nombre}: el listado no respondió 200 (${body.error?.code ?? ""})`).toBe(200);
+
+      const crudo = JSON.stringify(body.data ?? []);
+      for (const aguja of l.agujas) {
+        if (crudo.includes(aguja)) contaminados.push(`${l.nombre} ← ${aguja}`);
+      }
+    }
+
+    expect(contaminados, "listados/reportes de B con datos de A").toEqual([]);
+  });
+
+  it("los reportes de B filtrados POR UN ID DE A no devuelven nada de A", async () => {
+    if (skipIfNoCredentials() || !A?.jwt || !B?.jwt) return;
+
+    // Variante distinta de la anterior: acá B pide explícitamente el id de A como
+    // filtro. Un Service que aplicara el filtro del request pero se olvidara el
+    // de tenant devolvería exactamente las filas de A.
+    const filtrados: Array<{ nombre: string; path: string; aguja: string }> = [
+      { nombre: "valorización por producto de A", path: `/reportes/valorizacion-fecha?productoId=${A.productoId}`, aguja: A.productoId },
+      { nombre: "rotación por familia de A",      path: `/reportes/rotacion?familiaId=${A.familiaId}`,             aguja: A.productoId },
+      { nombre: "rentabilidad por producto de A", path: `/reportes/rentabilidad?productoId=${A.productoId}`,        aguja: A.productoId },
+      { nombre: "fraccionamiento por producto de A", path: `/reportes/fraccionamiento?productoOrigenId=${A.productoId}`, aguja: A.productoId },
+      { nombre: "consumo del profesional de A",   path: `/reportes/consumo-profesional?profesionalId=${A.userId}`,  aguja: A.userId },
+      { nombre: "consumo por especie de A",       path: `/reportes/consumo-especie?especieId=${A.especieId}`,       aguja: A.especieId },
+      { nombre: "ventas del usuario de A",        path: `/reportes/ventas-usuario?usuarioId=${A.userId}`,           aguja: A.userId },
+      { nombre: "ventas de la sesión de A",       path: `/reportes/ventas-sesion?sesionId=${A.sesionCajaId}`,       aguja: A.sesionCajaId },
+      { nombre: "ventas por medio de pago",       path: `/reportes/ventas-medio-pago?medioPagoId=${A.medioPagoId}`, aguja: A.ventaId },
+      { nombre: "margen por ítem de A",           path: `/ventas/reportes/margen?itemId=${A.productoId}&tipoItem=producto`, aguja: A.productoId },
+      { nombre: "ítems vendidos de A",            path: `/ventas/reportes/items-vendidos?itemId=${A.productoId}&tipoItem=producto`, aguja: A.productoId },
+      { nombre: "ventas de la sesión de A (listado)", path: `/ventas?sesionCajaId=${A.sesionCajaId}`,               aguja: A.ventaId },
+      { nombre: "compras del proveedor de A",     path: `/compras?proveedorId=${A.proveedorId}`,                    aguja: A.compraId },
+      { nombre: "productos de la familia de A",   path: `/productos?familiaId=${A.familiaId}`,                      aguja: A.productoId },
+      { nombre: "conversiones del producto de A", path: `/producto-conversiones?productoOrigenId=${A.productoId}`,   aguja: A.conversionId },
+    ];
+
+    const contaminados: string[] = [];
+    for (const f of filtrados) {
+      const res  = await callApp(f.path, { jwt: B.jwt });
+      const body = await res.json() as { success: boolean; data?: unknown; error?: { code?: string } };
+      // Un 404/403 también es un rechazo válido; lo inaceptable es un 200 con datos de A.
+      if (res.status >= 500) {
+        throw new Error(`${f.nombre}: respondió ${res.status} — el control de tenant no llegó a correr`);
+      }
+      if (res.status === 200 && JSON.stringify(body.data ?? []).includes(f.aguja)) {
+        contaminados.push(f.nombre);
+      }
+    }
+
+    expect(contaminados, "reportes de B que devolvieron filas de A al filtrar por un id de A").toEqual([]);
+  });
+});
+
+describeIntegration("Aislamiento por API — COMERCIAL: B no escribe sobre entidades de A", () => {
+  it("ninguna escritura comercial de B sobre A prospera, y las filas de A quedan intactas", async () => {
+    if (skipIfNoCredentials() || !A?.jwt || !B?.jwt) return;
+
+    const antes = await snapshotTenant(A.tenantId);
+
+    const escrituras: Intento[] = [
+      // ── Catálogo comercial (C1) ──────────────────────────────────────────
+      { nombre: "editar producto de A", method: "PUT", path: `/productos/${A.productoId}`,
+        body: { nombre: "Producto secuestrado por B" } },
+      { nombre: "desactivar producto de A", method: "PATCH", path: `/productos/${A.productoId}/estado`,
+        body: { activo: false } },
+      { nombre: "crear derivado del producto de A", method: "POST", path: `/productos/${A.productoId}/derivado`,
+        body: { codigo: `DERIV-INTRUSO-${Date.now()}`, nombre: "Derivado inyectado por B",
+                unidadMedidaId: B.unidadMedidaId, factorTeorico: 5 } },
+      { nombre: "editar familia de A", method: "PUT", path: `/familias-producto/${A.familiaId}`,
+        body: { nombre: "Familia secuestrada por B" } },
+      { nombre: "desactivar familia de A", method: "PATCH", path: `/familias-producto/${A.familiaId}/estado`,
+        body: { activo: false } },
+      { nombre: "editar conversión de A", method: "PUT", path: `/producto-conversiones/${A.conversionId}`,
+        body: { factorTeorico: 999 } },
+      { nombre: "desactivar conversión de A", method: "PATCH", path: `/producto-conversiones/${A.conversionId}/estado`,
+        body: { activo: false } },
+      { nombre: "crear conversión con productos de A", method: "POST", path: "/producto-conversiones",
+        body: { productoOrigenId: A.productoId, productoDestinoId: A.productoDerivadoId, factorTeorico: 3 } },
+      { nombre: "editar proveedor de A", method: "PUT", path: `/proveedores/${A.proveedorId}`,
+        body: { razonSocial: "Proveedor secuestrado por B" } },
+      { nombre: "desactivar proveedor de A", method: "PATCH", path: `/proveedores/${A.proveedorId}/estado`,
+        body: { activo: false } },
+      { nombre: "crear producto en la familia de A", method: "POST", path: "/productos",
+        body: { codigo: `PROD-INTRUSO-${Date.now()}`, nombre: "Producto inyectado por B",
+                unidadMedidaId: B.unidadMedidaId, familiaId: A.familiaId } },
+
+      // ── Compras (C2) ─────────────────────────────────────────────────────
+      { nombre: "editar compra de A", method: "PUT", path: `/compras/${A.compraId}`,
+        body: { observaciones: "Editada por B" } },
+      { nombre: "agregar ítem a la compra de A", method: "POST", path: `/compras/${A.compraId}/items`,
+        body: { productoId: B.productoId, cantidad: 1, costoUnitarioNeto: 10, alicuotaIva: 21 } },
+      { nombre: "editar ítem de la compra de A", method: "PUT",
+        path: `/compras/${A.compraId}/items/${A.compraItemId}`, body: { cantidad: 99 } },
+      { nombre: "borrar ítem de la compra de A", method: "DELETE",
+        path: `/compras/${A.compraId}/items/${A.compraItemId}` },
+      { nombre: "confirmar la compra de A", method: "POST", path: `/compras/${A.compraId}/confirmar` },
+      { nombre: "anular la compra de A", method: "POST", path: `/compras/${A.compraId}/anular`,
+        body: { motivo: "Anulada por un intruso de otra clínica" } },
+      { nombre: "crear compra con el proveedor de A", method: "POST", path: "/compras",
+        body: { proveedorId: A.proveedorId, fecha: "2026-02-02" } },
+
+      // ── Caja (C3) ────────────────────────────────────────────────────────
+      { nombre: "registrar movimiento en la sesión de A", method: "POST",
+        path: `/caja/sesiones/${A.sesionCajaId}/movimientos`,
+        body: { tipo: "ingreso_manual", medioPagoId: B.medioPagoId, importe: 100,
+                motivo: "Movimiento inyectado por otra clínica" } },
+      { nombre: "cerrar la sesión de caja de A", method: "POST",
+        path: `/caja/sesiones/${A.sesionCajaId}/cerrar`,
+        body: { efectivoContado: 0, motivo: "Cierre forzado por otra clínica" } },
+      { nombre: "abrir sesión en la caja de A", method: "POST", path: "/caja/sesiones",
+        body: { cajaId: A.cajaId, saldoInicial: 0 } },
+
+      // ── Ventas (C4) ──────────────────────────────────────────────────────
+      { nombre: "anular la venta de A", method: "POST", path: `/ventas/${A.ventaId}/anular`,
+        body: { motivo: "Anulada por un intruso de otra clínica" } },
+      { nombre: "vender el producto de A", method: "POST", path: "/ventas",
+        body: { sesionCajaId: B.sesionCajaId,
+                items: [{ tipoItem: "producto", productoId: A.productoId, cantidad: 1 }] } },
+      { nombre: "vender contra la sesión de caja de A", method: "POST", path: "/ventas",
+        body: { sesionCajaId: A.sesionCajaId,
+                items: [{ tipoItem: "producto", productoId: B.productoId, cantidad: 1 }] } },
+      { nombre: "vender el lote de A", method: "POST", path: "/ventas",
+        body: { sesionCajaId: B.sesionCajaId,
+                items: [{ tipoItem: "producto", productoId: B.productoId, cantidad: 1, loteId: A.loteId,
+                          motivoFefo: "Lote elegido a mano por un intruso" }] } },
+
+      // ── Ajustes, recuentos y devoluciones (C5) ───────────────────────────
+      { nombre: "ajustar el lote de A", method: "POST", path: "/ajustes",
+        body: { loteId: A.loteId, tipo: "salida_ajuste", cantidad: 5,
+                motivo: "Ajuste inyectado desde otra clínica" } },
+      { nombre: "bloquear el lote de A", method: "POST", path: `/lotes/${A.loteId}/bloquear`,
+        body: { motivo: "Bloqueo inyectado desde otra clínica" } },
+      { nombre: "desbloquear el lote de A", method: "POST", path: `/lotes/${A.loteId}/desbloquear`,
+        body: { motivo: "Desbloqueo inyectado desde otra clínica" } },
+      { nombre: "guardar detalles del recuento de A", method: "PUT",
+        path: `/recuentos/${A.recuentoId}/detalles`,
+        body: { items: [{ loteId: A.loteId, cantidadContada: 0 }] } },
+      { nombre: "aplicar el recuento de A", method: "POST", path: `/recuentos/${A.recuentoId}/aplicar`,
+        body: { confirmarDesvios: true } },
+      { nombre: "borrar el recuento de A", method: "DELETE", path: `/recuentos/${A.recuentoId}` },
+      { nombre: "devolver la venta de A", method: "POST", path: "/devoluciones",
+        body: { ventaId: A.ventaId, items: [{ ventaItemId: A.ventaItemId, cantidad: 1 }],
+                motivo: "Devolución inyectada desde otra clínica" } },
+
+      // ── Fraccionamiento (C6) ─────────────────────────────────────────────
+      { nombre: "fraccionar el lote de A", method: "POST", path: "/fraccionamiento",
+        body: { loteOrigenId: A.loteId, productoDestinoId: B.productoDerivadoId,
+                cantidadOrigen: 1, cantidadObtenida: 10, codigoLoteDestino: `FR-INTRUSO-${Date.now()}` } },
+      { nombre: "fraccionar hacia el producto de A", method: "POST", path: "/fraccionamiento",
+        body: { loteOrigenId: B.loteId, productoDestinoId: A.productoDerivadoId,
+                cantidadOrigen: 1, cantidadObtenida: 10, codigoLoteDestino: `FR-INTRUSO2-${Date.now()}` } },
+
+      // ── Consumo clínico (C7) ─────────────────────────────────────────────
+      { nombre: "consumir contra el evento clínico de A", method: "POST", path: "/consumos",
+        body: { historialId: A.eventoId, items: [{ productoId: B.productoId, cantidad: 1 }] } },
+      { nombre: "consumir el producto de A", method: "POST", path: "/consumos",
+        body: { historialId: B.eventoId, items: [{ productoId: A.productoId, cantidad: 1 }] } },
+      { nombre: "consumir el lote de A", method: "POST", path: "/consumos",
+        body: { historialId: B.eventoId,
+                items: [{ productoId: B.productoId, cantidad: 1, loteId: A.loteId,
+                          motivoFefo: "Lote elegido a mano por un intruso" }] } },
+    ];
+
+    const prosperaron: string[] = [];
+    for (const intento of escrituras) {
+      const { status, code } = await esperarRechazo(intento);
+      if (status < 400) prosperaron.push(`${intento.nombre} → ${status}`);
+      verificarMotivo(intento, status, code);
+    }
+
+    // El snapshot manda: el status no alcanza como prueba. Un endpoint que
+    // escribiera y DESPUÉS respondiera 404 seguiría siendo una fuga.
+    const despues = await snapshotTenant(A.tenantId);
+    const tocadas = Object.keys(antes).filter((t) => antes[t] !== despues[t]);
+
+    expect(tocadas, `tablas de A modificadas por pedidos de B: ${tocadas.join(", ")}`).toEqual([]);
+    expect(prosperaron, "escrituras comerciales de B sobre A que respondieron 2xx").toEqual([]);
+  });
 });

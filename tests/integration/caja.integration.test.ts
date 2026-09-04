@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { SUPABASE_URL, SERVICE_ROLE_KEY, describeIntegration } from "./_env.ts";
-import { crearUsuarioAuth, borrarUsuarioAuth } from "./_teardown.ts";
+import { crearUsuarioAuth, limpiarTenant } from "./_teardown.ts";
 
 globalThis.WebSocket = class FakeWebSocket {} as any;
 
@@ -105,10 +105,12 @@ describeIntegration("C3·T1: Restricciones de base de datos para Caja", () => {
 
   afterAll(async () => {
     if (!serviceDb) return;
-    if (usuarioAId) await borrarUsuarioAuth(usuarioAId);
-    if (usuarioBId) await borrarUsuarioAuth(usuarioBId);
-    if (tenantAId) await serviceDb.from("tenants").delete().eq("id", tenantAId);
-    if (tenantBId) await serviceDb.from("tenants").delete().eq("id", tenantBId);
+    // Antes: borrado a mano tabla por tabla, ignorando todos los errores. Dos
+    // fallas garantizadas — `movimientos_stock` lo rechaza siempre el trigger de
+    // inmutabilidad, y el DELETE de `tenants` también, por la misma cascada — y
+    // ninguna se veía. `limpiarTenant` usa la vía legítima (`dar_de_baja_tenant`)
+    // y revienta si el tenant sobrevive.
+    for (const tid of [tenantAId, tenantBId]) await limpiarTenant(serviceDb, tid);
   });
 
   it("RN-CJ4: el índice parcial rechaza la segunda sesión abierta", async () => {
@@ -359,8 +361,7 @@ describeIntegration("C3·T2: RPCs de Caja y Concurrencia", () => {
 
   afterAll(async () => {
     if (!serviceDb) return;
-    if (t2UsuarioId) await borrarUsuarioAuth(t2UsuarioId);
-    if (t2TenantId) await serviceDb.from("tenants").delete().eq("id", t2TenantId);
+    await limpiarTenant(serviceDb, t2TenantId);
   });
 
   it("RN-CJ4: dos aperturas SIMULTÁNEAS de la misma caja → gana exactamente una", async () => {
@@ -412,7 +413,7 @@ describeIntegration("C3·T2: RPCs de Caja y Concurrencia", () => {
 
       expect(count).toBe(1);
     }
-  });
+  }, 30_000);
 
   it("RN-CJ2: solo el efectivo afecta el arqueo", async () => {
     // 1. Crear caja

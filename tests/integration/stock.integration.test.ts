@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { SUPABASE_URL, SERVICE_ROLE_KEY, describeIntegration } from "./_env.ts";
-import { crearUsuarioAuth, borrarUsuarioAuth } from "./_teardown.ts";
+import { borrarUsuarioAuth, crearUsuarioAuth, limpiarTenant } from "./_teardown.ts";
 import { StockService } from "../../supabase/functions/api/src/modules/stock/stock.service.ts";
 
 globalThis.WebSocket = class FakeWebSocket {} as any;
@@ -148,21 +148,13 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  if (!serviceDb || !tenantAId) return;
-  await serviceDb.from("movimientos_stock").delete().eq("tenant_id", tenantAId);
-  await serviceDb.from("existencias_lote").delete().eq("tenant_id", tenantAId);
-  await serviceDb.from("lotes").delete().eq("tenant_id", tenantAId);
-  await serviceDb.from("ventas_items").delete().eq("tenant_id", tenantAId);
-  await serviceDb.from("ventas").delete().eq("tenant_id", tenantAId);
-  await serviceDb.from("sesiones_caja").delete().eq("tenant_id", tenantAId);
-  await serviceDb.from("cajas").delete().eq("tenant_id", tenantAId);
-  await serviceDb.from("compras_items").delete().eq("tenant_id", tenantAId);
-  await serviceDb.from("compras").delete().eq("tenant_id", tenantAId);
-  await serviceDb.from("productos").delete().eq("tenant_id", tenantAId);
-  await serviceDb.from("proveedores").delete().eq("tenant_id", tenantAId);
-  await serviceDb.from("usuarios").delete().eq("tenant_id", tenantAId);
-  await serviceDb.from("tenants").delete().eq("id", tenantAId);
-  if (usuarioAId) await borrarUsuarioAuth(usuarioAId);
+  if (!serviceDb) return;
+    // Antes: borrado a mano tabla por tabla, ignorando todos los errores. Dos
+    // fallas garantizadas — `movimientos_stock` lo rechaza siempre el trigger de
+    // inmutabilidad, y el DELETE de `tenants` también, por la misma cascada — y
+    // ninguna se veía. `limpiarTenant` usa la vía legítima (`dar_de_baja_tenant`)
+    // y revienta si el tenant sobrevive.
+  await limpiarTenant(serviceDb, tenantAId);
 });
 
 describeIntegration("C2·T1 — Libro mayor, lotes y existencias_lote (Base de datos)", () => {
@@ -294,6 +286,27 @@ describeIntegration("C2·T1 — Libro mayor, lotes y existencias_lote (Base de d
 
     expect(errSalida).toBeNull();
     expect(Number(movSalida?.cantidad_con_signo)).toBe(-3);
+
+    // 3. merma_fraccionamiento da signo neutro (0)
+    const { data: movMerma, error: errMerma } = await serviceDb
+      .from("movimientos_stock")
+      .insert({
+        tenant_id: tenantAId,
+        operacion_id: crypto.randomUUID(),
+        tipo: "merma_fraccionamiento",
+        producto_id: productoAId,
+        lote_id: loteAId,
+        cantidad: 2,
+        costo_unitario: 0,
+        costo_total: 0,
+        motivo: "Pérdida en fraccionamiento",
+        usuario_id: usuarioAId,
+      })
+      .select("cantidad, cantidad_con_signo")
+      .single();
+
+    expect(errMerma).toBeNull();
+    expect(Number(movMerma?.cantidad_con_signo)).toBe(0);
   });
 
   it("RN-MV5: la existencia nunca queda negativa", async () => {
@@ -701,7 +714,7 @@ describeIntegration("C2·T1 — Libro mayor, lotes y existencias_lote (Base de d
       const rowAntes = extAntes!.find((r) => r.lote_id === rowDespues.lote_id)!;
       expect(Number(rowDespues.cantidad)).toBe(Number(rowAntes.cantidad));
     }
-  });
+  }, 15000);
 
   it("RN-MV12: recalcular por producto no toca los demás", async () => {
     // 2 productos: PX y PY
