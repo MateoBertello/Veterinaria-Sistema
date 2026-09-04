@@ -11,6 +11,7 @@
 
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { execSync } from "node:child_process";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { SUPABASE_URL, SUPABASE_ANON_KEY, SERVICE_ROLE_KEY, describeIntegration } from "./_env.ts";
 import { crearUsuarioAuth, limpiarTenant } from "./_teardown.ts";
@@ -1503,20 +1504,23 @@ describe("C5·T1 / RN-SC4: Aislamiento RLS de Recuentos y Recuentos Detalle", ()
 // se pone rojo — que es exactamente la señal que se quiere.
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Las 7 vistas comerciales, con la columna que sirve para pedir una fila. */
-const VISTAS_COMERCIALES = [
-  "v_lotes_por_vencer",
-  "v_items_vendidos",
-  "v_margen_venta",
-  "v_costo_fraccionamiento",
-  "v_stock_familia_unidad_base",
-  "v_consumo_clinico",
-  "v_atenciones_sin_consumo",
-] as const;
+function obtenerVistasPublicas(): string[] {
+  const sql = "select relname from pg_class join pg_namespace on pg_namespace.oid = pg_class.relnamespace where relkind='v' and nspname='public';";
+  try {
+    const cmd = process.env.DATABASE_URL
+      ? `psql "${process.env.DATABASE_URL}" -t -A -c "${sql}"`
+      : `docker exec -i supabase_db_Veterinaria-Sistema psql -U postgres -d postgres -t -A -c "${sql}"`;
+    return execSync(cmd, { encoding: "utf8" }).trim().split("\n").map((s) => s.trim()).filter(Boolean);
+  } catch {
+    const cmd = `PGPASSWORD=postgres psql -h 127.0.0.1 -p 54322 -U postgres -d postgres -t -A -c "${sql}"`;
+    return execSync(cmd, { encoding: "utf8" }).trim().split("\n").map((s) => s.trim()).filter(Boolean);
+  }
+}
 
-describeIntegration("RLS-Vistas / RN-SC4: las 7 vistas comerciales no filtran datos de otro tenant", () => {
+describeIntegration("RLS-Vistas / RN-SC4: las vistas públicas no filtran datos de otro tenant", () => {
   /** Filas que el tenant A tiene en cada vista. Se llena en el beforeAll. */
   const filasDeA: Record<string, number> = {};
+  let vistasPublicas: string[] = [];
 
   /**
    * Insert del fixture que NO puede fallar en silencio. Sin esto, un valor de
@@ -1532,6 +1536,9 @@ describeIntegration("RLS-Vistas / RN-SC4: las 7 vistas comerciales no filtran da
 
   beforeAll(async () => {
     if (skipIfNoCredentials() || !tenantAId || !userAId) return;
+
+    vistasPublicas = obtenerVistasPublicas();
+    expect(vistasPublicas.length).toBeGreaterThan(0);
 
     const { data: u } = await serviceDb.from("unidades_medida").select("id").eq("codigo", "unidad").single();
     const unidadId = (u as { id: string })?.id;
@@ -1642,7 +1649,7 @@ describeIntegration("RLS-Vistas / RN-SC4: las 7 vistas comerciales no filtran da
 
     // Se registra cuántas filas tiene A en cada vista: si alguna quedara en 0,
     // el test de aislamiento daría verde sin haber probado nada.
-    for (const vista of VISTAS_COMERCIALES) {
+    for (const vista of vistasPublicas) {
       const { count } = await serviceDb
         .from(vista)
         .select("*", { count: "exact", head: true })
@@ -1651,25 +1658,35 @@ describeIntegration("RLS-Vistas / RN-SC4: las 7 vistas comerciales no filtran da
     }
   }, 60_000);
 
-  it("el fixture siembra datos del tenant A en las 7 vistas (si no, el test siguiente no probaría nada)", () => {
+  it("el fixture siembra datos del tenant A en las vistas comerciales del fixture (si no, el test siguiente no probaría nada)", () => {
     if (skipIfNoCredentials()) return;
-    for (const vista of VISTAS_COMERCIALES) {
-      expect(
-        filasDeA[vista],
-        `La vista ${vista} no tiene ninguna fila del tenant A: el control de aislamiento de abajo ` +
-        `daría verde por falta de datos, no por estar aislada.`,
-      ).toBeGreaterThan(0);
+    const vistasDelFixture = [
+      "v_lotes_por_vencer",
+      "v_items_vendidos",
+      "v_margen_venta",
+      "v_costo_fraccionamiento",
+      "v_stock_familia_unidad_base",
+      "v_consumo_clinico",
+      "v_atenciones_sin_consumo",
+    ];
+    for (const vista of vistasDelFixture) {
+      if (vistasPublicas.includes(vista)) {
+        expect(
+          filasDeA[vista],
+          `La vista ${vista} no tiene ninguna fila del tenant A: el control de aislamiento de abajo ` +
+          `daría verde por falta de datos, no por estar aislada.`,
+        ).toBeGreaterThan(0);
+      }
     }
   });
 
-  it("BLOQUEANTE: el usuario B no obtiene NI UNA fila del tenant A en ninguna de las 7 vistas", async () => {
+  it("BLOQUEANTE: el usuario B no obtiene NI UNA fila del tenant A en ninguna vista pública", async () => {
     if (skipIfNoCredentials()) return;
     const db = userClient(jwtB);
 
-    // Se recorren las 7 y recién al final se asevera, para que el mensaje liste
-    // TODAS las vistas que filtran y no solo la primera.
+    // Se recorren todas las vistas públicas leídas del catálogo
     const fugas: string[] = [];
-    for (const vista of VISTAS_COMERCIALES) {
+    for (const vista of vistasPublicas) {
       const { data } = await db.from(vista).select("tenant_id").eq("tenant_id", tenantAId);
       if ((data ?? []).length > 0) fugas.push(`${vista} (${(data ?? []).length} fila/s)`);
     }
@@ -1682,12 +1699,12 @@ describeIntegration("RLS-Vistas / RN-SC4: las 7 vistas comerciales no filtran da
     ).toEqual([]);
   });
 
-  it("BLOQUEANTE: authenticated no tiene SELECT sobre ninguna de las 7 vistas", async () => {
+  it("BLOQUEANTE: authenticated no tiene SELECT sobre ninguna vista pública", async () => {
     if (skipIfNoCredentials()) return;
     const db = userClient(jwtA);
 
     const legibles: string[] = [];
-    for (const vista of VISTAS_COMERCIALES) {
+    for (const vista of vistasPublicas) {
       const { error } = await db.from(vista).select("tenant_id").limit(1);
       if (error?.code !== "42501") legibles.push(`${vista} (${error?.code ?? "sin error"})`);
     }
@@ -1695,7 +1712,7 @@ describeIntegration("RLS-Vistas / RN-SC4: las 7 vistas comerciales no filtran da
     expect(
       legibles,
       `Estas vistas siguen siendo legibles por el rol authenticated: ${legibles.join(", ")}. ` +
-      `Las vistas comerciales se consultan por la API con service_role; ningún JWT de usuario ` +
+      `Las vistas se consultan por la API con service_role; ningún JWT de usuario ` +
       `debería poder pedirlas por PostgREST directo (§4.13 de la adenda).`,
     ).toEqual([]);
   });

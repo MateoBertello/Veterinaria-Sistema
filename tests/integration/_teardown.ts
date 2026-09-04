@@ -63,6 +63,54 @@ export async function borrarUsuarioAuth(userId: string): Promise<void> {
 }
 
 /**
+ * Borra una cuenta de Auth buscándola por email con paginación (perPage: 1000).
+ * Revienta si no pudo borrarla o si la cuenta sobrevive al DELETE.
+ */
+export async function borrarUsuarioAuthPorEmail(email: string): Promise<void> {
+  let page = 1;
+  const perPage = 1000;
+  let targetId: string | null = null;
+
+  while (true) {
+    const res = await fetch(`${SUPABASE_URL}/auth/v1/admin/users?page=${page}&per_page=${perPage}`, {
+      headers: adminHeaders(),
+    });
+    if (!res.ok) {
+      throw new Error(`borrarUsuarioAuthPorEmail(${email}): error al listar usuarios (pág ${page}): ${res.statusText}`);
+    }
+    const data = await res.json() as { users?: Array<{ id: string; email?: string }> };
+    const users = data.users ?? [];
+    const found = users.find((u) => u.email?.toLowerCase() === email.toLowerCase());
+    if (found) {
+      targetId = found.id;
+      break;
+    }
+    if (users.length < perPage) {
+      break;
+    }
+    page++;
+  }
+
+  if (!targetId) return;
+
+  const delRes = await fetch(`${SUPABASE_URL}/auth/v1/admin/users/${targetId}`, {
+    method: "DELETE",
+    headers: adminHeaders(),
+  });
+  if (!delRes.ok) {
+    throw new Error(`borrarUsuarioAuthPorEmail(${email}): falló DELETE ${targetId} — status ${delRes.status}: ${delRes.statusText}`);
+  }
+
+  // Verificación activa: la cuenta no puede seguir existiendo
+  const verifyRes = await fetch(`${SUPABASE_URL}/auth/v1/admin/users/${targetId}`, {
+    headers: adminHeaders(),
+  });
+  if (verifyRes.ok) {
+    throw new Error(`borrarUsuarioAuthPorEmail(${email}): la cuenta de Auth ${targetId} sigue existiendo tras el DELETE.`);
+  }
+}
+
+/**
  * Tablas de negocio con `tenant_id`, en orden hijo → padre según las FKs
  * ON DELETE RESTRICT del Apéndice DDL. Borrar una tabla vacía para ese tenant
  * es un no-op, así que correr la lista entera es seguro aunque la suite no

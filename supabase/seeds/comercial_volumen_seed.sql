@@ -72,11 +72,11 @@ BEGIN
     v_vet_uid   := ('0000bbbb-0000-0000-0000-' || substr(t_id::text, 25, 12))::uuid;
     v_recep_uid := ('0000cccc-0000-0000-0000-' || substr(t_id::text, 25, 12))::uuid;
 
-    INSERT INTO auth.users (id, instance_id, aud, role, email, encrypted_password, email_confirmed_at, raw_app_meta_data, raw_user_meta_data, created_at, updated_at)
+    INSERT INTO auth.users (id, instance_id, aud, role, email, encrypted_password, email_confirmed_at, raw_app_meta_data, raw_user_meta_data, created_at, updated_at, confirmation_token, recovery_token, email_change_token_new, email_change)
     VALUES
-      (v_admin_uid, '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'admin@' || substr(t_id::text, 1, 4) || '.com', '$2a$10$dummyhash', now(), jsonb_build_object('tenant_id', t_id, 'provider', 'email'), '{}'::jsonb, now(), now()),
-      (v_vet_uid,   '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'vet@' || substr(t_id::text, 1, 4) || '.com',   '$2a$10$dummyhash', now(), jsonb_build_object('tenant_id', t_id, 'provider', 'email'), '{}'::jsonb, now(), now()),
-      (v_recep_uid, '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'recep@' || substr(t_id::text, 1, 4) || '.com', '$2a$10$dummyhash', now(), jsonb_build_object('tenant_id', t_id, 'provider', 'email'), '{}'::jsonb, now(), now())
+      (v_admin_uid, '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'admin@' || substr(t_id::text, 1, 4) || '.com', '$2a$10$dummyhash', now(), jsonb_build_object('tenant_id', t_id, 'provider', 'email'), '{}'::jsonb, now(), now(), '', '', '', ''),
+      (v_vet_uid,   '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'vet@' || substr(t_id::text, 1, 4) || '.com',   '$2a$10$dummyhash', now(), jsonb_build_object('tenant_id', t_id, 'provider', 'email'), '{}'::jsonb, now(), now(), '', '', '', ''),
+      (v_recep_uid, '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'recep@' || substr(t_id::text, 1, 4) || '.com', '$2a$10$dummyhash', now(), jsonb_build_object('tenant_id', t_id, 'provider', 'email'), '{}'::jsonb, now(), now(), '', '', '', '')
     ON CONFLICT (id) DO NOTHING;
 
     INSERT INTO usuarios (id, tenant_id, username, email, full_name, active, rol_id)

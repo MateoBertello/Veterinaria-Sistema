@@ -286,6 +286,27 @@ describeIntegration("C2·T1 — Libro mayor, lotes y existencias_lote (Base de d
 
     expect(errSalida).toBeNull();
     expect(Number(movSalida?.cantidad_con_signo)).toBe(-3);
+
+    // 3. merma_fraccionamiento da signo neutro (0)
+    const { data: movMerma, error: errMerma } = await serviceDb
+      .from("movimientos_stock")
+      .insert({
+        tenant_id: tenantAId,
+        operacion_id: crypto.randomUUID(),
+        tipo: "merma_fraccionamiento",
+        producto_id: productoAId,
+        lote_id: loteAId,
+        cantidad: 2,
+        costo_unitario: 0,
+        costo_total: 0,
+        motivo: "Pérdida en fraccionamiento",
+        usuario_id: usuarioAId,
+      })
+      .select("cantidad, cantidad_con_signo")
+      .single();
+
+    expect(errMerma).toBeNull();
+    expect(Number(movMerma?.cantidad_con_signo)).toBe(0);
   });
 
   it("RN-MV5: la existencia nunca queda negativa", async () => {

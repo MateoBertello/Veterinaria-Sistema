@@ -82,7 +82,7 @@ no arranque, esas cinco RN efectivamente no están en el alcance de ninguna tand
 | RN-MV1 | C2·T5 | ✅ | `tests/unit/stock-ledger-guardrail.test.ts` | Guardrail estático: ningún `.from("existencias_lote").update(` ni `.insert(` en `src/modules/`. |
 | RN-MV2 | C2·T1 | ✅ | `tests/integration/stock.integration.test.ts` | Con el cliente `service_role`, `.update()` y `.delete()` sobre un movimiento devuelven `MOVEMENT_IMMUTABLE`. |
 | RN-MV3 | C2·T1 | ✅ | `tests/integration/stock.integration.test.ts` | Insertar cantidad 0 o negativa viola el CHECK. |
-| RN-MV4 | C2·T1 | ✅ | `tests/integration/stock.integration.test.ts` | `entrada_compra` da signo `+`, `salida_venta` da `−`; la columna generada no se puede escribir. |
+| RN-MV4 | C2·T1 | ✅ | `tests/integration/stock.integration.test.ts` | `entrada_compra` da signo `+`, `salida_venta` da `−`, `merma_fraccionamiento` da `0`; la columna generada no se puede escribir. |
 | RN-MV5 | C2·T1 | ✅ | `tests/integration/stock.integration.test.ts` | Forzar existencia negativa por PostgREST viola el CHECK de `existencias_lote`. La validación bajo bloqueo se cierra en C4·T2. |
 | RN-MV6 | C2·T4 | ✅ | `tests/unit/stock.service.test.ts` | Cambiar `costo_reposicion` no altera `movimientos_stock.costo_unitario` ya registrado. |
 | RN-MV7 | C2·T3 | ✅ | `tests/integration/compras.integration.test.ts` | Fallo a mitad de `confirmar_compra`: no queda ni el lote ni el movimiento. Se reverifica en C6·T1. |
@@ -211,6 +211,6 @@ del fixture de volumen versionado:
 | RN-SC3 | C1·T5 | ✅ | `tests/integration/grants.integration.test.ts` (**G3**) | Bloque que **enumera** las funciones creadas por las migraciones del módulo y verifica `has_function_privilege('anon'\|'authenticated', …) = false` para todas. Una función nueva entra sola al alcance. |
 | RN-SC4 | C1·T3 | ✅ | `tests/integration/rls.test.ts` | Con dos tenants sembrados, ninguna consulta de A devuelve filas de B en las tablas del módulo. **Bloqueante desde la primera etapa.** Se extiende en cada migración. |
 | RN-SC5 | C1·T5 | ✅ | `tests/unit/productos.service.test.ts`<br>`tests/unit/proveedores.service.test.ts` | Por tipo de operación, verificar el asiento con su `module`; si la operación falla, no queda asiento huérfano. Se reverifica en cada etapa. |
-| RN-SC6 | C1·T1 | ✅ | `tests/unit/audit-modulo-enum.test.ts` (**G2**) | Todo `module:` de `recordAudit` existe en el ENUM `modulo_auditoria` **y** en el tipo `AuditModule`. La dirección TS es nueva y es la que hoy falta. |
+| RN-SC6 | C1·T1 | ✅ | `tests/unit/audit-modulo-enum.test.ts` (**G2**) | Correspondencia bidireccional: todo `module:` de `recordAudit` y de RPCs en migraciones existe en el ENUM `modulo_auditoria`, y todo ENUM existe en el tipo `AuditModule`. |
 | RN-SC7 | C1·T5 | ✅ | `tests/unit/productos.controller.test.ts`<br>`tests/unit/proveedores.controller.test.ts` | Matriz rol × endpoint con el 403 esperado; módulo no contratado → `MODULE_NOT_LICENSED`. Se reverifica en cada etapa. |
-| RN-SC8 | C4·T5 | ✅ | `tests/integration/ventas.integration.test.ts` | Dos `.rpc("registrar_venta")` en `Promise.all` sobre un lote con existencia 1, con `rpcReallyRan()`, N repeticiones (default 50). Una tiene éxito y la otra falla con `INSUFFICIENT_STOCK`; **nunca las dos**. |
+| RN-SC8 | C4·T5 | ✅ | `tests/integration/ventas.integration.test.ts` | Dos o más `.rpc("registrar_venta")` en concurrencia con `rpcReallyRan()`: el lock `FOR UPDATE` serializa y rechaza con `INSUFFICIENT_STOCK`, sin errores de constraint CHECK. |

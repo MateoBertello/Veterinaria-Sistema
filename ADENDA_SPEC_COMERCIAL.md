@@ -144,16 +144,49 @@ cualquier error.
 
 ## §4.7 — `numero_operacion` se asigna al final del RPC
 
-*(Pendiente — corrección 2.3, Bloque 2.)*
+**Decía:** §4.7 definía el formato del identificador de operación para transacciones comerciales (ventas, compras, movimientos) generado habitualmente al inicio del procesamiento.
+
+**Dice ahora:**
+* El identificador `numero_operacion` en `ventas` es un `BIGINT` correlativo por tenant, gestionado atómicamente en la tabla `contadores_tenant` (con clave `(tenant_id, 'venta')`). La entidad `compras` no posee dicha columna.
+* La asignación del número correlativo se realiza **estrictamente al final del RPC transaccional**, una vez concluidas con éxito todas las validaciones de negocio, bloqueos de concurrencia (`FOR UPDATE` en lotes y existencias), cálculo exacto de subtotales e IVA por línea, y registro de asientos en el libro mayor.
+
+**Por qué.** Si la secuencia numérica se consume al inicio de la transacción y la operación resulta rechazada (por ejemplo, por stock insuficiente bajo concurrencia `INSUFFICIENT_STOCK`, o saldo inválido), el número queda consumido y se produce un hueco (gap) irreversible en la correlatividad temporal de las operaciones del tenant. Asignarlo inmediatamente antes del `COMMIT` o retorno del RPC garantiza numeración estrictamente contigua y sin saltos por fallos de validación o concurrencia.
+
+**Implementación:** `20261028000003_venta_numeracion_al_final.sql`. Cobertura en `tests/integration/ventas.integration.test.ts`.
 
 ---
 
 ## §6.3 RN-MV4 — El signo del movimiento tiene tres valores
 
-*(Pendiente — corrección 3.4, Bloque 3.)*
+**Decía:** RN-MV4 contemplaba únicamente dos direcciones de movimiento en `movimientos_stock`: positivo (`+1`) para entradas y negativo (`-1`) para salidas, reflejados en la columna generada `cantidad_con_signo`.
+
+**Dice ahora:** La función `signo_movimiento()` y la regla RN-MV4 establecen **tres** valores posibles para `cantidad_con_signo`:
+1. `+1` (Entradas): Incrementan el stock físico del lote (`entrada_compra`, `entrada_ajuste`, `entrada_devolucion`, `entrada_conversion`, `entrada_inicial`, `sobrante_recuento`).
+2. `-1` (Salidas): Disminuyen el stock físico del lote (`salida_venta`, `salida_ajuste`, `salida_conversion`, `salida_devolucion_proveedor`, `consumo_clinico`, `merma_vencimiento`, `merma_rotura`, `faltante_recuento`).
+3. `0` (Neutro): No altera la existencia física de mercadería ni la valuación contable del lote (`merma_fraccionamiento`).
+
+**Por qué.** En el proceso de fraccionamiento de un lote padre en hijos (C6·T1), la `salida_conversion` ya descuenta la totalidad del producto padre consumido, y la `entrada_conversion` ingresa al lote hijo únicamente las unidades útiles realmente obtenidas. La diferencia entre el rendimiento teórico y el obtenido es la merma del fraccionamiento. Registrarla con signo `-1` descontaría unidades que nunca llegaron a existir físicamente en el lote hijo, resultando en existencias negativas o saldos desvirtuados. Asignarle signo neutro (`0`) permite registrar el asiento de auditoría y trazabilidad operativa en el libro mayor sin alterar las existencias de `existencias_lote`.
+
+**Implementación:** `20261006000001_comercial_fraccionar_lote_rpc.sql`. Cobertura en `tests/integration/stock.integration.test.ts:228` (RN-MV4: verificación de los tres casos +1, -1 y 0).
 
 ---
 
 ## Nueva — Un controller test que mockea el Service no prueba el endpoint
 
-*(Pendiente — corrección 2.2, Bloque 2.)*
+**Decía:** La especificación no explicitaba el límite de responsabilidad entre los tests de controladores y los tests de servicios, lo que propiciaba pruebas unitarias de controllers que simulaban validar reglas de negocio (RN-xx) o constraints de base de datos a pesar de mockear el Service.
+
+**Dice ahora:**
+1. **Regla de oro de capas:** El Controller (ruta Hono) no contiene reglas de negocio. Su función se restringe a:
+   - Validación sintáctica de esquemas Zod (body, query, params).
+   - Verificación de contexto de tenant (`ctx.tenantId`), autenticación y permisos (`requireModule`, `requirePermission`).
+   - Mapeo de parámetros y delegación al Service correspondiente (`snake_case` ↔ `camelCase`).
+   - Formateo de respuesta mediante sobre estándar `ok()` o `fail()`.
+2. **Alcance de los tests:**
+   - Los tests de controller (`tests/unit/*.controller.test.ts`) mockean obligatoriamente el Service y prueban única y exclusivamente el transporte HTTP, la autorización y el contrato de entrada/salida.
+   - Los tests de controller **no prueban ni pueden probar reglas de negocio**: un mock que simula el resultado del Service devuelve lo programado por el test, no lo que el sistema realmente computa.
+   - Las reglas de negocio (RN-xx) se prueban en `tests/unit/*.service.test.ts`.
+   - Las reglas que estipulan *"la base rechaza X"* se prueban contra PostgreSQL real en `tests/integration/*.integration.test.ts`.
+
+**Por qué.** Un falso verde en un test de controller que mockea el Service oculta roturas graves en la lógica de negocio o en la base de datos. Mantener la frontera arquitectónica rigurosa asegura que cada suite valide lo que realmente le compete: transporte en controllers, lógica en services, e integridad transaccional y RLS en la base de datos.
+
+**Implementación:** Estructura modular en `supabase/functions/api/src/modules/` y cobertura diferenciada entre suites unitarias e integrales.

@@ -1602,7 +1602,16 @@ describeIntegration("C4·T5: Concurrencia sobre Stock Crítico (RN-SC8)", () => 
 
     resultados.forEach((r, i) => expect(rpcReallyRan(r.error), `llamada ${i}`).toBe(true));
     expect(resultados.filter(esExito)).toHaveLength(3);
-    expect(resultados.filter((r) => r.error !== null)).toHaveLength(7);
+    const fallas = resultados.filter((r) => r.error !== null);
+    expect(fallas).toHaveLength(7);
+
+    // Distinguir FOR UPDATE del CHECK constraint: ninguna llamada perdedora puede
+    // fallar por error de CHECK de la base, sino por INSUFFICIENT_STOCK lanzado por el RPC
+    for (const [i, f] of fallas.entries()) {
+      const msg = f.error?.message ?? "";
+      expect(msg, `llamada ${i}: falló con error de CHECK de base en vez de lock`).not.toMatch(/existencias_lote_cantidad_check|violates check constraint/i);
+      expect(msg, `llamada ${i}: debe fallar por INSUFFICIENT_STOCK`).toMatch(/INSUFFICIENT_STOCK/);
+    }
 
     const { data } = await serviceDb
       .from("existencias_lote")

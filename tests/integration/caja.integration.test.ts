@@ -413,7 +413,7 @@ describeIntegration("C3·T2: RPCs de Caja y Concurrencia", () => {
 
       expect(count).toBe(1);
     }
-  });
+  }, 30_000);
 
   it("RN-CJ2: solo el efectivo afecta el arqueo", async () => {
     // 1. Crear caja

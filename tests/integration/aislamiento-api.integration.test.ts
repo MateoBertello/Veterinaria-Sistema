@@ -494,7 +494,7 @@ const TABLAS_SNAPSHOT: ReadonlyArray<readonly [tabla: string, orden: string]> = 
   // suma acá. Y no es cosmético — de esta tabla depende qué se le puede
   // inyectar a un animal, así que una escritura cruzada no es solo un dato
   // ajeno: habilita una vacuna equivocada en la clínica de al lado.
-  ["especie_tipo_vacuna", "especie_id"],
+  ["especie_tipo_vacuna", "especie_id,tipo_vacuna_id"],
 
   // ── Módulo Comercial (Etapas C1..C8) ────────────────────────────────────────
   // Ni una de estas tablas estaba en la matriz: el módulo entero se mergeó sin
@@ -516,7 +516,11 @@ const TABLAS_SNAPSHOT: ReadonlyArray<readonly [tabla: string, orden: string]> = 
 async function snapshotTenant(tenantId: string): Promise<Record<string, string>> {
   const foto: Record<string, string> = {};
   for (const [tabla, orden] of TABLAS_SNAPSHOT) {
-    const { data, error } = await serviceDb.from(tabla).select("*").eq("tenant_id", tenantId).order(orden);
+    let query = serviceDb.from(tabla).select("*").eq("tenant_id", tenantId);
+    for (const col of orden.split(",").map((c) => c.trim())) {
+      query = query.order(col);
+    }
+    const { data, error } = await query;
     // Un error acá deja la foto en "[]" a ambos lados y la comparación pasa sin
     // haber mirado la tabla. Se corta en vez de dar ese verde.
     if (error) throw new Error(`snapshotTenant: no se pudo fotografiar "${tabla}": ${error.message}`);
