@@ -41,6 +41,66 @@
   --sidebar-accent-foreground: oklch(0.205 0 0);
   --sidebar-border: oklch(0.922 0 0);
   --sidebar-ring: oklch(0.708 0 0);
+
+  /* ── Sistema visual Leo — superficie de marca y acentos de métrica ─────────
+     Estas variables son la ÚNICA fuente de los degradados, acentos, superficies
+     suaves y elevaciones que usan la tarjeta de bienvenida y las tarjetas de
+     métrica. No repetir el literal en un componente: si un valor aparece dos
+     veces, va acá.
+
+     Los valores no son estéticos a ojo: están medidos contra el texto que se
+     apoya encima (WCAG 2.1 SC 1.4.3, 4.5:1). Ver docs/GUIA_ESTILO.md §1 por la
+     tabla de mediciones. El naranja de marca #f97316 se mantiene como identidad
+     (logo, iconografía, tints), pero NO puede ser fondo de texto blanco: da
+     2.80:1. Por eso el degradado arranca en orange-700. */
+
+  /* Degradado de marca. Ambas paradas y todo punto intermedio dan >= 4.5:1
+     contra blanco (peor punto 5.18:1, en la parada clara). */
+  --brand-gradient-from: #c2410c; /* orange-700 — blanco 5.18:1 */
+  --brand-gradient-to:   #9a3412; /* orange-800 — blanco 7.51:1 */
+  --brand-gradient: linear-gradient(
+    105deg,
+    var(--brand-gradient-from) 0%,
+    var(--brand-gradient-to) 100%
+  );
+  /* Tintas sobre el degradado. La bajada usa orange-100 y no orange-200:
+     #fed7aa da 3.83:1 sobre la parada clara y no pasa. */
+  --brand-on-gradient:       #ffffff; /* 5.18:1 */
+  --brand-on-gradient-muted: #ffedd5; /* orange-100 — 4.52:1 */
+  /* Superficie de los chips sobre el degradado. Va en NEGRO translúcido, no en
+     blanco: un velo blanco aclara el fondo y hunde el contraste del texto
+     blanco a 3.73:1. El velo negro lo sube a 7.27:1. */
+  --brand-chip-surface: rgb(0 0 0 / 0.20);
+  --brand-chip-border:  rgb(255 255 255 / 0.28);
+
+  /* Acentos de métrica: borde izquierdo (línea), superficie del chip del icono
+     y tinta del icono. La tinta sobre su superficie da >= 6.3:1; la línea sobre
+     card blanca da >= 5:1 (holgado sobre el 3:1 de SC 1.4.11 para no-texto). */
+  --metric-brand:           #c2410c;
+  --metric-brand-surface:   #ffedd5;
+  --metric-brand-ink:       #9a3412;
+  --metric-amber:           #b45309;
+  --metric-amber-surface:   #fef3c7;
+  --metric-amber-ink:       #92400e;
+  --metric-info:            #1d4ed8;
+  --metric-info-surface:    #dbeafe;
+  --metric-info-ink:        #1e40af;
+  --metric-success:         #047857;
+  --metric-success-surface: #d1fae5;
+  --metric-success-ink:     #065f46;
+  --metric-special:         #6d28d9;
+  --metric-special-surface: #ede9fe;
+  --metric-special-ink:     #5b21b6;
+
+  /* Elevación. Tres escalones y nada más: reposo, hover de tarjeta enlazada y
+     la superficie de marca, que flota sobre el resto del panel. */
+  --elevation-card:       0 1px 2px 0 rgb(24 24 27 / 0.04), 0 1px 3px 0 rgb(24 24 27 / 0.06);
+  --elevation-card-hover: 0 2px 4px -1px rgb(24 24 27 / 0.06), 0 8px 16px -4px rgb(24 24 27 / 0.10);
+  --elevation-brand:      0 4px 6px -2px rgb(154 52 18 / 0.15), 0 12px 24px -6px rgb(154 52 18 / 0.25);
+
+  /* Radio de la superficie de marca: un escalón por encima de la card (rounded-xl)
+     para que lea como panel y no como una tarjeta más de la grilla. */
+  --surface-radius: calc(var(--radius) + 0.5rem);
 }
 
 .dark {
@@ -78,6 +138,34 @@
   --sidebar-accent-foreground: oklch(0.985 0 0);
   --sidebar-border: oklch(0.269 0 0);
   --sidebar-ring: oklch(0.439 0 0);
+
+  /* Sistema visual Leo en oscuro. OJO: hoy es código inalcanzable — nada en la
+     app agrega la clase `.dark` al <html> (no hay ThemeProvider montado; ver
+     main.tsx). Se define igual para que el bloque de tokens no quede a medias
+     si algún día se enciende, con el mismo criterio del kit heredado, que ya
+     trae variantes `dark:` sin conmutador. Sin medición de contraste real:
+     cuando el modo oscuro se encienda, hay que volver a medir. */
+  --brand-gradient-from: #9a3412;
+  --brand-gradient-to:   #7c2d12;
+  --brand-on-gradient:       #ffffff;
+  --brand-on-gradient-muted: #fed7aa;
+  --brand-chip-surface: rgb(0 0 0 / 0.30);
+  --brand-chip-border:  rgb(255 255 255 / 0.22);
+
+  --metric-brand-surface:   oklch(0.28 0.06 45);
+  --metric-brand-ink:       #fed7aa;
+  --metric-amber-surface:   oklch(0.28 0.05 75);
+  --metric-amber-ink:       #fde68a;
+  --metric-info-surface:    oklch(0.28 0.06 265);
+  --metric-info-ink:        #bfdbfe;
+  --metric-success-surface: oklch(0.28 0.05 165);
+  --metric-success-ink:     #a7f3d0;
+  --metric-special-surface: oklch(0.28 0.06 300);
+  --metric-special-ink:     #ddd6fe;
+
+  --elevation-card:       0 1px 2px 0 rgb(0 0 0 / 0.40), 0 1px 3px 0 rgb(0 0 0 / 0.30);
+  --elevation-card-hover: 0 2px 4px -1px rgb(0 0 0 / 0.45), 0 8px 16px -4px rgb(0 0 0 / 0.40);
+  --elevation-brand:      0 4px 6px -2px rgb(0 0 0 / 0.45), 0 12px 24px -6px rgb(0 0 0 / 0.50);
 }
 
 @theme inline {
@@ -119,4 +207,35 @@
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
+
+  /* Sistema visual Leo → utilidades de Tailwind. `--color-*` habilita
+     bg-/text-/border-; `--shadow-*` habilita shadow-. El degradado no se mapea:
+     se referencia como bg-[image:var(--brand-gradient)] para que el token siga
+     siendo el único lugar donde vive el valor. */
+  --color-brand-on-gradient:       var(--brand-on-gradient);
+  --color-brand-on-gradient-muted: var(--brand-on-gradient-muted);
+  --color-brand-chip-surface:      var(--brand-chip-surface);
+  --color-brand-chip-border:       var(--brand-chip-border);
+
+  --color-metric-brand:           var(--metric-brand);
+  --color-metric-brand-surface:   var(--metric-brand-surface);
+  --color-metric-brand-ink:       var(--metric-brand-ink);
+  --color-metric-amber:           var(--metric-amber);
+  --color-metric-amber-surface:   var(--metric-amber-surface);
+  --color-metric-amber-ink:       var(--metric-amber-ink);
+  --color-metric-info:            var(--metric-info);
+  --color-metric-info-surface:    var(--metric-info-surface);
+  --color-metric-info-ink:        var(--metric-info-ink);
+  --color-metric-success:         var(--metric-success);
+  --color-metric-success-surface: var(--metric-success-surface);
+  --color-metric-success-ink:     var(--metric-success-ink);
+  --color-metric-special:         var(--metric-special);
+  --color-metric-special-surface: var(--metric-special-surface);
+  --color-metric-special-ink:     var(--metric-special-ink);
+
+  --shadow-card:       var(--elevation-card);
+  --shadow-card-hover: var(--elevation-card-hover);
+  --shadow-brand:      var(--elevation-brand);
+
+  --radius-surface: var(--surface-radius);
 }
