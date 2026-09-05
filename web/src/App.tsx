@@ -41,6 +41,7 @@ import { VencimientosPage } from "./pages/VencimientosPage.tsx";
 import { ComprasPage } from "./pages/ComprasPage.tsx";
 import { CompraDetallePage } from "./pages/CompraDetallePage.tsx";
 import { CajaPage } from "./pages/CajaPage.tsx";
+import { ArqueoCajaPage } from "./pages/ArqueoCajaPage.tsx";
 import { PantallaEnConstruccion } from "./components/comercial/PantallaEnConstruccion.tsx";
 import { AccessibilityButton } from "./components/accesibilidad/AccessibilityButton.tsx";
 import { Button } from "./components/ui/button.tsx";
@@ -425,7 +426,7 @@ export function App() {
             path="/ventas/caja/:sesionId"
             element={
               <RequirePermission permission="manage_cash">
-                <PantallaEnConstruccion titulo="Detalle de Sesión de Caja" />
+                <ArqueoCajaPage />
               </RequirePermission>
             }
           />
