@@ -42,6 +42,7 @@ import { ComprasPage } from "./pages/ComprasPage.tsx";
 import { CompraDetallePage } from "./pages/CompraDetallePage.tsx";
 import { CajaPage } from "./pages/CajaPage.tsx";
 import { ArqueoCajaPage } from "./pages/ArqueoCajaPage.tsx";
+import { MostradorPage } from "./pages/MostradorPage.tsx";
 import { PantallaEnConstruccion } from "./components/comercial/PantallaEnConstruccion.tsx";
 import { AccessibilityButton } from "./components/accesibilidad/AccessibilityButton.tsx";
 import { Button } from "./components/ui/button.tsx";
@@ -394,7 +395,7 @@ export function App() {
             path="/ventas"
             element={
               <RequirePermission permission="manage_sales">
-                <PantallaEnConstruccion titulo="Mostrador de Ventas" />
+                <MostradorPage />
               </RequirePermission>
             }
           />
