@@ -126,10 +126,8 @@ describe("ExistenciasPage (F2·T1)", () => {
       </MemoryRouter>,
     );
 
-    await screen.findByText("Existencias de Stock");
-
     // El contador de productos debe decir 10 productos, nunca 30
-    expect(screen.getByText(/10 productos/i)).toBeInTheDocument();
+    expect(await screen.findByText(/10 productos/i)).toBeInTheDocument();
     expect(screen.queryByText(/30 productos/i)).not.toBeInTheDocument();
   });
 
