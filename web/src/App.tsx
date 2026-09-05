@@ -31,6 +31,7 @@ import { RegistrarEstadiaPage } from "./pages/RegistrarEstadiaPage.tsx";
 import { UsuariosPage } from "./pages/UsuariosPage.tsx";
 import { AuditoriaPage } from "./pages/AuditoriaPage.tsx";
 import { PreferenciasPage } from "./pages/PreferenciasPage.tsx";
+import { CargaPreciosPage } from "./pages/CargaPreciosPage.tsx";
 import { PantallaEnConstruccion } from "./components/comercial/PantallaEnConstruccion.tsx";
 import { AccessibilityButton } from "./components/accesibilidad/AccessibilityButton.tsx";
 import { Button } from "./components/ui/button.tsx";
@@ -299,7 +300,7 @@ export function App() {
             path="/stock/productos/precios"
             element={
               <RequirePermission permission="manage_products">
-                <PantallaEnConstruccion titulo="Carga Asistida de Precios" />
+                <CargaPreciosPage />
               </RequirePermission>
             }
           />

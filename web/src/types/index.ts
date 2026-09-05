@@ -196,6 +196,8 @@ export interface Servicio {
   descripcion:         string | null;
   activo:              boolean;
   createdAt:           string;
+  precio?:             number | null;
+  alicuotaIva?:        number;
 }
 
 export interface ServicioInput {
@@ -204,7 +206,11 @@ export interface ServicioInput {
   duracionMinutos:     number;
   requiereProfesional: boolean;
   descripcion?:        string | null;
+  precio?:             number | null;
+  alicuotaIva?:        number;
 }
+
+export type ActualizarServicioInput = Partial<ServicioInput>;
 
 // ─── Turnos ─────────────────────────────────────────────────────────────────
 

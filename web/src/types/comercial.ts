@@ -5,6 +5,9 @@
 
 // ─── Enums con valores exactos de la base / backend ──────────────────────────
 
+export const ALICUOTAS_IVA = [0, 10.5, 21, 27] as const;
+export type AlicuotaIva = (typeof ALICUOTAS_IVA)[number];
+
 export type CondicionVenta =
   | "libre"
   | "bajo_receta"

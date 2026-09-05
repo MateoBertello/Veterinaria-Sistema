@@ -33,7 +33,7 @@ export function crearServicio(input: ServicioInput): Promise<Servicio> {
 }
 
 /** PUT /servicios/{id} — edición de servicio. */
-export function editarServicio(id: string, input: ServicioInput): Promise<Servicio> {
+export function editarServicio(id: string, input: Partial<ServicioInput>): Promise<Servicio> {
   return apiClient<Servicio>(`/servicios/${id}`, {
     method: "PUT",
     body: JSON.stringify(input),
