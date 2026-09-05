@@ -47,29 +47,47 @@ mostrador no lleva alícuota, y el workaround no se saca nunca.
 
 1. `precio` y `alicuotaIva` en `CrearServicioSchema` y `ActualizarServicioSchema`.
 2. El mapeo de ida y vuelta en `servicios.service.ts` (escritura + `ServicioPublico`).
-3. **Corrección del bug #5:** `productos.controller.ts` no lee `c.req.query("codigoBarras")`,
+3. **Smoke de camino feliz contra base real**, no un controller test con el Service mockeado
+   — ver `ADENDA_SPEC_COMERCIAL.md`, sección *"Nueva — Un controller test que mockea el
+   Service no prueba el endpoint"*.
+4. Entrada en `tests/integration/aislamiento-api.integration.test.ts`: el caso de escritura
+   de `servicios` ya existe (`editar servicio`, PUT `/servicios/:id`); hay que extenderlo para
+   que el body lleve `precio`/`alicuotaIva` y siga dando 404 contra el servicio de otro tenant.
+5. **Corrección del bug #5:** `productos.controller.ts` no lee `c.req.query("codigoBarras")`,
    así que el filtro existe en `ListarProductosQuerySchema` y en `ProductoService.buscarPaginado`
    y no hace nada. Es una línea. El match parcial de `search` sobre un escáner devuelve
    resultados equivocados con códigos que comparten prefijo.
-4. **Smoke de camino feliz contra base real**, no un controller test con el Service mockeado
-   — ver `ADENDA_SPEC_COMERCIAL.md`, sección *"Nueva — Un controller test que mockea el
-   Service no prueba el endpoint"*.
-5. Entrada en `tests/integration/aislamiento-api.integration.test.ts`: el caso de escritura
-   de `servicios` ya existe (`editar servicio`, PUT `/servicios/:id`); hay que extenderlo para
-   que el body lleve `precio`/`alicuotaIva` y siga dando 404 contra el servicio de otro tenant.
+
+> **B0.3 y B0.4 resuelven el licenciamiento en el seed.** Los dos corren contra base real y
+> por lo tanto se llevan la habilitación de `stock` y `ventas` a la siembra, donde
+> corresponde. Es lo que convierte a la tanda 0a de una tarea manual de consola en una simple
+> verificación (§0.2).
 
 Prompt: `prompts_frontend/B0_backend_precio_servicio.md`.
 
-### 0.2 — 0a: setup del tenant de prueba (MANUAL, sin código)
+### 0.2 — 0a: verificación del tenant de prueba (sin código, sin consola)
 
-Sin esto, todo endpoint comercial devuelve `403 MODULE_NOT_LICENSED` y va a parecer un bug
-del frontend. No hay nada que construir: el camino ya existe.
+**Ya no es un paso manual.** El licenciamiento lo resuelve el seed, por dos caminos que se
+refuerzan:
 
-1. Entrar a la consola Super Admin (`/admin/login`).
-2. Tenant de prueba → detalle → habilitar **Stock** y **Ventas**
-   (`PUT /api/v1/admin/tenants/:id/modulos/:modulo`).
-3. Volver a entrar con un usuario del tenant y confirmar que el sidebar muestra los dos
-   ítems nuevos bajo *Módulos contratados*.
+- `crear_tenant` (migración `20260901000002_comercial_permisos_licenciamiento.sql`, paso 6)
+  **ya inserta `stock` y `ventas` en `modulos_contratados` según el plan**: `stock` para
+  `profesional` y `premium`, `ventas` solo para `premium`. Y el paso 4 de la misma migración
+  hace el backfill de los tenants que ya existían.
+- `scripts/seed.mjs` crea el tenant de demo con **`plan: "premium"`**, así que los cinco
+  módulos vendibles quedan habilitados solos.
+- B0.3 y B0.4 se apoyan en eso para su fixture, que es lo que lo deja fijado por un test en
+  vez de por una convención.
+
+Entonces 0a se reduce a **comprobar que el entorno quedó bien** antes de empezar F1. Si algo
+de esto falla, el problema es del seed o del plan del tenant, no de las pantallas:
+
+```
+1. Entrar con un usuario del tenant de prueba (login normal, no /admin/login).
+2. GET /api/v1/productos    → 200   (si da 403 MODULE_NOT_LICENSED, falta `stock`)
+3. GET /api/v1/caja/cajas   → 200   (si da 403, falta `ventas`: son dos módulos distintos)
+4. El sidebar muestra Stock y Ventas bajo *Módulos contratados*.
+```
 
 `web/src/lib/navigation.ts` y `web/src/lib/planes.ts` **ya conocen** `stock` y `ventas`, y
 `buildNavItems` ya oculta el módulo no contratado (RN-G2). No se toca ninguno de los dos.
@@ -307,7 +325,7 @@ Orden de ejecución. Una por sesión, un commit por tanda.
 | # | Tanda | Qué entrega | Depende de |
 |---|---|---|---|
 | — | **B0** | dos campos de servicio + fix `codigoBarras` (BACKEND, bloqueado) | merge + re-auditoría |
-| — | **0a** | setup del tenant (manual, sin código) | — |
+| — | **0a** | verificación del tenant (sin código; el seed ya licencia) | B0 |
 | 1 | **F1·T1** | capa de datos comercial, tipos, rutas y gating | B0, 0a |
 | 2 | **0b** | carga asistida de precios ← *la tanda cero* | F1·T1 |
 | 3 | **F1·T2** | pantalla Productos | F1·T1 |

@@ -1,7 +1,7 @@
 # B0 — Precio y alícuota de servicio en la API (+ fix de `codigoBarras`)
 > **Capa:** BACKEND · **Modelo:** Gemini Flash · **Rol:** ejecución
 > **NO SE EJECUTA TODAVÍA.** Bloqueada hasta que `feat/modulo-comercial` esté mergeada y
-> re-auditada (Gemini está corrigiendo los bloques 2 y 3 sobre esa rama).
+> re-auditada (Gemini está corrigiendo los bloques 2 y 3 sobre esa rama). B0 va después.
 > **Es prerrequisito duro de F1.** Sin B0, la tanda 0b no puede cargar precios de servicios
 > y el mostrador no puede venderlos sin romper D-03.
 
@@ -13,6 +13,7 @@
 | `supabase/functions/api/src/modules/servicios/servicios.service.ts` | `ServicioPublico`, el mapper de fila y los `insert`/`update`. |
 | `supabase/migrations/20260922000001_comercial_ventas.sql` líneas 13–16 | El DDL real de las dos columnas. **No lo modifiques**: ya está aplicado. |
 | `supabase/migrations/20260922000002_comercial_registrar_venta_rpc.sql` líneas 198–222 | Cómo la RPC lee `precio` y `alicuota_iva`, y cuándo lanza `PRODUCT_WITHOUT_PRICE`. |
+| `supabase/migrations/20260901000002_comercial_permisos_licenciamiento.sql` pasos 4 y 6 | Cómo se licencian `stock` y `ventas` por plan. Lo necesitás para el fixture de 1.3 y 1.4. |
 | `supabase/functions/api/src/modules/productos/productos.schemas.ts` | `ALICUOTAS_IVA`: la lista y el mensaje de error a replicar tal cual. |
 | `supabase/functions/api/src/modules/productos/productos.controller.ts` | El `ListarProductosQuerySchema.safeParse({...})` del GET `/` — ahí falta una línea. |
 | `ADENDA_SPEC_COMERCIAL.md`, sección *"Nueva — Un controller test que mockea el Service no prueba el endpoint"* | Por qué el test de esta tanda va contra base real. |
@@ -31,9 +32,9 @@
 - Esta tanda NO toca RPCs, ni RLS, ni políticas, ni grants.
 ```
 
-## 1. Qué hacer — cuatro cambios, ninguno con margen de interpretación
+## 1. Qué hacer — cinco cambios, ninguno con margen de interpretación
 
-### 1.1 — `servicios.schemas.ts`
+### B0.1 — `servicios.schemas.ts`
 
 Agregar a `CrearServicioSchema` (y por lo tanto a `ActualizarServicioSchema`, que es
 `.partial()` del anterior — no lo dupliques):
@@ -56,7 +57,7 @@ esto devuelve un 422 legible en vez de un 500 con el mensaje de Postgres.
 `precio` es `nullish` a propósito: un servicio sin precio cargado es un estado válido — la
 RPC lo rechaza recién al vender.
 
-### 1.2 — `servicios.service.ts`
+### B0.2 — `servicios.service.ts`
 
 Tres puntos, y solo tres:
 
@@ -71,7 +72,52 @@ Tres puntos, y solo tres:
 **No cambies nada más de este archivo.** Ni `assertDuracion`, ni la pre-query de RN-SV2, ni el
 `select("*")`.
 
-### 1.3 — Fix del filtro `codigoBarras` muerto (`productos.controller.ts`)
+### B0.3 — Smoke de camino feliz **contra base real**
+
+`tests/integration/servicios.integration.test.ts`. **No** un controller test con el Service
+mockeado: eso no prueba el endpoint (ver la adenda). Con `callApp` y un JWT real:
+
+```
+POST /servicios  { nombre, tipo, duracionMinutos, requiereProfesional, precio: 1500, alicuotaIva: 21 }
+  → 201, y data.precio === 1500 (number, no "1500.00")
+GET  /servicios/:id
+  → 200, precio 1500, alicuotaIva 21
+PUT  /servicios/:id  { precio: 1800 }
+  → 200, precio 1800, y duracionMinutos SIN cambiar
+GET  /servicios?limit=100
+  → el servicio aparece con su precio en el listado
+```
+
+Y el caso que cierra el círculo con la razón de ser de B0:
+
+```
+POST /ventas con un ítem { tipoItem: "servicio", servicioId } SIN precioUnitario
+  → 201 (antes de B0 esto era imposible: precio era NULL y la RPC tiraba
+     PRODUCT_WITHOUT_PRICE). Verificar que la línea guardada tiene la alícuota
+     del servicio, que es lo que D-03 exige.
+```
+
+**El fixture licencia los módulos, y ahí es donde queda resuelto el problema del tenant de
+prueba.** El tenant que crea este test tiene que tener `stock` y `ventas` habilitados en
+`modulos_contratados`, o el `POST /ventas` de arriba devuelve `403 MODULE_NOT_LICENSED` y el
+smoke no prueba nada. La forma correcta es **crear el tenant con plan `premium`**, que es lo
+que hace `crear_tenant` (paso 6 de `20260901000002`): licencia los cinco módulos vendibles
+sin que el fixture escriba en `modulos_contratados` a mano. Si el helper de fixture existente
+crea el tenant con otro plan, pasale `premium`; no parchees la tabla por afuera.
+
+### B0.4 — Matriz de aislamiento
+
+`tests/integration/aislamiento-api.integration.test.ts`: el caso
+`{ nombre: "editar servicio", method: "PUT", path: /servicios/${A.servicioId} }` ya existe.
+Extendé su body para que lleve `precio` y `alicuotaIva`, y confirmá que sigue dando **404**
+cuando el JWT es del tenant B. Un precio no puede ser el vector que abra la escritura
+cross-tenant.
+
+**Mismo requisito de licenciamiento que B0.3:** los dos tenants del fixture (A y B) se crean
+con plan `premium`, así los casos comerciales de la matriz corren de verdad en vez de morir
+en el `requireModule`.
+
+### B0.5 — Fix del filtro `codigoBarras` muerto (`productos.controller.ts`)
 
 `ListarProductosQuerySchema` declara `codigoBarras` y `ProductoService.buscarPaginado` lo
 aplica (`q.eq("codigo_barras", query.codigoBarras)`), pero el controller **nunca lo lee**. En
@@ -88,43 +134,17 @@ equivocado.
 **Cuidado con el fallback:** el objeto literal del `else` (cuando el parseo falla) también
 tiene que incluir `codigoBarras: undefined`, o TypeScript se queja del tipo.
 
-### 1.4 — Tests
+Sumale al smoke de B0.3 el caso: dos productos cuyos códigos de barras compartan prefijo
+(`7791234567890` y `77912345678901`), y `GET /productos?codigoBarras=7791234567890` devuelve
+**uno solo**.
 
-**a) Unit del Service** (`tests/unit/servicios.service.test.ts`, extendiendo el que ya está):
+### B0.6 — Unit del Service
+
+`tests/unit/servicios.service.test.ts`, extendiendo el que ya está:
 - `RN-SV: crea un servicio con precio y alícuota y los devuelve como number`
 - `RN-SV: rechaza una alícuota fuera de {0, 10.50, 21, 27} → VALIDATION_ERROR`
 - `RN-SV: actualizar sin tocar precio no lo pisa` (el `undefined` no entra al payload)
 - `RN-SV: actualizar con precio null lo borra`
-
-**b) Smoke de camino feliz CONTRA BASE REAL** (`tests/integration/servicios.integration.test.ts`).
-**No** un controller test con el Service mockeado: eso no prueba el endpoint (ver la adenda).
-El smoke hace, con `callApp` y un JWT real, el ciclo completo:
-
-```
-POST /servicios  { nombre, tipo, duracionMinutos, requiereProfesional, precio: 1500, alicuotaIva: 21 }
-  → 201, y data.precio === 1500 (number, no "1500.00")
-GET  /servicios/:id
-  → 200, precio 1500, alicuotaIva 21
-PUT  /servicios/:id  { precio: 1800 }
-  → 200, precio 1800, y duracionMinutos SIN cambiar
-GET  /servicios?limit=100
-  → el servicio aparece con su precio en el listado
-```
-
-Y un caso que cierra el círculo con la razón de ser de B0:
-
-```
-POST /ventas con un ítem { tipoItem: "servicio", servicioId } SIN precioUnitario
-  → 201 (antes de B0 esto era imposible: precio era NULL y la RPC tiraba
-     PRODUCT_WITHOUT_PRICE). Verificar que la línea guardada tiene la alícuota
-     del servicio, que es lo que D-03 exige.
-```
-
-**c) Matriz de aislamiento** (`tests/integration/aislamiento-api.integration.test.ts`):
-el caso `{ nombre: "editar servicio", method: "PUT", path: /servicios/${A.servicioId} }` ya
-existe. Extendé su body para que lleve `precio` y `alicuotaIva`, y confirmá que sigue dando
-**404** cuando el JWT es del tenant B. Un precio no puede ser el vector que abra la escritura
-cross-tenant.
 
 ## 2. Prohibido en esta tanda
 
@@ -132,6 +152,7 @@ cross-tenant.
 - Crear migraciones. Las columnas ya existen y ya están aplicadas.
 - Tocar registrar_venta ni ningún otro RPC.
 - Tocar RLS, políticas o grants de `servicios`.
+- Escribir en modulos_contratados a mano desde un fixture. El plan del tenant lo resuelve.
 - Cambiar la forma del envelope o los ErrorCode.
 - Tocar cualquier archivo de web/.
 - "Aprovechar el viaje" para arreglar otra cosa del módulo servicios.
@@ -140,8 +161,10 @@ cross-tenant.
 ## 3. Definición de terminado
 
 1. `npm run typecheck` en verde.
-2. `npm test` en verde (los unit nuevos incluidos).
+2. `npm test` en verde (los unit de B0.6 incluidos).
 3. `npm run test:integration` en verde, con **0 skipped** en `servicios.integration.test.ts`
    y en `aislamiento-api.integration.test.ts`. Contá los `passed`: una suite SKIPPED no es
    un rojo pero tampoco es una prueba (faltan `TEST_SUPABASE_*` en `.env`).
-4. Un commit: `fix(servicios): precio y alícuota por API + filtro codigoBarras [B0]`
+4. **La tanda 0a pasa su verificación**: con el seed corrido, `GET /api/v1/productos` y
+   `GET /api/v1/caja/cajas` devuelven 200 con un usuario del tenant de demo.
+5. Un commit: `fix(servicios): precio y alícuota por API + filtro codigoBarras [B0]`
