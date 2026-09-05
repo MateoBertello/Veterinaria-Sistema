@@ -1,10 +1,15 @@
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
 import {
   AlertCircle,
+  AlertTriangle,
+  ArrowRight,
   Check,
-  ChevronRight,
+  CheckCircle2,
   ChevronsUpDown,
+  Coins,
+  CreditCard,
+  Layers,
   Lock,
   Package,
   PawPrint,
@@ -27,6 +32,15 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../co
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs.tsx";
 import { Skeleton } from "../components/ui/skeleton.tsx";
 import { Popover, PopoverContent, PopoverTrigger } from "../components/ui/popover.tsx";
+import { Textarea } from "../components/ui/textarea.tsx";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "../components/ui/dialog.tsx";
 import {
   Command,
   CommandEmpty,
@@ -45,6 +59,8 @@ import {
 import { useAuth } from "../auth/AuthContext.tsx";
 import { sesionActual } from "../api/comercial/caja.ts";
 import { listarFamilias, listarProductos } from "../api/comercial/productos.ts";
+import { candidatosFefo } from "../api/comercial/stock.ts";
+import { registrarVenta } from "../api/comercial/ventas.ts";
 import { listarMediosPago, listarServiciosVendibles, listarUnidadesMedida } from "../api/catalogos-comercial.ts";
 import { listarClientes } from "../api/clientes.ts";
 import { listarMascotas } from "../api/mascotas.ts";
@@ -53,8 +69,12 @@ import type {
   Cliente,
   CondicionPago,
   Familia,
+  LoteCandidato,
   Mascota,
+  MedioPago,
   Producto,
+  RegistrarVentaInput,
+  ResultadoVenta,
   ServicioVendible,
   SesionCaja,
   UnidadMedida,
@@ -82,11 +102,21 @@ export interface CartItem {
   unidadMedidaId?: string | null;
   admiteDecimales?: boolean;
   escalaDecimal?: number;
-  // Campos reservados para FEFO (F4·T2)
+  // Campos de FEFO (F4·T2)
+  candidatos?: LoteCandidato[];
+  loadingLotes?: boolean;
   loteId?: string | null;
-  motivoFefo?: string | null;
+  motivoFefo?: string;
   loteSugeridoId?: string | null;
   sinStock?: boolean;
+  stockInsuficiente?: boolean;
+}
+
+export interface PagoFormItem {
+  id: string;
+  medioPagoId: string;
+  importe: number;
+  referencia: string;
 }
 
 export function formatMoneda(valor: number): string {
@@ -114,6 +144,7 @@ function guardarFavoritos(userId: string, items: FavoritoItem[]): void {
 }
 
 export function MostradorPage() {
+  const navigate = useNavigate();
   const { user } = useAuth();
   const userId = user?.id || "anon";
   const tieneManageCash = Boolean(user?.permissions?.includes("manage_cash"));
@@ -126,6 +157,7 @@ export function MostradorPage() {
   // Catálogos auxiliares
   const [familias, setFamilias] = useState<Familia[]>([]);
   const [unidades, setUnidades] = useState<UnidadMedida[]>([]);
+  const [mediosPago, setMediosPago] = useState<MedioPago[]>([]);
 
   // Búsqueda y catálogo de productos
   const [activeTab, setActiveTab] = useState<"productos" | "servicios">("productos");
@@ -154,6 +186,17 @@ export function MostradorPage() {
   const [clienteQuery, setClienteQuery] = useState("");
   const [clientesSugeridos, setClientesSugeridos] = useState<Cliente[]>([]);
 
+  // Modal de cobro (F4·T2)
+  const [cobroDialogOpen, setCobroDialogOpen] = useState(false);
+  const [pagos, setPagos] = useState<PagoFormItem[]>([]);
+  const [observacionesVenta, setObservacionesVenta] = useState("");
+  const [submittingVenta, setSubmittingVenta] = useState(false);
+  const [errorCobro, setErrorCobro] = useState<string | null>(null);
+
+  // Modal de éxito (F4·T2)
+  const [exitoDialogOpen, setExitoDialogOpen] = useState(false);
+  const [resultadoVenta, setResultadoVenta] = useState<ResultadoVenta | null>(null);
+
   // 1. Cargar sesión de caja inicial
   const verificarCaja = useCallback(async () => {
     setCajaLoading(true);
@@ -180,16 +223,18 @@ export function MostradorPage() {
     return () => clearTimeout(timer);
   }, [search]);
 
-  // 3. Cargar familias y unidades de medida (una sola vez si hay caja)
+  // 3. Cargar familias, unidades de medida y medios de pago (una sola vez si hay caja)
   useEffect(() => {
     if (!sesion) return;
     Promise.all([
       listarFamilias({ activo: true, limit: 100 }),
       listarUnidadesMedida(),
+      listarMediosPago(),
     ])
-      .then(([famRes, uniRes]) => {
+      .then(([famRes, uniRes, medRes]) => {
         setFamilias(famRes.items);
         setUnidades(uniRes);
+        setMediosPago(medRes);
       })
       .catch(() => {
         // Fallback silencioso
@@ -267,6 +312,48 @@ export function MostradorPage() {
       .catch(() => setClientesSugeridos([]));
   }, [clienteOpen, clienteQuery]);
 
+  // Función para consultar candidatos FEFO para un producto
+  const consultarLotesFefo = useCallback(async (productoId: string, cantidad: number, uid: string) => {
+    setCart((prev) =>
+      prev.map((it) => (it.uid === uid ? { ...it, loadingLotes: true } : it)),
+    );
+    try {
+      const lotes = await candidatosFefo({ productoId, cantidad });
+      setCart((prev) =>
+        prev.map((it) => {
+          if (it.uid !== uid) return it;
+          if (lotes.length === 0) {
+            return {
+              ...it,
+              loadingLotes: false,
+              candidatos: [],
+              sinStock: true,
+              loteId: null,
+              loteSugeridoId: null,
+              motivoFefo: "",
+            };
+          }
+          const primerLote = lotes[0];
+          const sumaStock = lotes.reduce((acc, l) => acc + l.cantidadDisponible, 0);
+          return {
+            ...it,
+            loadingLotes: false,
+            candidatos: lotes,
+            sinStock: false,
+            stockInsuficiente: sumaStock < cantidad,
+            loteId: primerLote.loteId,
+            loteSugeridoId: primerLote.loteId,
+            motivoFefo: "",
+          };
+        }),
+      );
+    } catch {
+      setCart((prev) =>
+        prev.map((it) => (it.uid === uid ? { ...it, loadingLotes: false } : it)),
+      );
+    }
+  }, []);
+
   // Guardar favoritos al cambiar
   const toggleFavorito = (item: FavoritoItem) => {
     const yaExiste = favoritos.some((f) => f.id === item.id);
@@ -279,29 +366,34 @@ export function MostradorPage() {
   const agregarProducto = (prod: Producto) => {
     if (prod.precioVenta == null) return;
     const u = unidades.find((uni) => uni.id === prod.unidadMedidaId);
+    const uid = `${prod.id}-${Date.now()}`;
+
     setCart((prev) => {
       const index = prev.findIndex((it) => it.productoId === prod.id);
       if (index >= 0) {
+        const itemActual = prev[index];
+        const nuevaCantidad = itemActual.cantidad + 1;
         const copy = [...prev];
-        copy[index] = { ...copy[index], cantidad: copy[index].cantidad + 1 };
+        copy[index] = { ...itemActual, cantidad: nuevaCantidad };
+        consultarLotesFefo(prod.id, nuevaCantidad, itemActual.uid);
         return copy;
       }
-      return [
-        ...prev,
-        {
-          uid: `${prod.id}-${Date.now()}`,
-          tipoItem: "producto",
-          productoId: prod.id,
-          nombre: prod.nombre,
-          codigo: prod.codigo,
-          precioUnitario: prod.precioVenta!,
-          cantidad: 1,
-          descuentoPorcentaje: 0,
-          unidadMedidaId: prod.unidadMedidaId,
-          admiteDecimales: u?.admite_decimales ?? false,
-          escalaDecimal: u?.escala_decimal ?? 0,
-        },
-      ];
+      const nuevoItem: CartItem = {
+        uid,
+        tipoItem: "producto",
+        productoId: prod.id,
+        nombre: prod.nombre,
+        codigo: prod.codigo,
+        precioUnitario: prod.precioVenta!,
+        cantidad: 1,
+        descuentoPorcentaje: 0,
+        unidadMedidaId: prod.unidadMedidaId,
+        admiteDecimales: u?.admite_decimales ?? false,
+        escalaDecimal: u?.escala_decimal ?? 0,
+        loadingLotes: true,
+      };
+      consultarLotesFefo(prod.id, 1, uid);
+      return [...prev, nuevoItem];
     });
   };
 
@@ -335,11 +427,37 @@ export function MostradorPage() {
     setCart((prev) => prev.filter((it) => it.uid !== uid));
   };
 
-  // Actualizar cantidad
+  // Actualizar cantidad de ítem (re-consulta FEFO si es producto)
   const actualizarCantidad = (uid: string, cant: number) => {
-    if (cant <= 0) return;
+    const item = cart.find((it) => it.uid === uid);
+    if (cant > 0 && item && item.tipoItem === "producto" && item.productoId) {
+      consultarLotesFefo(item.productoId, cant, uid);
+    }
     setCart((prev) =>
       prev.map((it) => (it.uid === uid ? { ...it, cantidad: cant } : it)),
+    );
+  };
+
+  // Cambiar lote en la línea del carrito (FEFO §2.2)
+  const seleccionarLoteLinea = (uid: string, loteId: string) => {
+    setCart((prev) =>
+      prev.map((it) => {
+        if (it.uid !== uid) return it;
+        const esSugerido = it.loteSugeridoId === loteId;
+        return {
+          ...it,
+          loteId,
+          // Si vuelve al sugerido, el motivo se limpia; si elige otro, mantiene o pide motivo
+          motivoFefo: esSugerido ? "" : it.motivoFefo || "",
+        };
+      }),
+    );
+  };
+
+  // Actualizar motivo FEFO
+  const actualizarMotivoFefo = (uid: string, motivo: string) => {
+    setCart((prev) =>
+      prev.map((it) => (it.uid === uid ? { ...it, motivoFefo: motivo } : it)),
     );
   };
 
@@ -372,6 +490,23 @@ export function MostradorPage() {
     return Math.max(0, neto);
   }, [subtotalLineas, descuentoGlobal]);
 
+  // Validación de cobro: FEFO y stock resueltos
+  const puedeCobrar = useMemo(() => {
+    if (cart.length === 0) return false;
+    for (const it of cart) {
+      if (it.cantidad <= 0) return false;
+      if (it.tipoItem === "producto") {
+        if (it.sinStock) return false;
+        if (!it.loteId) return false;
+        // Si no es el lote sugerido, motivoFefo es REQUERIDO y no puede estar vacío
+        if (it.loteSugeridoId && it.loteId !== it.loteSugeridoId) {
+          if (!it.motivoFefo || !it.motivoFefo.trim()) return false;
+        }
+      }
+    }
+    return true;
+  }, [cart]);
+
   // Si no hay cliente seleccionado, no se permite cuenta_corriente
   const handleCondicionPagoChange = (val: CondicionPago) => {
     if (val === "cuenta_corriente" && !cliente) return;
@@ -392,6 +527,176 @@ export function MostradorPage() {
     if (!q) return servicios;
     return servicios.filter((s) => s.nombre.toLowerCase().includes(q));
   }, [servicios, debouncedSearch]);
+
+  // ─── LÓGICA DE COBRO (F4·T2) ───────────────────────────────────────────────
+
+  // Abrir panel de cobro
+  const iniciarCobro = () => {
+    if (!puedeCobrar) return;
+    const medioDefecto =
+      mediosPago.find((m) => m.codigo === "efectivo") || mediosPago[0];
+
+    setPagos([
+      {
+        id: `pago-${Date.now()}`,
+        medioPagoId: medioDefecto?.id || "",
+        importe: totalFinal,
+        referencia: "",
+      },
+    ]);
+    setErrorCobro(null);
+    setCobroDialogOpen(true);
+  };
+
+  // Atajo: pagar todo en efectivo
+  const pagarTodoEnEfectivo = () => {
+    const medioEfectivo =
+      mediosPago.find((m) => m.codigo === "efectivo") || mediosPago[0];
+    if (!medioEfectivo) return;
+
+    setPagos([
+      {
+        id: `pago-${Date.now()}`,
+        medioPagoId: medioEfectivo.id,
+        importe: totalFinal,
+        referencia: "",
+      },
+    ]);
+  };
+
+  // Agregar medio de pago a la lista
+  const agregarMedioPago = () => {
+    const sumaActual = pagos.reduce((acc, p) => acc + (p.importe || 0), 0);
+    const faltante = Math.max(0, totalFinal - sumaActual);
+    const medioDefecto = mediosPago[0];
+
+    setPagos((prev) => [
+      ...prev,
+      {
+        id: `pago-${Date.now()}`,
+        medioPagoId: medioDefecto?.id || "",
+        importe: faltante,
+        referencia: "",
+      },
+    ]);
+  };
+
+  // Quitar medio de pago
+  const quitarMedioPago = (id: string) => {
+    setPagos((prev) => prev.filter((p) => p.id !== id));
+  };
+
+  // Actualizar línea de pago
+  const actualizarPago = (id: string, campo: "medioPagoId" | "importe" | "referencia", val: any) => {
+    setPagos((prev) =>
+      prev.map((p) => (p.id === id ? { ...p, [campo]: val } : p)),
+    );
+  };
+
+  // Cálculos de pagos
+  const sumaPagos = useMemo(() => {
+    return pagos.reduce((acc, p) => acc + (Number(p.importe) || 0), 0);
+  }, [pagos]);
+
+  const saldoFaltante = Math.max(0, totalFinal - sumaPagos);
+
+  // Validación de confirmación de cobro
+  const puedeConfirmarCobro = useMemo(() => {
+    if (submittingVenta) return false;
+    if (pagos.length === 0) return false;
+
+    // Con contado, debe cubrir la totalidad
+    if (condicionPago === "contado" && sumaPagos < totalFinal) {
+      return false;
+    }
+
+    // Cada pago debe tener importe > 0 y si requiere referencia, no estar vacía
+    for (const p of pagos) {
+      if (p.importe <= 0) return false;
+      const m = mediosPago.find((x) => x.id === p.medioPagoId);
+      if (m?.requiere_referencia && !p.referencia?.trim()) {
+        return false;
+      }
+    }
+    return true;
+  }, [submittingVenta, pagos, condicionPago, sumaPagos, totalFinal, mediosPago]);
+
+  // Enviar venta a la API
+  const handleConfirmarVenta = async () => {
+    if (!puedeConfirmarCobro || !sesion) return;
+
+    setSubmittingVenta(true);
+    setErrorCobro(null);
+
+    const payload: RegistrarVentaInput = {
+      sesionCajaId: sesion.id,
+      clienteId: cliente?.id || null,
+      condicionPago,
+      descuento: descuentoGlobal,
+      observaciones: observacionesVenta.trim() || null,
+      // NOTA CRÍTICA: NO MANDAR precioUnitario para respetar alícuota del catálogo
+      items: cart.map((it) => ({
+        tipoItem: it.tipoItem,
+        productoId: it.tipoItem === "producto" ? it.productoId : null,
+        servicioId: it.tipoItem === "servicio" ? it.servicioId : null,
+        cantidad: it.cantidad,
+        descuentoPorcentaje: it.descuentoPorcentaje,
+        loteId: it.tipoItem === "producto" ? it.loteId : null,
+        motivoFefo:
+          it.tipoItem === "producto" && it.loteId !== it.loteSugeridoId
+            ? it.motivoFefo?.trim() || null
+            : null,
+        mascotaId: it.mascotaId || null,
+      })),
+      pagos: pagos
+        .filter((p) => p.importe > 0)
+        .map((p) => ({
+          medioPagoId: p.medioPagoId,
+          importe: p.importe,
+          referencia: p.referencia?.trim() || null,
+        })),
+    };
+
+    try {
+      const res = await registrarVenta(payload);
+      setResultadoVenta(res);
+      setCobroDialogOpen(false);
+      setExitoDialogOpen(true);
+    } catch (err: any) {
+      const code = err?.code || "";
+      let msg = err?.message || "Error al registrar la operación de venta.";
+
+      if (code === "PRODUCT_WITHOUT_PRICE") {
+        msg = "Uno de los productos no tiene precio configurado en el catálogo.";
+      } else if (code === "PRODUCT_NOT_SELLABLE") {
+        msg = "El producto no está habilitado para la venta.";
+      } else if (code === "PRODUCT_INACTIVE") {
+        msg = "El producto se encuentra inactivo.";
+      } else if (code === "UNIT_NO_DECIMALS") {
+        msg = "La cantidad no respeta la escala decimal permitida para la unidad de medida.";
+      } else if (code === "INSUFFICIENT_STOCK") {
+        msg = "Stock insuficiente en los lotes seleccionados para completar la venta.";
+      } else if (code === "CASH_SESSION_NOT_FOUND") {
+        msg = "No se encontró una sesión de caja abierta válida para registrar la operación.";
+      }
+
+      setErrorCobro(msg);
+      // El carrito NO se vacía ante un error
+    } finally {
+      setSubmittingVenta(false);
+    }
+  };
+
+  // Resetear para nueva venta
+  const reiniciarVenta = () => {
+    setCart([]);
+    setCliente(null);
+    setCondicionPago("contado");
+    setDescuentoGlobal(0);
+    setObservacionesVenta("");
+    setExitoDialogOpen(false);
+    setResultadoVenta(null);
+  };
 
   // ─── RENDER: Guardia de caja ───────────────────────────────────────────────
   if (cajaLoading) {
@@ -526,6 +831,8 @@ export function MostradorPage() {
                           if (prodEnLista) {
                             agregarProducto(prodEnLista);
                           } else {
+                            const uid = `${fav.id}-${Date.now()}`;
+                            consultarLotesFefo(fav.id, 1, uid);
                             setCart((prev) => {
                               const idx = prev.findIndex((it) => it.productoId === fav.id);
                               if (idx >= 0) {
@@ -536,7 +843,7 @@ export function MostradorPage() {
                               return [
                                 ...prev,
                                 {
-                                  uid: `${fav.id}-${Date.now()}`,
+                                  uid,
                                   tipoItem: "producto",
                                   productoId: fav.id,
                                   nombre: fav.nombre,
@@ -544,6 +851,7 @@ export function MostradorPage() {
                                   precioUnitario: fav.precio,
                                   cantidad: 1,
                                   descuentoPorcentaje: 0,
+                                  loadingLotes: true,
                                 },
                               ];
                             });
@@ -940,7 +1248,7 @@ export function MostradorPage() {
               </div>
 
               {/* Lista de Líneas del Carrito */}
-              <div className="space-y-3 min-h-36 max-h-80 overflow-y-auto pr-1">
+              <div className="space-y-3 min-h-36 max-h-96 overflow-y-auto pr-1">
                 {cart.length === 0 ? (
                   <div className="py-10 text-center text-sm text-muted-foreground">
                     El carrito está vacío.
@@ -955,6 +1263,12 @@ export function MostradorPage() {
                     const precioBruto = item.precioUnitario * item.cantidad;
                     const desc = precioBruto * (item.descuentoPorcentaje / 100);
                     const totalLinea = precioBruto - desc;
+                    const esProducto = item.tipoItem === "producto";
+                    const noEsSugerido =
+                      esProducto &&
+                      item.loteId &&
+                      item.loteSugeridoId &&
+                      item.loteId !== item.loteSugeridoId;
 
                     return (
                       <div
@@ -983,10 +1297,90 @@ export function MostradorPage() {
                           </Button>
                         </div>
 
-                        {/* Espacio reservado para FEFO (F4·T2) */}
-                        {item.tipoItem === "producto" && (
-                          <div className="rounded bg-muted/40 px-2 py-1 text-[11px] text-muted-foreground border border-dashed">
-                            Lote — F4·T2
+                        {/* Selector de Lote con FEFO (§2.2) para Productos */}
+                        {esProducto && (
+                          <div className="space-y-1.5 pt-1">
+                            {item.loadingLotes ? (
+                              <Skeleton className="h-8 w-full" />
+                            ) : item.sinStock ? (
+                              <div className="rounded bg-destructive/10 p-2 text-xs font-medium text-destructive border border-destructive/20 flex items-center gap-1.5">
+                                <AlertCircle className="size-4 shrink-0" aria-hidden />
+                                Sin stock disponible
+                              </div>
+                            ) : (
+                              <div className="space-y-1.5">
+                                <div className="flex items-center justify-between">
+                                  <Label className="text-[11px] font-semibold text-muted-foreground uppercase">
+                                    Lote (criterio FEFO)
+                                  </Label>
+                                  {item.stockInsuficiente && (
+                                    <span className="text-[10px] text-amber-600 font-medium">
+                                      Stock disponible menor al pedido
+                                    </span>
+                                  )}
+                                </div>
+                                <Select
+                                  value={item.loteId || ""}
+                                  onValueChange={(val) => seleccionarLoteLinea(item.uid, val)}
+                                >
+                                  <SelectTrigger
+                                    aria-label={`Lote para ${item.nombre}`}
+                                    className="h-8 text-xs font-mono"
+                                  >
+                                    <SelectValue placeholder="Seleccionar lote..." />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {(item.candidatos || []).map((cand, idx) => {
+                                      const esSugerido = idx === 0;
+                                      return (
+                                        <SelectItem key={cand.loteId} value={cand.loteId}>
+                                          <div className="flex items-center gap-2">
+                                            <span>{cand.codigoLote || "Sin código"}</span>
+                                            {cand.fechaVencimiento && (
+                                              <span className="text-muted-foreground text-[10px]">
+                                                (vence: {cand.fechaVencimiento})
+                                              </span>
+                                            )}
+                                            <span className="text-muted-foreground text-[10px]">
+                                              Disp: {cand.cantidadDisponible}
+                                            </span>
+                                            {esSugerido && (
+                                              <Badge className="bg-green-100 text-green-800 border-green-300 text-[10px] px-1 py-0 hover:bg-green-100">
+                                                Sugerido (vence antes)
+                                              </Badge>
+                                            )}
+                                          </div>
+                                        </SelectItem>
+                                      );
+                                    })}
+                                  </SelectContent>
+                                </Select>
+
+                                {/* Campo motivoFefo en la misma línea (§2.2) */}
+                                {noEsSugerido && (
+                                  <div className="pt-1 space-y-1 bg-amber-50/70 p-2 rounded-md border border-amber-200">
+                                    <div className="flex items-center gap-1 text-[11px] font-semibold text-amber-900">
+                                      <AlertTriangle className="size-3.5 text-amber-600" aria-hidden />
+                                      Motivo de desvío de FEFO (requerido)
+                                    </div>
+                                    <Input
+                                      type="text"
+                                      placeholder="Explicá por qué elegís este lote en vez del sugerido..."
+                                      aria-label={`Motivo FEFO para ${item.nombre}`}
+                                      value={item.motivoFefo || ""}
+                                      onChange={(e) => actualizarMotivoFefo(item.uid, e.target.value)}
+                                      className="h-7 text-xs bg-white border-amber-300"
+                                      required
+                                    />
+                                    {!item.motivoFefo?.trim() && (
+                                      <span className="text-[10px] text-destructive block">
+                                        Debés especificar un motivo para poder cobrar.
+                                      </span>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            )}
                           </div>
                         )}
 
@@ -1002,10 +1396,11 @@ export function MostradorPage() {
                               min={step}
                               step={step}
                               aria-label={`Cantidad para ${item.nombre}`}
-                              value={item.cantidad}
-                              onChange={(e) =>
-                                actualizarCantidad(item.uid, parseFloat(e.target.value) || 0)
-                              }
+                              value={item.cantidad === 0 ? "" : item.cantidad}
+                              onChange={(e) => {
+                                const val = e.target.value === "" ? 0 : parseFloat(e.target.value);
+                                actualizarCantidad(item.uid, isNaN(val) ? 0 : val);
+                              }}
                               className="h-8 text-xs font-mono text-center"
                             />
                           </div>
@@ -1124,19 +1519,304 @@ export function MostradorPage() {
                   </div>
                 </div>
 
-                {/* Botón Cobrar (En F4·T1 deshabilitado según spec) */}
+                {/* Botón Cobrar (F4·T2) */}
                 <Button
                   type="button"
-                  disabled
+                  disabled={!puedeCobrar}
+                  onClick={iniciarCobro}
                   className="w-full h-11 text-base font-semibold bg-orange-600 hover:bg-orange-700 text-white shadow-sm"
                 >
-                  Cobro — F4·T2
+                  Cobrar
                 </Button>
               </div>
             </CardContent>
           </Card>
         </div>
       </div>
+
+      {/* ─── MODAL DE COBRO (F4·T2) ───────────────────────────────────────────── */}
+      <Dialog open={cobroDialogOpen} onOpenChange={setCobroDialogOpen}>
+        <DialogContent className="max-w-lg sm:max-w-xl">
+          <DialogHeader>
+            <DialogTitle className="text-xl font-bold text-orange-950 flex items-center gap-2">
+              <CreditCard className="size-5 text-orange-600" aria-hidden />
+              Registro de Cobro
+            </DialogTitle>
+            <DialogDescription>
+              Seleccioná los medios de pago para registrar la operación en la sesión de caja abierta.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-2">
+            {/* Banner de Total */}
+            <div className="p-3 bg-orange-50 rounded-lg border border-orange-200 flex items-center justify-between">
+              <div>
+                <span className="text-xs text-muted-foreground uppercase font-semibold">Total a cobrar</span>
+                <div className="text-2xl font-black text-orange-950">
+                  {formatMoneda(totalFinal)}
+                </div>
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={pagarTodoEnEfectivo}
+                className="text-xs border-orange-300 text-orange-900 hover:bg-orange-100"
+              >
+                <Coins className="size-3.5 mr-1 text-orange-700" aria-hidden />
+                Pagar todo en efectivo
+              </Button>
+            </div>
+
+            {/* Error de RPC si hubo */}
+            {errorCobro && (
+              <div
+                role="alert"
+                className="p-3 rounded-md bg-destructive/10 border border-destructive/30 text-destructive text-sm flex items-start gap-2"
+              >
+                <AlertCircle className="size-4 shrink-0 mt-0.5" aria-hidden />
+                <div>{errorCobro}</div>
+              </div>
+            )}
+
+            {/* Medios de Pago */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <Label className="text-xs font-semibold uppercase text-muted-foreground">
+                  Medios de pago ({pagos.length})
+                </Label>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={agregarMedioPago}
+                  className="h-7 text-xs text-orange-700 hover:text-orange-900"
+                >
+                  <Plus className="size-3.5 mr-1" aria-hidden />
+                  Agregar otro medio
+                </Button>
+              </div>
+
+              <div className="space-y-2.5 max-h-60 overflow-y-auto pr-1">
+                {pagos.map((p, idx) => {
+                  const medioSeleccionado = mediosPago.find((m) => m.id === p.medioPagoId);
+                  const exigeReferencia = medioSeleccionado?.requiere_referencia;
+
+                  return (
+                    <div
+                      key={p.id}
+                      className="p-2.5 rounded-lg border bg-muted/20 space-y-2"
+                    >
+                      <div className="grid grid-cols-12 gap-2 items-center">
+                        {/* Selector de medio */}
+                        <div className="col-span-6">
+                          <Label className="text-[10px] text-muted-foreground block mb-0.5">
+                            Medio #{idx + 1}
+                          </Label>
+                          <Select
+                            value={p.medioPagoId}
+                            onValueChange={(val) => actualizarPago(p.id, "medioPagoId", val)}
+                          >
+                            <SelectTrigger aria-label={`Medio de pago ${idx + 1}`} className="h-8 text-xs">
+                              <SelectValue placeholder="Elegir medio..." />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {mediosPago.map((m) => (
+                                <SelectItem key={m.id} value={m.id}>
+                                  {m.nombre}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+
+                        {/* Importe */}
+                        <div className="col-span-5">
+                          <Label className="text-[10px] text-muted-foreground block mb-0.5">
+                            Importe ($)
+                          </Label>
+                          <Input
+                            type="number"
+                            min={0.01}
+                            step={0.01}
+                            aria-label={`Importe pago ${idx + 1}`}
+                            value={p.importe || ""}
+                            onChange={(e) =>
+                              actualizarPago(p.id, "importe", parseFloat(e.target.value) || 0)
+                            }
+                            className="h-8 text-xs font-mono"
+                          />
+                        </div>
+
+                        {/* Botón quitar */}
+                        <div className="col-span-1 flex items-end justify-center pt-3">
+                          {pagos.length > 1 && (
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              aria-label={`Eliminar pago ${idx + 1}`}
+                              onClick={() => quitarMedioPago(p.id)}
+                              className="h-8 w-8 p-0 text-muted-foreground hover:text-destructive"
+                            >
+                              <Trash2 className="size-4" aria-hidden />
+                            </Button>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Campo Referencia */}
+                      <div>
+                        <Input
+                          type="text"
+                          placeholder={
+                            exigeReferencia
+                              ? "N° de cupón, autorización o transferencia (requerido)..."
+                              : "Referencia opcional..."
+                          }
+                          aria-label={`Referencia pago ${idx + 1}`}
+                          value={p.referencia}
+                          onChange={(e) => actualizarPago(p.id, "referencia", e.target.value)}
+                          className={cn(
+                            "h-7 text-xs",
+                            exigeReferencia && !p.referencia?.trim() && "border-amber-400 bg-amber-50/50",
+                          )}
+                          required={exigeReferencia}
+                        />
+                        {exigeReferencia && !p.referencia?.trim() && (
+                          <span className="text-[10px] text-amber-700 block mt-0.5">
+                            Este medio de pago requiere ingresar un número de referencia.
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Indicador en vivo de saldo faltante o saldo a cuenta corriente */}
+              <div className="p-2.5 rounded-md bg-muted/40 border text-xs flex items-center justify-between">
+                <span className="font-medium text-muted-foreground">Total ingresado:</span>
+                <span className="font-mono font-bold text-foreground">
+                  {formatMoneda(sumaPagos)}
+                </span>
+              </div>
+
+              {saldoFaltante > 0 && condicionPago === "contado" && (
+                <div className="text-xs font-semibold text-destructive flex items-center gap-1.5">
+                  <AlertCircle className="size-3.5" aria-hidden />
+                  Faltan cubrir {formatMoneda(saldoFaltante)} para completar el pago al contado.
+                </div>
+              )}
+
+              {saldoFaltante > 0 && condicionPago === "cuenta_corriente" && (
+                <div className="text-xs font-medium text-amber-800 bg-amber-50 p-2 rounded border border-amber-200">
+                  Saldo pendiente a cuenta corriente de {cliente?.fullName}:{" "}
+                  <span className="font-bold font-mono">{formatMoneda(saldoFaltante)}</span>
+                </div>
+              )}
+            </div>
+
+            {/* Observaciones */}
+            <div className="space-y-1">
+              <Label className="text-xs font-semibold text-muted-foreground uppercase">
+                Observaciones (opcional)
+              </Label>
+              <Textarea
+                placeholder="Notas internas sobre la venta..."
+                aria-label="Observaciones de venta"
+                value={observacionesVenta}
+                onChange={(e) => setObservacionesVenta(e.target.value)}
+                rows={2}
+                className="text-xs"
+              />
+            </div>
+          </div>
+
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setCobroDialogOpen(false)}
+              disabled={submittingVenta}
+            >
+              Cancelar
+            </Button>
+            <Button
+              type="button"
+              disabled={!puedeConfirmarCobro}
+              onClick={handleConfirmarVenta}
+              className="bg-orange-600 hover:bg-orange-700 text-white"
+            >
+              {submittingVenta ? "Registrando..." : "Confirmar venta"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ─── MODAL DE ÉXITO POST-VENTA (F4·T2) ───────────────────────────────── */}
+      <Dialog open={exitoDialogOpen} onOpenChange={setExitoDialogOpen}>
+        <DialogContent className="max-w-md text-center sm:text-left">
+          <DialogHeader className="text-center sm:text-left">
+            <div className="mx-auto sm:mx-0 mb-2 flex size-12 items-center justify-center rounded-full bg-green-100 text-green-700">
+              <CheckCircle2 className="size-7" aria-hidden />
+            </div>
+            {/* NOTA CRÍTICA: "Operación N°", nunca "Comprobante", "Factura", "Ticket", "Recibo" */}
+            <DialogTitle className="text-xl font-bold text-foreground">
+              Operación N° {resultadoVenta?.numeroOperacion}
+            </DialogTitle>
+            <DialogDescription>
+              La venta fue registrada con éxito en el sistema.
+            </DialogDescription>
+          </DialogHeader>
+
+          {resultadoVenta && (
+            <div className="space-y-3 py-2 text-sm border-y my-2">
+              <div className="flex justify-between text-muted-foreground">
+                <span>Subtotal neto:</span>
+                <span className="font-mono">{formatMoneda(resultadoVenta.subtotalNeto)}</span>
+              </div>
+              <div className="flex justify-between text-muted-foreground">
+                <span>IVA:</span>
+                <span className="font-mono">{formatMoneda(resultadoVenta.totalIva)}</span>
+              </div>
+              <div className="flex justify-between font-bold text-base text-foreground pt-1 border-t">
+                <span>Total pagado:</span>
+                <span className="font-mono text-orange-950">{formatMoneda(resultadoVenta.total)}</span>
+              </div>
+              {resultadoVenta.saldoPendiente > 0 && (
+                <div className="flex justify-between text-amber-800 bg-amber-50 p-2 rounded text-xs font-semibold">
+                  <span>Saldo pendiente:</span>
+                  <span className="font-mono">{formatMoneda(resultadoVenta.saldoPendiente)}</span>
+                </div>
+              )}
+            </div>
+          )}
+
+          <DialogFooter className="flex-col sm:flex-row gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={reiniciarVenta}
+              className="w-full sm:w-auto"
+            >
+              Nueva venta
+            </Button>
+            {resultadoVenta && (
+              <Button
+                type="button"
+                asChild
+                className="w-full sm:w-auto bg-orange-600 hover:bg-orange-700 text-white"
+              >
+                <Link to={`/ventas/${resultadoVenta.ventaId}`}>
+                  Ver detalle
+                  <ArrowRight className="size-4 ml-1" aria-hidden />
+                </Link>
+              </Button>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
