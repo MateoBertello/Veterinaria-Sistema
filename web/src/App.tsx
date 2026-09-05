@@ -40,6 +40,7 @@ import { LoteDetallePage } from "./pages/LoteDetallePage.tsx";
 import { VencimientosPage } from "./pages/VencimientosPage.tsx";
 import { ComprasPage } from "./pages/ComprasPage.tsx";
 import { CompraDetallePage } from "./pages/CompraDetallePage.tsx";
+import { CajaPage } from "./pages/CajaPage.tsx";
 import { PantallaEnConstruccion } from "./components/comercial/PantallaEnConstruccion.tsx";
 import { AccessibilityButton } from "./components/accesibilidad/AccessibilityButton.tsx";
 import { Button } from "./components/ui/button.tsx";
@@ -416,7 +417,7 @@ export function App() {
             path="/ventas/caja"
             element={
               <RequirePermission permission="manage_cash">
-                <PantallaEnConstruccion titulo="Sesión de Caja" />
+                <CajaPage />
               </RequirePermission>
             }
           />
