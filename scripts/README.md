@@ -70,7 +70,9 @@ SUPABASE_ANON_KEY=<anon key que imprime `supabase start`>
 
 Es **idempotente**: corrércelo dos veces no duplica ni rompe.
 
-1. **Tenant demo** "Veterinaria Demo" (`cuit_rut 20999999999`, plan `premium`)
+1. **Tenant demo** "Veterinaria Demo" (`cuit_rut 20-99999999-9`, plan `premium`)
+   — el MISMO valor que usa `supabase/seed.sql`, para que ambos seeds converjan en
+   un único tenant demo en vez de crear uno cada uno —
    provisionado por el **camino real**: el RPC `crear_tenant` → `on_tenant_created`,
    que crea los 3 roles con sus permisos, la `configuracion_tenant (10, 7)` y los
    módulos contratados según el plan (premium ⇒ historial + turnos + guardería).
