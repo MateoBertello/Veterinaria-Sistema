@@ -35,6 +35,8 @@ import { CargaPreciosPage } from "./pages/CargaPreciosPage.tsx";
 import { ProductosPage } from "./pages/ProductosPage.tsx";
 import { FamiliasPage } from "./pages/FamiliasPage.tsx";
 import { ProveedoresPage } from "./pages/ProveedoresPage.tsx";
+import { ExistenciasPage } from "./pages/ExistenciasPage.tsx";
+import { LoteDetallePage } from "./pages/LoteDetallePage.tsx";
 import { PantallaEnConstruccion } from "./components/comercial/PantallaEnConstruccion.tsx";
 import { AccessibilityButton } from "./components/accesibilidad/AccessibilityButton.tsx";
 import { Button } from "./components/ui/button.tsx";
@@ -271,7 +273,7 @@ export function App() {
             path="/stock/existencias"
             element={
               <RequirePermission permission="view_stock">
-                <PantallaEnConstruccion titulo="Existencias de Stock" />
+                <ExistenciasPage />
               </RequirePermission>
             }
           />
@@ -279,7 +281,7 @@ export function App() {
             path="/stock/lotes/:id"
             element={
               <RequirePermission permission="view_stock">
-                <PantallaEnConstruccion titulo="Detalle de Lote" />
+                <LoteDetallePage />
               </RequirePermission>
             }
           />
