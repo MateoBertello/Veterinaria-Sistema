@@ -1,10 +1,11 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Navigate, Outlet, Route, Routes, useLocation } from "react-router-dom";
 import { Dog, Menu } from "lucide-react";
 import { buildNavItems, type NavItem } from "./lib/navigation.ts";
-import { fetchModulosHabilitados } from "./api/modulos.ts";
 import { useAuth } from "./auth/AuthContext.tsx";
+import { ModulosProvider, useModulos } from "./auth/ModulosContext.tsx";
 import { ProtectedRoute } from "./auth/ProtectedRoute.tsx";
+import { RequireModule } from "./auth/RequireModule.tsx";
 import { RequirePermission } from "./auth/RequirePermission.tsx";
 import { RequireSuperAdmin } from "./auth/RequireSuperAdmin.tsx";
 import { AdminShell } from "./components/admin/AdminShell.tsx";
@@ -98,23 +99,9 @@ function MobileNav({ items, user, onLogout }: {
  * logout, en el `<aside>` de desktop y en la barra+Sheet de mobile. */
 function Navigation() {
   const { user, logout } = useAuth();
+  const { modulos } = useModulos();
   const permissions = user?.permissions ?? [];
-  const [items, setItems] = useState<NavItem[]>(buildNavItems([], permissions));
-
-  useEffect(() => {
-    let activo = true;
-    fetchModulosHabilitados()
-      .then((modulos) => {
-        if (activo) setItems(buildNavItems(modulos, permissions));
-      })
-      .catch(() => {
-        // Sin módulos/backend: se muestran solo los ítems base.
-        if (activo) setItems(buildNavItems([], permissions));
-      });
-    return () => {
-      activo = false;
-    };
-  }, [permissions]);
+  const items = useMemo(() => buildNavItems(modulos, permissions), [modulos, permissions]);
 
   const onLogout = () => void logout();
 
@@ -133,20 +120,22 @@ function Navigation() {
 /** Layout autenticado: navegación + área de contenido. Se renderiza solo con sesión válida. */
 export function Shell() {
   return (
-    <div className="flex min-h-screen flex-col bg-background md:flex-row">
-      {/* Skip-link (WCAG 2.4.1): visible al recibir foco por teclado, salta al contenido. */}
-      <a
-        href="#contenido"
-        className="sr-only focus:not-sr-only focus:absolute focus:left-2 focus:top-2 focus:z-50 focus:rounded-md focus:bg-primary focus:px-4 focus:py-2 focus:text-sm focus:font-medium focus:text-primary-foreground"
-      >
-        Saltar al contenido
-      </a>
-      <Navigation />
-      <main id="contenido" className="flex-1 overflow-x-auto px-4 py-6 md:px-8">
-        <Outlet />
-      </main>
-      <AccessibilityButton />
-    </div>
+    <ModulosProvider>
+      <div className="flex min-h-screen flex-col bg-background md:flex-row">
+        {/* Skip-link (WCAG 2.4.1): visible al recibir foco por teclado, salta al contenido. */}
+        <a
+          href="#contenido"
+          className="sr-only focus:not-sr-only focus:absolute focus:left-2 focus:top-2 focus:z-50 focus:rounded-md focus:bg-primary focus:px-4 focus:py-2 focus:text-sm focus:font-medium focus:text-primary-foreground"
+        >
+          Saltar al contenido
+        </a>
+        <Navigation />
+        <main id="contenido" className="flex-1 overflow-x-auto px-4 py-6 md:px-8">
+          <Outlet />
+        </main>
+        <AccessibilityButton />
+      </div>
+    </ModulosProvider>
   );
 }
 
@@ -188,8 +177,12 @@ export function App() {
         <Route path="/" element={<DashboardPage />} />
         <Route path="/clientes" element={<ClientesPage />} />
         <Route path="/mascotas" element={<MascotasPage />} />
-        <Route path="/historial" element={<HistorialClinicoIndexPage />} />
-        <Route path="/historial/:mascotaId" element={<HistorialClinicoPage />} />
+        {/* ─── Módulos Vendibles Clínicos (RN-G2) ─── */}
+        <Route element={<RequireModule modulo="historial_clinico" />}>
+          <Route path="/historial" element={<HistorialClinicoIndexPage />} />
+          <Route path="/historial/:mascotaId" element={<HistorialClinicoPage />} />
+        </Route>
+
         <Route
           path="/servicios"
           element={
@@ -214,12 +207,19 @@ export function App() {
             </RequirePermission>
           }
         />
-        <Route path="/turnos" element={<TurnosPage />} />
-        <Route path="/turnos/nuevo" element={<AgendarTurnoPage />} />
-        <Route path="/turnos/:id/editar" element={<AgendarTurnoPage />} />
-        <Route path="/guarderia" element={<OcupacionGuarderiaPage />} />
-        <Route path="/guarderia/nuevo" element={<RegistrarEstadiaPage />} />
-        <Route path="/guarderia/:id/editar" element={<RegistrarEstadiaPage />} />
+
+        <Route element={<RequireModule modulo="turnos" />}>
+          <Route path="/turnos" element={<TurnosPage />} />
+          <Route path="/turnos/nuevo" element={<AgendarTurnoPage />} />
+          <Route path="/turnos/:id/editar" element={<AgendarTurnoPage />} />
+        </Route>
+
+        <Route element={<RequireModule modulo="guarderia" />}>
+          <Route path="/guarderia" element={<OcupacionGuarderiaPage />} />
+          <Route path="/guarderia/nuevo" element={<RegistrarEstadiaPage />} />
+          <Route path="/guarderia/:id/editar" element={<RegistrarEstadiaPage />} />
+        </Route>
+
         <Route
           path="/catalogos"
           element={
@@ -252,177 +252,182 @@ export function App() {
             </RequirePermission>
           }
         />
-        {/* ─── Rutas Comerciales: Stock ─── */}
-        <Route
-          path="/stock"
-          element={
-            <RequirePermission permission="view_stock">
-              <PantallaEnConstruccion titulo="Stock" />
-            </RequirePermission>
-          }
-        />
-        <Route
-          path="/stock/existencias"
-          element={
-            <RequirePermission permission="view_stock">
-              <PantallaEnConstruccion titulo="Existencias de Stock" />
-            </RequirePermission>
-          }
-        />
-        <Route
-          path="/stock/lotes/:id"
-          element={
-            <RequirePermission permission="view_stock">
-              <PantallaEnConstruccion titulo="Detalle de Lote" />
-            </RequirePermission>
-          }
-        />
-        <Route
-          path="/stock/vencimientos"
-          element={
-            <RequirePermission permission="view_stock">
-              <PantallaEnConstruccion titulo="Vencimientos Próximos" />
-            </RequirePermission>
-          }
-        />
-        <Route
-          path="/stock/productos"
-          element={
-            <RequirePermission permission="manage_products">
-              <PantallaEnConstruccion titulo="Catálogo de Productos" />
-            </RequirePermission>
-          }
-        />
-        <Route
-          path="/stock/productos/precios"
-          element={
-            <RequirePermission permission="manage_products">
-              <PantallaEnConstruccion titulo="Carga Asistida de Precios" />
-            </RequirePermission>
-          }
-        />
-        <Route
-          path="/stock/familias"
-          element={
-            <RequirePermission permission="manage_products">
-              <PantallaEnConstruccion titulo="Familias de Productos" />
-            </RequirePermission>
-          }
-        />
-        <Route
-          path="/stock/proveedores"
-          element={
-            <RequirePermission permission="manage_suppliers">
-              <PantallaEnConstruccion titulo="Proveedores" />
-            </RequirePermission>
-          }
-        />
-        <Route
-          path="/stock/compras"
-          element={
-            <RequirePermission permission="manage_suppliers">
-              <PantallaEnConstruccion titulo="Compras" />
-            </RequirePermission>
-          }
-        />
-        <Route
-          path="/stock/compras/:id"
-          element={
-            <RequirePermission permission="manage_suppliers">
-              <PantallaEnConstruccion titulo="Detalle de Compra" />
-            </RequirePermission>
-          }
-        />
-        <Route
-          path="/stock/ajustes"
-          element={
-            <RequirePermission permission="manage_stock">
-              <PantallaEnConstruccion titulo="Ajustes de Stock" />
-            </RequirePermission>
-          }
-        />
-        <Route
-          path="/stock/recuentos"
-          element={
-            <RequirePermission permission="manage_stock">
-              <PantallaEnConstruccion titulo="Recuentos de Inventario" />
-            </RequirePermission>
-          }
-        />
-        <Route
-          path="/stock/recuentos/:id"
-          element={
-            <RequirePermission permission="manage_stock">
-              <PantallaEnConstruccion titulo="Detalle de Recuento" />
-            </RequirePermission>
-          }
-        />
-        <Route
-          path="/stock/fraccionamiento"
-          element={
-            <RequirePermission permission="split_stock">
-              <PantallaEnConstruccion titulo="Fraccionamiento de Lotes" />
-            </RequirePermission>
-          }
-        />
-        <Route
-          path="/stock/reportes"
-          element={
-            <RequirePermission permission="view_stock">
-              <PantallaEnConstruccion titulo="Reportes de Stock" />
-            </RequirePermission>
-          }
-        />
 
-        {/* ─── Rutas Comerciales: Ventas ─── */}
-        <Route
-          path="/ventas"
-          element={
-            <RequirePermission permission="manage_sales">
-              <PantallaEnConstruccion titulo="Mostrador de Ventas" />
-            </RequirePermission>
-          }
-        />
-        <Route
-          path="/ventas/historial"
-          element={
-            <RequirePermission permission="manage_sales">
-              <PantallaEnConstruccion titulo="Historial de Ventas" />
-            </RequirePermission>
-          }
-        />
-        <Route
-          path="/ventas/:id"
-          element={
-            <RequirePermission permission="manage_sales">
-              <PantallaEnConstruccion titulo="Detalle de Venta" />
-            </RequirePermission>
-          }
-        />
-        <Route
-          path="/ventas/caja"
-          element={
-            <RequirePermission permission="manage_cash">
-              <PantallaEnConstruccion titulo="Sesión de Caja" />
-            </RequirePermission>
-          }
-        />
-        <Route
-          path="/ventas/caja/:sesionId"
-          element={
-            <RequirePermission permission="manage_cash">
-              <PantallaEnConstruccion titulo="Detalle de Sesión de Caja" />
-            </RequirePermission>
-          }
-        />
-        <Route
-          path="/ventas/reportes"
-          element={
-            <RequirePermission permission="view_sales">
-              <PantallaEnConstruccion titulo="Reportes de Ventas" />
-            </RequirePermission>
-          }
-        />
+        {/* ─── Rutas Comerciales: Stock (RN-G2) ─── */}
+        <Route element={<RequireModule modulo="stock" />}>
+          <Route
+            path="/stock"
+            element={
+              <RequirePermission permission="view_stock">
+                <PantallaEnConstruccion titulo="Stock" />
+              </RequirePermission>
+            }
+          />
+          <Route
+            path="/stock/existencias"
+            element={
+              <RequirePermission permission="view_stock">
+                <PantallaEnConstruccion titulo="Existencias de Stock" />
+              </RequirePermission>
+            }
+          />
+          <Route
+            path="/stock/lotes/:id"
+            element={
+              <RequirePermission permission="view_stock">
+                <PantallaEnConstruccion titulo="Detalle de Lote" />
+              </RequirePermission>
+            }
+          />
+          <Route
+            path="/stock/vencimientos"
+            element={
+              <RequirePermission permission="view_stock">
+                <PantallaEnConstruccion titulo="Vencimientos Próximos" />
+              </RequirePermission>
+            }
+          />
+          <Route
+            path="/stock/productos"
+            element={
+              <RequirePermission permission="manage_products">
+                <PantallaEnConstruccion titulo="Catálogo de Productos" />
+              </RequirePermission>
+            }
+          />
+          <Route
+            path="/stock/productos/precios"
+            element={
+              <RequirePermission permission="manage_products">
+                <PantallaEnConstruccion titulo="Carga Asistida de Precios" />
+              </RequirePermission>
+            }
+          />
+          <Route
+            path="/stock/familias"
+            element={
+              <RequirePermission permission="manage_products">
+                <PantallaEnConstruccion titulo="Familias de Productos" />
+              </RequirePermission>
+            }
+          />
+          <Route
+            path="/stock/proveedores"
+            element={
+              <RequirePermission permission="manage_suppliers">
+                <PantallaEnConstruccion titulo="Proveedores" />
+              </RequirePermission>
+            }
+          />
+          <Route
+            path="/stock/compras"
+            element={
+              <RequirePermission permission="manage_suppliers">
+                <PantallaEnConstruccion titulo="Compras" />
+              </RequirePermission>
+            }
+          />
+          <Route
+            path="/stock/compras/:id"
+            element={
+              <RequirePermission permission="manage_suppliers">
+                <PantallaEnConstruccion titulo="Detalle de Compra" />
+              </RequirePermission>
+            }
+          />
+          <Route
+            path="/stock/ajustes"
+            element={
+              <RequirePermission permission="manage_stock">
+                <PantallaEnConstruccion titulo="Ajustes de Stock" />
+              </RequirePermission>
+            }
+          />
+          <Route
+            path="/stock/recuentos"
+            element={
+              <RequirePermission permission="manage_stock">
+                <PantallaEnConstruccion titulo="Recuentos de Inventario" />
+              </RequirePermission>
+            }
+          />
+          <Route
+            path="/stock/recuentos/:id"
+            element={
+              <RequirePermission permission="manage_stock">
+                <PantallaEnConstruccion titulo="Detalle de Recuento" />
+              </RequirePermission>
+            }
+          />
+          <Route
+            path="/stock/fraccionamiento"
+            element={
+              <RequirePermission permission="split_stock">
+                <PantallaEnConstruccion titulo="Fraccionamiento de Lotes" />
+              </RequirePermission>
+            }
+          />
+          <Route
+            path="/stock/reportes"
+            element={
+              <RequirePermission permission="view_stock">
+                <PantallaEnConstruccion titulo="Reportes de Stock" />
+              </RequirePermission>
+            }
+          />
+        </Route>
+
+        {/* ─── Rutas Comerciales: Ventas (RN-G2) ─── */}
+        <Route element={<RequireModule modulo="ventas" />}>
+          <Route
+            path="/ventas"
+            element={
+              <RequirePermission permission="manage_sales">
+                <PantallaEnConstruccion titulo="Mostrador de Ventas" />
+              </RequirePermission>
+            }
+          />
+          <Route
+            path="/ventas/historial"
+            element={
+              <RequirePermission permission="manage_sales">
+                <PantallaEnConstruccion titulo="Historial de Ventas" />
+              </RequirePermission>
+            }
+          />
+          <Route
+            path="/ventas/:id"
+            element={
+              <RequirePermission permission="manage_sales">
+                <PantallaEnConstruccion titulo="Detalle de Venta" />
+              </RequirePermission>
+            }
+          />
+          <Route
+            path="/ventas/caja"
+            element={
+              <RequirePermission permission="manage_cash">
+                <PantallaEnConstruccion titulo="Sesión de Caja" />
+              </RequirePermission>
+            }
+          />
+          <Route
+            path="/ventas/caja/:sesionId"
+            element={
+              <RequirePermission permission="manage_cash">
+                <PantallaEnConstruccion titulo="Detalle de Sesión de Caja" />
+              </RequirePermission>
+            }
+          />
+          <Route
+            path="/ventas/reportes"
+            element={
+              <RequirePermission permission="view_sales">
+                <PantallaEnConstruccion titulo="Reportes de Ventas" />
+              </RequirePermission>
+            }
+          />
+        </Route>
 
         <Route path="/preferencias" element={<PreferenciasPage />} />
         {/* Ruta desconocida dentro de la sesión → panel de inicio. */}

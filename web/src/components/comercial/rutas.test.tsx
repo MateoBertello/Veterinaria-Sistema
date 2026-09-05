@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import type { AuthUser, ModuloContratado } from "../../types/index.ts";
 
@@ -77,14 +77,14 @@ const RUTAS_COMERCIALES = [
 
 describe("Rutas y Gating Comercial (F1·T1)", () => {
   for (const { path, tituloEsperado } of RUTAS_COMERCIALES) {
-    it(`navegar a '${path}' renderiza el placeholder con título '${tituloEsperado}'`, () => {
+    it(`navegar a '${path}' con módulo contratado y permiso renderiza el placeholder con título '${tituloEsperado}'`, async () => {
       render(
         <MemoryRouter initialEntries={[path]}>
           <App />
         </MemoryRouter>,
       );
 
-      const heading = screen.getByRole("heading", { level: 1, name: tituloEsperado });
+      const heading = await screen.findByRole("heading", { level: 1, name: tituloEsperado });
       expect(heading).toBeInTheDocument();
       expect(
         screen.getByText("Esta pantalla se habilitará en las siguientes tandas del módulo comercial."),
@@ -95,7 +95,7 @@ describe("Rutas y Gating Comercial (F1·T1)", () => {
     });
   }
 
-  it("si el usuario no tiene el permiso correspondiente, RequirePermission bloquea el acceso", () => {
+  it("si el usuario no tiene el permiso correspondiente, RequirePermission bloquea el acceso", async () => {
     mockAuth.user = {
       ...USUARIO_COMERCIAL_COMPLETO,
       permissions: ["view_stock"], // Solo view_stock, no manage_products
@@ -107,10 +107,47 @@ describe("Rutas y Gating Comercial (F1·T1)", () => {
       </MemoryRouter>,
     );
 
+    const heading = await screen.findByRole("heading", { level: 1, name: "Sin acceso" });
+    expect(heading).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Catálogo de Productos" })).not.toBeInTheDocument();
-    expect(screen.getByRole("heading", { level: 1, name: "Sin acceso" })).toBeInTheDocument();
     expect(
       screen.getByText("Tu rol no tiene permiso para ver esta sección."),
     ).toBeInTheDocument();
+  });
+
+  it("si el tenant no tiene 'stock' contratado, RequireModule bloquea el acceso a /stock", async () => {
+    fetchModulosHabilitadosMock.mockResolvedValue([
+      { modulo: "ventas", habilitado: true, fechaAlta: null },
+    ]);
+
+    render(
+      <MemoryRouter initialEntries={["/stock"]}>
+        <App />
+      </MemoryRouter>,
+    );
+
+    const heading = await screen.findByRole("heading", { level: 1, name: "Módulo no contratado" });
+    expect(heading).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Stock" })).not.toBeInTheDocument();
+    expect(screen.getByText(/no forma parte del plan contratado/)).toBeInTheDocument();
+    expect(screen.getAllByText(/Stock e Inventario/).length).toBeGreaterThan(0);
+  });
+
+  it("si el tenant no tiene 'ventas' contratado, RequireModule bloquea el acceso a /ventas", async () => {
+    fetchModulosHabilitadosMock.mockResolvedValue([
+      { modulo: "stock", habilitado: true, fechaAlta: null },
+    ]);
+
+    render(
+      <MemoryRouter initialEntries={["/ventas"]}>
+        <App />
+      </MemoryRouter>,
+    );
+
+    const heading = await screen.findByRole("heading", { level: 1, name: "Módulo no contratado" });
+    expect(heading).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Mostrador de Ventas" })).not.toBeInTheDocument();
+    expect(screen.getByText(/no forma parte del plan contratado/)).toBeInTheDocument();
+    expect(screen.getAllByText(/Ventas y Facturación/).length).toBeGreaterThan(0);
   });
 });

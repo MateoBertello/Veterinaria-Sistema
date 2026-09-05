@@ -199,3 +199,17 @@ cualquier error.
 ## Deuda anotada — `movimientos_stock.mascota_id` se escribe y no se lee
 
 `registrar_venta` y `registrar_consumo_clinico` escriben `movimientos_stock.mascota_id` (48 de 618 filas no nulas en la base de volumen) y ninguna consulta del sistema lo lee: la trazabilidad por mascota se resuelve por `v_consumo_clinico`, que proyecta `mascota_id` desde `historial_clinico.pet_id` y llega a los movimientos por `idx_mov_historial`. `idx_mov_mascota` se eliminó con razón en `20261029000001_eliminar_idx_mov_mascota_sin_consumidor.sql` —no lo usaba ningún plan—, pero queda anotado que un reporte futuro de trazabilidad por mascota que consulte `movimientos_stock` directo, en vez de la vista, quedaría sin índice. No se corrige ahora: no hay consumidor todavía.
+
+---
+
+## Deuda anotada — Inconsistencia de transporte en `/ventas`: snake_case vs camelCase
+
+**Defecto de backend:**
+CLAUDE.md y la arquitectura del sistema exigen que la capa Service realice siempre la normalización bidireccional entre `snake_case` (base de datos) y `camelCase` (cliente API).
+Actualmente:
+- `POST /ventas` devuelve `ResultadoVenta` en `camelCase` (`ventaId`, `numeroOperacion`, etc.).
+- Sin embargo, `GET /ventas` y `GET /ventas/:id` devuelven filas crudas proyectadas desde PostgREST en `snake_case` (`subtotal_neto`, `total_iva`, `numero_operacion`, `items: ventas_items(*)`, `pagos: ventas_pagos(*)`).
+
+**Parche temporal en frontend:**
+Para no romper el contrato del backend auditado, el frontend implementó la normalización aislada mediante la función `toVenta(row: VentaRow): Venta` en [`web/src/api/comercial/ventas.ts`](file:///home/mateo/Veterinaria-Sistema/web/src/api/comercial/ventas.ts).
+Queda documentado como deuda técnica del backend para unificar la salida de `GET /ventas` y `GET /ventas/:id` en `camelCase` directamente desde el Service, eliminando la necesidad de `toVenta()` en el cliente.
