@@ -37,6 +37,7 @@ import { FamiliasPage } from "./pages/FamiliasPage.tsx";
 import { ProveedoresPage } from "./pages/ProveedoresPage.tsx";
 import { ExistenciasPage } from "./pages/ExistenciasPage.tsx";
 import { LoteDetallePage } from "./pages/LoteDetallePage.tsx";
+import { VencimientosPage } from "./pages/VencimientosPage.tsx";
 import { PantallaEnConstruccion } from "./components/comercial/PantallaEnConstruccion.tsx";
 import { AccessibilityButton } from "./components/accesibilidad/AccessibilityButton.tsx";
 import { Button } from "./components/ui/button.tsx";
@@ -289,7 +290,7 @@ export function App() {
             path="/stock/vencimientos"
             element={
               <RequirePermission permission="view_stock">
-                <PantallaEnConstruccion titulo="Vencimientos Próximos" />
+                <VencimientosPage />
               </RequirePermission>
             }
           />

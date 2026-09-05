@@ -50,3 +50,26 @@ export function formatFechaISO(fechaISO: string): string {
     day:   "numeric",
   });
 }
+
+/**
+ * Suma días a una fecha ISO y devuelve otra fecha ISO.
+ * Cálculo en UTC para evitar desfases horarios.
+ */
+export function sumarDias(fechaISO: string, dias: number): string {
+  const [anio, mes, dia] = fechaISO.split("-").map(Number) as [number, number, number];
+  const fecha = new Date(Date.UTC(anio, mes - 1, dia + dias));
+  return fecha.toISOString().slice(0, 10);
+}
+
+/**
+ * Calcula la diferencia en días calendario entre dos fechas ISO (fecha2 - fecha1).
+ * Si fecha2 es anterior a fecha1, el resultado es negativo.
+ */
+export function diferenciaDias(fechaISO1: string, fechaISO2: string): number {
+  const [a1, m1, d1] = fechaISO1.split("-").map(Number) as [number, number, number];
+  const [a2, m2, d2] = fechaISO2.split("-").map(Number) as [number, number, number];
+  const utc1 = Date.UTC(a1, m1 - 1, d1);
+  const utc2 = Date.UTC(a2, m2 - 1, d2);
+  const MS_POR_DIA = 1000 * 60 * 60 * 24;
+  return Math.round((utc2 - utc1) / MS_POR_DIA);
+}
