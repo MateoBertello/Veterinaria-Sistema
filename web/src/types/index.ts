@@ -900,3 +900,6 @@ export interface EditarTenantInput {
 
 /** Filtro de estado del listado de tenants (espejo de `ListarTenantsQuerySchema`). */
 export type EstadoTenantFiltro = "activo" | "suspendido";
+
+// ─── Re-export de tipos del Módulo Comercial (F1·T1) ─────────────────────────
+export * from "./comercial.ts";
