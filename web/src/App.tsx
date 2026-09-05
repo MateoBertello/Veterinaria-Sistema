@@ -32,6 +32,7 @@ import { UsuariosPage } from "./pages/UsuariosPage.tsx";
 import { AuditoriaPage } from "./pages/AuditoriaPage.tsx";
 import { PreferenciasPage } from "./pages/PreferenciasPage.tsx";
 import { CargaPreciosPage } from "./pages/CargaPreciosPage.tsx";
+import { ProductosPage } from "./pages/ProductosPage.tsx";
 import { PantallaEnConstruccion } from "./components/comercial/PantallaEnConstruccion.tsx";
 import { AccessibilityButton } from "./components/accesibilidad/AccessibilityButton.tsx";
 import { Button } from "./components/ui/button.tsx";
@@ -292,7 +293,7 @@ export function App() {
             path="/stock/productos"
             element={
               <RequirePermission permission="manage_products">
-                <PantallaEnConstruccion titulo="Catálogo de Productos" />
+                <ProductosPage />
               </RequirePermission>
             }
           />

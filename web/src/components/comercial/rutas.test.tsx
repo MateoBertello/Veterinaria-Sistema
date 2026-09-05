@@ -86,7 +86,7 @@ describe("Rutas y Gating Comercial (F1·T1)", () => {
 
       const heading = await screen.findByRole("heading", { level: 1, name: tituloEsperado });
       expect(heading).toBeInTheDocument();
-      if (path !== "/stock/productos/precios") {
+      if (path !== "/stock/productos/precios" && path !== "/stock/productos") {
         expect(
           screen.getByText("Esta pantalla se habilitará en las siguientes tandas del módulo comercial."),
         ).toBeInTheDocument();
