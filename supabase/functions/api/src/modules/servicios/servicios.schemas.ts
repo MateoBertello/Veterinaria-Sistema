@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ALICUOTAS_IVA } from "../productos/productos.schemas.ts";
 
 // RN-SV1: duracionMinutos entero 5–480, múltiplo de 5.
 // RN-SV4: requiereProfesional persiste el flag que TurnoService leerá en E6.
@@ -22,6 +23,14 @@ export const CrearServicioSchema = z.object({
     .refine((v) => v % 5 === 0, "La duración debe ser múltiplo de 5"),
   requiereProfesional: z.boolean(),
   descripcion:         z.string().max(300).nullish(),
+  precio:              z.number().nonnegative().nullish(),
+  alicuotaIva:         z
+    .number()
+    .refine(
+      (v) => (ALICUOTAS_IVA as readonly number[]).includes(v),
+      "La alícuota debe ser 0, 10.50, 21 o 27",
+    )
+    .default(21),
 });
 
 // Todos los campos opcionales en edición.

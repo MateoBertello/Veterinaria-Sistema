@@ -345,4 +345,111 @@ describe("ServicioService", () => {
     expect(auditArg.action).toBe("UPDATE");
     expect(auditArg.entityId).toBe(SVC_ID);
   });
+
+  // ── Precios y alícuotas (B0) ──────────────────────────────────────────────
+
+  it("RN-SV: crea un servicio con precio y alícuota y los devuelve como number", async () => {
+    const filaDb = {
+      id: SVC_ID,
+      tenant_id: TENANT_ID,
+      nombre: "Vacunación Antirrábica",
+      tipo: "clinica",
+      duracion_minutos: 15,
+      requiere_profesional: true,
+      descripcion: null,
+      activo: true,
+      precio: "1500.00",
+      alicuota_iva: "21.00",
+      created_at: "2026-09-05T00:00:00Z",
+    };
+    const db = buildDbChain({ singleData: filaDb });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    const res = await ServicioService.crear(
+      {
+        nombre: "Vacunación Antirrábica",
+        tipo: "clinica",
+        duracionMinutos: 15,
+        requiereProfesional: true,
+        precio: 1500,
+        alicuotaIva: 21,
+      },
+      ctx,
+    );
+
+    expect(res.precio).toBe(1500);
+    expect(typeof res.precio).toBe("number");
+    expect(res.alicuotaIva).toBe(21);
+    expect(typeof res.alicuotaIva).toBe("number");
+    expect(db.insert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        precio: 1500,
+        alicuota_iva: 21,
+      }),
+    );
+  });
+
+  it("RN-SV: rechaza una alícuota fuera de {0, 10.50, 21, 27} → VALIDATION_ERROR", async () => {
+    const db = buildDbChain();
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    await expect(
+      ServicioService.crear(
+        {
+          ...dtoValido,
+          precio: 1000,
+          alicuotaIva: 15 as never,
+        },
+        ctx,
+      ),
+    ).rejects.toMatchObject({ code: ErrorCode.VALIDATION_ERROR, statusCode: 422 });
+  });
+
+  it("RN-SV: actualizar sin tocar precio no lo pisa", async () => {
+    const filaDb = {
+      id: SVC_ID,
+      tenant_id: TENANT_ID,
+      nombre: "Consulta General",
+      tipo: "clinica",
+      duracion_minutos: 30,
+      requiere_profesional: true,
+      descripcion: "Revisación básica",
+      activo: true,
+      precio: "2000.00",
+      alicuota_iva: "21.00",
+      created_at: "2026-06-22T00:00:00Z",
+    };
+    const db = buildDbChain({ singleData: filaDb });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    await ServicioService.actualizar(SVC_ID, { descripcion: "Nueva descripción" }, ctx);
+
+    expect(db.update).toHaveBeenCalledWith(
+      expect.not.objectContaining({ precio: expect.anything() }),
+    );
+  });
+
+  it("RN-SV: actualizar con precio null lo borra", async () => {
+    const filaDb = {
+      id: SVC_ID,
+      tenant_id: TENANT_ID,
+      nombre: "Consulta General",
+      tipo: "clinica",
+      duracion_minutos: 30,
+      requiere_profesional: true,
+      descripcion: "Revisación básica",
+      activo: true,
+      precio: null,
+      alicuota_iva: "21.00",
+      created_at: "2026-06-22T00:00:00Z",
+    };
+    const db = buildDbChain({ singleData: filaDb });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    await ServicioService.actualizar(SVC_ID, { precio: null }, ctx);
+
+    expect(db.update).toHaveBeenCalledWith(
+      expect.objectContaining({ precio: null }),
+    );
+  });
 });

@@ -49,17 +49,18 @@ productosRouter.use("/*", ...sharedMiddleware);
 
 productosRouter.get("/", async (c) => {
   const parsed = ListarProductosQuerySchema.safeParse({
-    search:    c.req.query("search"),
-    familiaId: c.req.query("familiaId"),
-    activo:    c.req.query("activo"),
-    vendible:  c.req.query("vendible"),
-    page:      c.req.query("page"),
-    limit:     c.req.query("limit"),
+    search:       c.req.query("search"),
+    codigoBarras: c.req.query("codigoBarras"),
+    familiaId:    c.req.query("familiaId"),
+    activo:       c.req.query("activo"),
+    vendible:     c.req.query("vendible"),
+    page:         c.req.query("page"),
+    limit:        c.req.query("limit"),
   });
 
   const opts = parsed.success
     ? parsed.data
-    : { page: 1, limit: 20, activo: undefined, vendible: undefined, search: undefined, familiaId: undefined };
+    : { page: 1, limit: 20, activo: undefined, vendible: undefined, search: undefined, codigoBarras: undefined, familiaId: undefined };
 
   const { items, total, page, limit } = await ProductoService.buscarPaginado(opts, callerCtx(c));
   return c.json(ok(items, { page, limit, total }), 200);

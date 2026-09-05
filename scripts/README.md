@@ -30,14 +30,14 @@ demo listo para usar, sin crear nada a mano por SQL ni por la consola de Supabas
 # 1. Levantar el stack local (Postgres, Auth, PostgREST, Studio, Inbucket…)
 supabase start
 
-# 2. Aplicar migraciones + seed global de catálogos.
-#    `supabase db reset` reaplica TODAS las migraciones desde cero, incluido
-#    20260614000004_seed_global.sql (permisos) + on_tenant_created, que siembra
-#    el catálogo clínico (especies, razas, tipos_vacuna) de cada tenant.
-#    Ese seed corre como migración: NO hay que invocarlo aparte.
+# 2. Aplicar migraciones + seed de desarrollo y volumen.
+#    `supabase db reset` reaplica TODAS las migraciones desde cero e invoca los
+#    seeds configurados en `[db.seed]` (supabase/seed.sql con el tenant demo
+#    "Veterinaria Demo" y su admin, y el fixture de volumen comercial).
 supabase db reset
 
-# 3. Configurar .env (ver más abajo) y sembrar el entorno de demo.
+# 3. Configurar .env (ver más abajo). El tenant demo ya queda listo desde el reset;
+#    opcionalmente `npm run seed` siembra además clientes demo y mascotas.
 npm run seed
 
 # 4. Servir la Edge Function de la API (Hono).

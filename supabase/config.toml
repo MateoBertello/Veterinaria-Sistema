@@ -19,7 +19,7 @@ major_version = 15
 # Ver tests/README.md § "El fixture de volumen".
 [db.seed]
 enabled = true
-sql_paths = ["./seeds/comercial_volumen_seed.sql"]
+sql_paths = ["./seed.sql", "./seeds/comercial_volumen_seed.sql"]
 
 [studio]
 enabled = true

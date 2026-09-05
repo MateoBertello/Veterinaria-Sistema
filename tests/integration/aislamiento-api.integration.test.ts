@@ -685,7 +685,7 @@ describeIntegration("Aislamiento por API — ESCRITURA: B no modifica entidades 
 
       { nombre: "editar servicio", method: "PUT",   path: `/servicios/${A.servicioId}`,
         body: { nombre: "Servicio de B", tipo: "clinica", duracionMinutos: 45,
-                requiereProfesional: true } },
+                requiereProfesional: true, precio: 1500, alicuotaIva: 21 } },
       { nombre: "desactivar servicio", method: "PATCH", path: `/servicios/${A.servicioId}/estado`,
         body: { activo: false } },
 
