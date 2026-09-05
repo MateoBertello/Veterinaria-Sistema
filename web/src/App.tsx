@@ -33,6 +33,8 @@ import { AuditoriaPage } from "./pages/AuditoriaPage.tsx";
 import { PreferenciasPage } from "./pages/PreferenciasPage.tsx";
 import { CargaPreciosPage } from "./pages/CargaPreciosPage.tsx";
 import { ProductosPage } from "./pages/ProductosPage.tsx";
+import { FamiliasPage } from "./pages/FamiliasPage.tsx";
+import { ProveedoresPage } from "./pages/ProveedoresPage.tsx";
 import { PantallaEnConstruccion } from "./components/comercial/PantallaEnConstruccion.tsx";
 import { AccessibilityButton } from "./components/accesibilidad/AccessibilityButton.tsx";
 import { Button } from "./components/ui/button.tsx";
@@ -309,7 +311,7 @@ export function App() {
             path="/stock/familias"
             element={
               <RequirePermission permission="manage_products">
-                <PantallaEnConstruccion titulo="Familias de Productos" />
+                <FamiliasPage />
               </RequirePermission>
             }
           />
@@ -317,7 +319,7 @@ export function App() {
             path="/stock/proveedores"
             element={
               <RequirePermission permission="manage_suppliers">
-                <PantallaEnConstruccion titulo="Proveedores" />
+                <ProveedoresPage />
               </RequirePermission>
             }
           />
