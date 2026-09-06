@@ -46,6 +46,8 @@ import { MostradorPage } from "./pages/MostradorPage.tsx";
 import VentasHistorialPage from "./pages/VentasHistorialPage.tsx";
 import VentaDetallePage from "./pages/VentaDetallePage.tsx";
 import { AjustesPage } from "./pages/AjustesPage.tsx";
+import { RecuentosPage } from "./pages/RecuentosPage.tsx";
+import { RecuentoDetallePage } from "./pages/RecuentoDetallePage.tsx";
 import { PantallaEnConstruccion } from "./components/comercial/PantallaEnConstruccion.tsx";
 import { AccessibilityButton } from "./components/accesibilidad/AccessibilityButton.tsx";
 import { Button } from "./components/ui/button.tsx";
@@ -362,7 +364,7 @@ export function App() {
             path="/stock/recuentos"
             element={
               <RequirePermission permission="manage_stock">
-                <PantallaEnConstruccion titulo="Recuentos de Inventario" />
+                <RecuentosPage />
               </RequirePermission>
             }
           />
@@ -370,7 +372,7 @@ export function App() {
             path="/stock/recuentos/:id"
             element={
               <RequirePermission permission="manage_stock">
-                <PantallaEnConstruccion titulo="Detalle de Recuento" />
+                <RecuentoDetallePage />
               </RequirePermission>
             }
           />
