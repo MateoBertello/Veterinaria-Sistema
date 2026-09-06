@@ -49,6 +49,7 @@ import { AjustesPage } from "./pages/AjustesPage.tsx";
 import { RecuentosPage } from "./pages/RecuentosPage.tsx";
 import { RecuentoDetallePage } from "./pages/RecuentoDetallePage.tsx";
 import { FraccionamientoPage } from "./pages/FraccionamientoPage.tsx";
+import { ReportesStockPage } from "./pages/ReportesStockPage.tsx";
 import { PantallaEnConstruccion } from "./components/comercial/PantallaEnConstruccion.tsx";
 import { AccessibilityButton } from "./components/accesibilidad/AccessibilityButton.tsx";
 import { Button } from "./components/ui/button.tsx";
@@ -389,7 +390,7 @@ export function App() {
             path="/stock/reportes"
             element={
               <RequirePermission permission="view_stock">
-                <PantallaEnConstruccion titulo="Reportes de Stock" />
+                <ReportesStockPage />
               </RequirePermission>
             }
           />

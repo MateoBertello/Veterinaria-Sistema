@@ -726,140 +726,196 @@ export interface DisponibilidadLoteItem {
 
 // ─── 10. Reportes ─────────────────────────────────────────────────────────────
 
+export interface ItemReporteValorizacion {
+  loteId:                string;
+  codigoLote:            string | null;
+  fechaVencimiento:      string | null;
+  productoId:            string;
+  productoCodigo:        string;
+  productoNombre:        string;
+  familiaId:             string | null;
+  familiaNombre:         string | null;
+  unidadMedida:          string;
+  cantidadAFecha:        number;
+  costoUnitarioEfectivo: number;
+  valorTotal:            number;
+}
+
 export interface ReporteValorizacion {
   fechaCorte:        string;
   totalLineas:       number;
   totalUnidades:     number;
   valorizacionTotal: number;
-  items: Array<{
-    loteId:                string;
-    codigoLote:            string | null;
-    fechaVencimiento:      string | null;
-    productoId:            string;
-    productoCodigo:        string;
-    productoNombre:        string;
-    familiaId:             string | null;
-    familiaNombre:         string | null;
-    unidadMedida:          string;
-    cantidad:              number;
-    costoUnitarioEfectivo: number;
-    valorTotal:            number;
-  }>;
+  items:             ItemReporteValorizacion[];
+}
+
+export interface ItemReporteRotacion {
+  productoId:          string;
+  codigo:              string;
+  nombre:              string;
+  familiaId:           string | null;
+  familiaNombre:       string | null;
+  stockActual:         number;
+  costoReposicion:     number;
+  valorInmovilizado:   number;
+  ultimoMovimientoAt:  string | null;
+  diasSinMovimiento:   number;
+  sinMovimiento:       boolean;
+  totalSalidasPeriodo: number;
 }
 
 export interface ReporteRotacion {
-  totalProductos: number;
-  sinMovimiento:  number;
-  items: Array<{
-    productoId:         string;
-    codigo:             string;
-    nombre:             string;
-    familiaNombre:      string;
-    diasSinMovimiento:  number;
-    ultimoMovimiento:   string | null;
-    existenciaActual:   number;
-    costoReposicion:    number;
-    valorInmovilizado:  number;
-  }>;
+  diasLimite:               number;
+  totalProductos:           number;
+  totalSinMovimiento:       number;
+  capitalInmovilizadoTotal: number;
+  items:                    ItemReporteRotacion[];
+}
+
+export interface ItemReporteFraccionamiento {
+  tenant_id?:              string;
+  operacion_id:            string;
+  producto_origen_id:      string;
+  producto_destino_id:     string;
+  producto_origen_nombre:  string;
+  producto_destino_nombre: string;
+  cantidad_origen:         number;
+  factor_teorico:          number | null;
+  cantidad_teorica:        number | null;
+  cantidad_obtenida:       number;
+  merma:                   number;
+  costo_consumido:         number;
+  costo_unitario_hijo:     number;
+  sobrecosto:              number | null;
+  fraccionado_at:          string;
+}
+
+export type ReporteFraccionamiento = ItemReporteFraccionamiento[];
+
+export interface ItemReporteConsumoProfesional {
+  profesionalId:      string;
+  profesionalNombre:  string;
+  cantidadConsumos:   number;
+  unidadesConsumidas: number;
+  costoTotalInsumos:  number;
+}
+
+export type ReporteConsumoProfesional = ItemReporteConsumoProfesional[];
+
+export interface ItemReporteConsumoEspecie {
+  especieId:          string;
+  especieNombre:      string;
+  cantidadConsumos:   number;
+  unidadesConsumidas: number;
+  costoTotalInsumos:  number;
+}
+
+export type ReporteConsumoEspecie = ItemReporteConsumoEspecie[];
+
+export interface ItemReporteRentabilidad {
+  itemId:          string;
+  itemNombre:      string;
+  tipoItem:        string;
+  cantidadVendida: number;
+  netoTotal:       number;
+  costoTotal:      number;
+  margenBruto:     number;
+  margenPct:       number;
 }
 
 export interface ReporteRentabilidad {
-  totalVentas:     number;
-  margenPromedio:  number;
-  gananciaTotal:   number;
-  items: Array<{
-    ventaId:             string;
-    fecha:               string;
-    productoId:          string;
-    codigo:              string;
-    nombre:              string;
-    familiaNombre:       string;
-    cantidad:            number;
-    precioVentaUnitario: number;
-    costoUnitario:       number;
-    margenPorcentaje:    number;
-    gananciaTotal:       number;
-  }>;
+  totalItemsVendidos: number;
+  totalNeto:          number;
+  totalCosto:         number;
+  totalMargenBruto:   number;
+  margenPromedioPct:  number;
+  items:              ItemReporteRentabilidad[];
 }
 
-export interface ReporteFraccionamiento {
-  totalOperaciones:     number;
-  mermaTotalPromedio:   number;
-  items: Array<{
-    fraccionamientoId:    string;
-    fecha:                string;
-    productoOrigen:       string;
-    cantidadOrigen:       number;
-    productoDestino:      string;
-    cantidadDestino:      number;
-    mermaPorcentaje:      number;
-    costoOrigenTotal:     number;
-    costoDestinoUnitario: number;
-  }>;
+export interface ItemReporteVentasUsuario {
+  usuarioId:           string;
+  usuarioNombre:       string;
+  usuarioUsername:     string;
+  cantidadOperaciones: number;
+  subtotalNeto:        number;
+  totalIva:            number;
+  totalDescuentos:     number;
+  totalVentas:         number;
+  ticketPromedio:      number;
 }
 
-export interface ReporteVentasUsuario {
-  totalVentas:    number;
-  totalRecaudado: number;
-  usuarios: Array<{
-    usuarioId:      string;
-    nombre:         string;
-    cantidadVentas: number;
-    totalRecaudado: number;
-    ticketPromedio: number;
-  }>;
+export type ReporteVentasUsuario = ItemReporteVentasUsuario[];
+
+export interface ItemReporteVentasSesion {
+  sesionId:             string;
+  cajaId:               string;
+  cajaNombre:           string;
+  estado:               string;
+  aperturaAt:           string;
+  cierreAt:             string | null;
+  usuarioApertura:      string | null;
+  usuarioCierre:        string | null;
+  saldoInicial:         number;
+  saldoTeoricoEfectivo: number | null;
+  efectivoContado:      number | null;
+  diferencia:           number | null;
+  cantidadVentas:       number;
+  totalVentas:          number;
 }
 
-export interface ReporteVentasSesion {
-  totalSesiones:  number;
-  totalRecaudado: number;
-  sesiones: Array<{
-    sesionId:         string;
-    cajaNombre:       string;
-    fechaApertura:    string;
-    fechaCierre:      string | null;
-    estado:           string;
-    totalVentas:      number;
-    totalRecaudado:   number;
-    diferenciaArqueo: number | null;
-  }>;
+export type ReporteVentasSesion = ItemReporteVentasSesion[];
+
+export interface ItemReporteVentasMedioPago {
+  medioPagoId:           string;
+  medioPagoCodigo:       string;
+  medioPagoNombre:       string;
+  cantidadTransacciones: number;
+  totalRecaudado:        number;
+  porcentajeDelTotal:    number;
 }
 
 export interface ReporteVentasMedioPago {
-  totalRecaudado: number;
-  mediosPago: Array<{
-    medioPagoId:        string;
-    codigo:             string;
-    nombre:             string;
-    cantidadOperaciones: number;
-    totalRecaudado:     number;
-    porcentajeDelTotal: number;
-  }>;
+  granTotal:          number;
+  totalTransacciones: number;
+  items:              ItemReporteVentasMedioPago[];
 }
 
-export interface ReporteConsumoProfesional {
-  totalConsumos:   number;
-  totalValorizado: number;
-  profesionales: Array<{
-    profesionalId:   string;
-    nombre:          string;
-    cantidadEventos: number;
-    totalInsumos:    number;
-    valorTotal:      number;
-  }>;
+export interface ItemReporteMargen {
+  tenant_id?:    string;
+  venta_id:      string;
+  vendido_at:    string;
+  tipo_item:     string;
+  item_id:       string;
+  item_nombre:   string;
+  cantidad:      number;
+  importe_total: number;
+  neto_total:    number;
+  costo_total:   number;
+  margen:        number;
 }
 
-export interface ReporteConsumoEspecie {
-  totalConsumos:   number;
-  totalValorizado: number;
-  especies: Array<{
-    especieId:       string;
-    nombre:          string;
-    cantidadEventos: number;
-    totalInsumos:    number;
-    valorTotal:      number;
-  }>;
+export type ReporteMargen = ItemReporteMargen[];
+
+export interface ItemReporteItemsVendidos {
+  tenant_id?:              string;
+  venta_id:                string;
+  numero_operacion:        number;
+  vendido_at:              string;
+  venta_estado:            string;
+  usuario_id:              string;
+  tipo_item:               string;
+  item_id:                 string;
+  item_nombre:             string;
+  familia_id:              string | null;
+  cantidad:                number;
+  precio_unitario:         number;
+  neto_unitario:           number;
+  iva_unitario:            number;
+  importe_total:           number;
+  costo_unitario_efectivo: number | null;
 }
+
+export type ReporteItemsVendidos = ItemReporteItemsVendidos[];
 
 // ─── 11. Catálogos PostgREST ─────────────────────────────────────────────────
 

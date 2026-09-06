@@ -58,6 +58,8 @@ export function fraccionamiento(
   );
 }
 
+export const reporteFraccionamiento = fraccionamiento;
+
 export interface ReporteConsumoProfesionalParams {
   desde?:         string;
   hasta?:         string;
