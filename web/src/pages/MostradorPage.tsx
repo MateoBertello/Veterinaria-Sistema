@@ -65,6 +65,7 @@ import { listarMediosPago, listarServiciosVendibles, listarUnidadesMedida } from
 import { listarClientes } from "../api/clientes.ts";
 import { listarMascotas } from "../api/mascotas.ts";
 import { cn } from "../components/ui/utils.ts";
+import { SelectorLoteFefo } from "../components/comercial/SelectorLoteFefo.tsx";
 import type {
   Cliente,
   CondicionPago,
@@ -1300,87 +1301,19 @@ export function MostradorPage() {
                         {/* Selector de Lote con FEFO (§2.2) para Productos */}
                         {esProducto && (
                           <div className="space-y-1.5 pt-1">
-                            {item.loadingLotes ? (
-                              <Skeleton className="h-8 w-full" />
-                            ) : item.sinStock ? (
-                              <div className="rounded bg-destructive/10 p-2 text-xs font-medium text-destructive border border-destructive/20 flex items-center gap-1.5">
-                                <AlertCircle className="size-4 shrink-0" aria-hidden />
-                                Sin stock disponible
-                              </div>
-                            ) : (
-                              <div className="space-y-1.5">
-                                <div className="flex items-center justify-between">
-                                  <Label className="text-[11px] font-semibold text-muted-foreground uppercase">
-                                    Lote (criterio FEFO)
-                                  </Label>
-                                  {item.stockInsuficiente && (
-                                    <span className="text-[10px] text-amber-600 font-medium">
-                                      Stock disponible menor al pedido
-                                    </span>
-                                  )}
-                                </div>
-                                <Select
-                                  value={item.loteId || ""}
-                                  onValueChange={(val) => seleccionarLoteLinea(item.uid, val)}
-                                >
-                                  <SelectTrigger
-                                    aria-label={`Lote para ${item.nombre}`}
-                                    className="h-8 text-xs font-mono"
-                                  >
-                                    <SelectValue placeholder="Seleccionar lote..." />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    {(item.candidatos || []).map((cand, idx) => {
-                                      const esSugerido = idx === 0;
-                                      return (
-                                        <SelectItem key={cand.loteId} value={cand.loteId}>
-                                          <div className="flex items-center gap-2">
-                                            <span>{cand.codigoLote || "Sin código"}</span>
-                                            {cand.fechaVencimiento && (
-                                              <span className="text-muted-foreground text-[10px]">
-                                                (vence: {cand.fechaVencimiento})
-                                              </span>
-                                            )}
-                                            <span className="text-muted-foreground text-[10px]">
-                                              Disp: {cand.cantidadDisponible}
-                                            </span>
-                                            {esSugerido && (
-                                              <Badge className="bg-green-100 text-green-800 border-green-300 text-[10px] px-1 py-0 hover:bg-green-100">
-                                                Sugerido (vence antes)
-                                              </Badge>
-                                            )}
-                                          </div>
-                                        </SelectItem>
-                                      );
-                                    })}
-                                  </SelectContent>
-                                </Select>
-
-                                {/* Campo motivoFefo en la misma línea (§2.2) */}
-                                {noEsSugerido && (
-                                  <div className="pt-1 space-y-1 bg-amber-50/70 p-2 rounded-md border border-amber-200">
-                                    <div className="flex items-center gap-1 text-[11px] font-semibold text-amber-900">
-                                      <AlertTriangle className="size-3.5 text-amber-600" aria-hidden />
-                                      Motivo de desvío de FEFO (requerido)
-                                    </div>
-                                    <Input
-                                      type="text"
-                                      placeholder="Explicá por qué elegís este lote en vez del sugerido..."
-                                      aria-label={`Motivo FEFO para ${item.nombre}`}
-                                      value={item.motivoFefo || ""}
-                                      onChange={(e) => actualizarMotivoFefo(item.uid, e.target.value)}
-                                      className="h-7 text-xs bg-white border-amber-300"
-                                      required
-                                    />
-                                    {!item.motivoFefo?.trim() && (
-                                      <span className="text-[10px] text-destructive block">
-                                        Debés especificar un motivo para poder cobrar.
-                                      </span>
-                                    )}
-                                  </div>
-                                )}
-                              </div>
-                            )}
+                            <SelectorLoteFefo
+                              candidatos={item.candidatos}
+                              loadingLotes={item.loadingLotes}
+                              sinStock={item.sinStock}
+                              stockInsuficiente={item.stockInsuficiente}
+                              loteId={item.loteId}
+                              loteSugeridoId={item.loteSugeridoId}
+                              motivoFefo={item.motivoFefo}
+                              nombreProducto={item.nombre}
+                              mensajeSinMotivo="Debés especificar un motivo para poder cobrar."
+                              onSeleccionarLote={(val) => seleccionarLoteLinea(item.uid, val)}
+                              onActualizarMotivoFefo={(motivo) => actualizarMotivoFefo(item.uid, motivo)}
+                            />
                           </div>
                         )}
 
