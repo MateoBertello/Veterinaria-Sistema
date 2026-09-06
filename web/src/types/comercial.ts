@@ -436,6 +436,7 @@ export interface VentaItemRow {
   tipo_item:                TipoItemVenta;
   producto_id:              string | null;
   servicio_id:              string | null;
+  descripcion_snapshot?:    string | null;
   lote_id:                  string | null;
   motivo_fefo:              string | null;
   mascota_id:               string | null;
@@ -446,6 +447,8 @@ export interface VentaItemRow {
   importe_iva:              number;
   total_linea:              number;
   costo_unitario_historico: number | null;
+  descuento_porcentaje?:    number | null;
+  lote?:                    { id: string; codigo_lote?: string; numero_lote?: string; fecha_vencimiento?: string | null } | null;
   created_at?:              string;
 }
 
@@ -488,6 +491,7 @@ export interface VentaItem {
   tipoItem:               TipoItemVenta;
   productoId:             string | null;
   servicioId:             string | null;
+  descripcionSnapshot?:   string | null;
   loteId:                 string | null;
   motivoFefo:             string | null;
   mascotaId:              string | null;
@@ -498,6 +502,8 @@ export interface VentaItem {
   importeIva:             number;
   totalLinea:             number;
   costoUnitarioHistorico: number | null;
+  descuentoPorcentaje?:   number | null;
+  lote?:                  { id: string; codigoLote?: string; numeroLote?: string; fechaVencimiento?: string | null } | null;
 }
 
 export interface VentaPago {

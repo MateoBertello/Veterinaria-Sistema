@@ -41,6 +41,7 @@ function toVenta(row: VentaRow): Venta {
       tipoItem:               it.tipo_item,
       productoId:             it.producto_id,
       servicioId:             it.servicio_id,
+      descripcionSnapshot:    it.descripcion_snapshot ?? null,
       loteId:                 it.lote_id,
       motivoFefo:             it.motivo_fefo,
       mascotaId:              it.mascota_id,
@@ -51,6 +52,13 @@ function toVenta(row: VentaRow): Venta {
       importeIva:             Number(it.importe_iva),
       totalLinea:             Number(it.total_linea),
       costoUnitarioHistorico: it.costo_unitario_historico != null ? Number(it.costo_unitario_historico) : null,
+      descuentoPorcentaje:    it.descuento_porcentaje != null ? Number(it.descuento_porcentaje) : 0,
+      lote:                   it.lote ? {
+        id:               it.lote.id,
+        codigoLote:       it.lote.codigo_lote,
+        numeroLote:       it.lote.numero_lote,
+        fechaVencimiento: it.lote.fecha_vencimiento,
+      } : null,
     })),
     pagos: (row.pagos ?? []).map((p) => ({
       id:          p.id,

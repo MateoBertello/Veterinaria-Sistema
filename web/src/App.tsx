@@ -43,6 +43,8 @@ import { CompraDetallePage } from "./pages/CompraDetallePage.tsx";
 import { CajaPage } from "./pages/CajaPage.tsx";
 import { ArqueoCajaPage } from "./pages/ArqueoCajaPage.tsx";
 import { MostradorPage } from "./pages/MostradorPage.tsx";
+import VentasHistorialPage from "./pages/VentasHistorialPage.tsx";
+import VentaDetallePage from "./pages/VentaDetallePage.tsx";
 import { PantallaEnConstruccion } from "./components/comercial/PantallaEnConstruccion.tsx";
 import { AccessibilityButton } from "./components/accesibilidad/AccessibilityButton.tsx";
 import { Button } from "./components/ui/button.tsx";
@@ -400,10 +402,18 @@ export function App() {
             }
           />
           <Route
+            path="/ventas/mostrador"
+            element={
+              <RequirePermission permission="manage_sales">
+                <MostradorPage />
+              </RequirePermission>
+            }
+          />
+          <Route
             path="/ventas/historial"
             element={
               <RequirePermission permission="manage_sales">
-                <PantallaEnConstruccion titulo="Historial de Ventas" />
+                <VentasHistorialPage />
               </RequirePermission>
             }
           />
@@ -411,7 +421,7 @@ export function App() {
             path="/ventas/:id"
             element={
               <RequirePermission permission="manage_sales">
-                <PantallaEnConstruccion titulo="Detalle de Venta" />
+                <VentaDetallePage />
               </RequirePermission>
             }
           />
