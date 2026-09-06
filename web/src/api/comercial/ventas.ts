@@ -4,6 +4,8 @@ import type {
   AnularVentaInput,
   ApiMeta,
   EstadoVenta,
+  ItemReporteItemsVendidos,
+  ItemReporteMargen,
   RegistrarVentaInput,
   ResultadoVenta,
   TipoItemVenta,
@@ -128,8 +130,8 @@ export interface ReporteMargenParams {
 
 export function reporteMargen(
   params: ReporteMargenParams = {},
-): Promise<unknown[]> {
-  return apiClient<unknown[]>(`/ventas/reportes/margen${buildQuery(params as Record<string, unknown>)}`);
+): Promise<ItemReporteMargen[]> {
+  return apiClient<ItemReporteMargen[]>(`/ventas/reportes/margen${buildQuery(params as Record<string, unknown>)}`);
 }
 
 export interface ReporteItemsVendidosParams {
@@ -141,8 +143,8 @@ export interface ReporteItemsVendidosParams {
 
 export function reporteItemsVendidos(
   params: ReporteItemsVendidosParams = {},
-): Promise<unknown[]> {
-  return apiClient<unknown[]>(
+): Promise<ItemReporteItemsVendidos[]> {
+  return apiClient<ItemReporteItemsVendidos[]>(
     `/ventas/reportes/items-vendidos${buildQuery(params as Record<string, unknown>)}`,
   );
 }
