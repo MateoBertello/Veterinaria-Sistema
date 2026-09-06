@@ -48,6 +48,7 @@ import VentaDetallePage from "./pages/VentaDetallePage.tsx";
 import { AjustesPage } from "./pages/AjustesPage.tsx";
 import { RecuentosPage } from "./pages/RecuentosPage.tsx";
 import { RecuentoDetallePage } from "./pages/RecuentoDetallePage.tsx";
+import { FraccionamientoPage } from "./pages/FraccionamientoPage.tsx";
 import { PantallaEnConstruccion } from "./components/comercial/PantallaEnConstruccion.tsx";
 import { AccessibilityButton } from "./components/accesibilidad/AccessibilityButton.tsx";
 import { Button } from "./components/ui/button.tsx";
@@ -380,7 +381,7 @@ export function App() {
             path="/stock/fraccionamiento"
             element={
               <RequirePermission permission="split_stock">
-                <PantallaEnConstruccion titulo="Fraccionamiento de Lotes" />
+                <FraccionamientoPage />
               </RequirePermission>
             }
           />
