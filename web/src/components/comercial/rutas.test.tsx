@@ -100,7 +100,8 @@ describe("Rutas y Gating Comercial (F1·T1)", () => {
         path !== "/ventas/caja/ses-123" &&
         path !== "/ventas" &&
         path !== "/ventas/historial" &&
-        path !== "/ventas/v-123"
+        path !== "/ventas/v-123" &&
+        path !== "/stock/ajustes"
       ) {
         expect(
           screen.getByText("Esta pantalla se habilitará en las siguientes tandas del módulo comercial."),

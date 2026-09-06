@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { AlertCircle, ChevronLeft, ChevronRight, Eye, Layers } from "lucide-react";
+import { AlertCircle, ChevronLeft, ChevronRight, Eye, Layers, Lock, Unlock } from "lucide-react";
+import { BloquearLoteDialog } from "../components/comercial/BloquearLoteDialog.tsx";
+import { DesbloquearLoteDialog } from "../components/comercial/DesbloquearLoteDialog.tsx";
 import {
   Table,
   TableBody,
@@ -115,6 +117,10 @@ export function LotesPage({
   );
   const [page, setPage] = useState(1);
   const [tieneSiguiente, setTieneSiguiente] = useState(false);
+
+  const [loteParaAccion, setLoteParaAccion] = useState<Lote | null>(null);
+  const [bloquearOpen, setBloquearOpen] = useState(false);
+  const [desbloquearOpen, setDesbloquearOpen] = useState(false);
 
   // NOTA PLAN_FRONTEND_COMERCIAL.md §4.3:
   // Con `conExistencia`, el backend filtra en memoria después de paginar, por lo que
@@ -287,12 +293,43 @@ export function LotesPage({
                       <EstadoLoteBadge estado={lote.estado} />
                     </TableCell>
                     <TableCell className="text-center">
-                      <Button asChild variant="ghost" size="sm" className="h-8 w-8 p-0">
-                        <Link to={`/stock/lotes/${lote.id}`} title="Ver detalle de lote">
-                          <Eye className="h-4 w-4 text-slate-600 hover:text-orange-700" />
-                          <span className="sr-only">Ver detalle de lote</span>
-                        </Link>
-                      </Button>
+                      <div className="flex items-center justify-center gap-1">
+                        <Button asChild variant="ghost" size="sm" className="h-8 w-8 p-0">
+                          <Link to={`/stock/lotes/${lote.id}`} title="Ver detalle de lote">
+                            <Eye className="h-4 w-4 text-slate-600 hover:text-orange-700" />
+                            <span className="sr-only">Ver detalle de lote</span>
+                          </Link>
+                        </Button>
+                        {lote.estado === "bloqueado" ? (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-8 w-8 p-0 text-emerald-600 hover:text-emerald-800"
+                            title="Desbloquear lote"
+                            onClick={() => {
+                              setLoteParaAccion(lote);
+                              setDesbloquearOpen(true);
+                            }}
+                          >
+                            <Unlock className="h-4 w-4" />
+                            <span className="sr-only">Desbloquear lote</span>
+                          </Button>
+                        ) : (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-8 w-8 p-0 text-slate-500 hover:text-rose-700"
+                            title="Bloquear lote"
+                            onClick={() => {
+                              setLoteParaAccion(lote);
+                              setBloquearOpen(true);
+                            }}
+                          >
+                            <Lock className="h-4 w-4" />
+                            <span className="sr-only">Bloquear lote</span>
+                          </Button>
+                        )}
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))
@@ -330,6 +367,31 @@ export function LotesPage({
           </div>
         </div>
       </div>
+
+      <BloquearLoteDialog
+        lote={loteParaAccion}
+        open={bloquearOpen}
+        onOpenChange={setBloquearOpen}
+        onSuccess={({ estado }) => {
+          if (loteParaAccion) {
+            setLotes((prev) =>
+              prev.map((l) => (l.id === loteParaAccion.id ? { ...l, estado: estado as any } : l)),
+            );
+          }
+        }}
+      />
+      <DesbloquearLoteDialog
+        lote={loteParaAccion}
+        open={desbloquearOpen}
+        onOpenChange={setDesbloquearOpen}
+        onSuccess={({ estado }) => {
+          if (loteParaAccion) {
+            setLotes((prev) =>
+              prev.map((l) => (l.id === loteParaAccion.id ? { ...l, estado: estado as any } : l)),
+            );
+          }
+        }}
+      />
     </div>
   );
 }

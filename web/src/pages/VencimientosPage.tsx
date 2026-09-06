@@ -313,7 +313,7 @@ export function VencimientosPage() {
                                 size="sm"
                                 className="h-8 text-xs gap-1 border-rose-300 text-rose-800 hover:bg-rose-100"
                               >
-                                <Link to="/stock/ajustes" title="Ajustar por merma">
+                                <Link to={`/stock/ajustes?loteId=${lote.id}`} title="Ajustar por merma">
                                   Dar de baja
                                   <ExternalLink className="h-3 w-3" />
                                 </Link>

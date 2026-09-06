@@ -16,7 +16,11 @@ import {
   TrendingDown,
   TrendingUp,
   Truck,
+  Lock,
+  Unlock,
 } from "lucide-react";
+import { BloquearLoteDialog } from "../components/comercial/BloquearLoteDialog.tsx";
+import { DesbloquearLoteDialog } from "../components/comercial/DesbloquearLoteDialog.tsx";
 import {
   Table,
   TableBody,
@@ -92,6 +96,8 @@ export function LoteDetallePage() {
   const [lote, setLote] = useState<Lote | null>(null);
   const [loteCargando, setLoteCargando] = useState(true);
   const [loteError, setLoteError] = useState<string | null>(null);
+  const [bloquearOpen, setBloquearOpen] = useState(false);
+  const [desbloquearOpen, setDesbloquearOpen] = useState(false);
 
   // Bloque 2: Kardex
   const [movimientos, setMovimientos] = useState<KardexMovimiento[]>([]);
@@ -226,7 +232,32 @@ export function LoteDetallePage() {
                 </p>
               </div>
             </div>
-            {lote && <EstadoLoteBadge estado={lote.estado} />}
+            {lote && (
+              <div className="flex items-center gap-2">
+                <EstadoLoteBadge estado={lote.estado} />
+                {lote.estado === "bloqueado" ? (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setDesbloquearOpen(true)}
+                    className="h-8 text-xs gap-1 border-emerald-300 text-emerald-800 hover:bg-emerald-50"
+                  >
+                    <Unlock className="h-3.5 w-3.5" />
+                    Desbloquear lote
+                  </Button>
+                ) : (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setBloquearOpen(true)}
+                    className="h-8 text-xs gap-1 border-rose-300 text-rose-800 hover:bg-rose-50"
+                  >
+                    <Lock className="h-3.5 w-3.5" />
+                    Bloquear lote
+                  </Button>
+                )}
+              </div>
+            )}
           </div>
         </CardHeader>
         <CardContent className="pt-6">
@@ -519,6 +550,23 @@ export function LoteDetallePage() {
           )}
         </Card>
       </div>
+
+      <BloquearLoteDialog
+        lote={lote}
+        open={bloquearOpen}
+        onOpenChange={setBloquearOpen}
+        onSuccess={({ estado }) => {
+          setLote((prev) => (prev ? { ...prev, estado: estado as any } : null));
+        }}
+      />
+      <DesbloquearLoteDialog
+        lote={lote}
+        open={desbloquearOpen}
+        onOpenChange={setDesbloquearOpen}
+        onSuccess={({ estado }) => {
+          setLote((prev) => (prev ? { ...prev, estado: estado as any } : null));
+        }}
+      />
     </div>
   );
 }
