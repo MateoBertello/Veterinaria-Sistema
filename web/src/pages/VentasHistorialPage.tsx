@@ -34,6 +34,7 @@ import {
   TableRow,
 } from "../components/ui/table.tsx";
 import { Skeleton } from "../components/ui/skeleton.tsx";
+import { Alert, AlertDescription, AlertTitle } from "../components/ui/alert.tsx";
 
 export default function VentasHistorialPage() {
   const { user } = useAuth();
@@ -277,16 +278,21 @@ export default function VentasHistorialPage() {
               ))}
             </div>
           ) : error ? (
-            <div className="p-8 text-center space-y-3">
-              <AlertCircle className="size-8 text-destructive mx-auto" />
-              <div className="text-sm font-medium text-destructive">{error}</div>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => void fetchVentas()}
-              >
-                Reintentar
-              </Button>
+            <div className="p-8">
+              <Alert variant="destructive">
+                <AlertCircle className="size-4" />
+                <AlertTitle>No se pudo cargar el historial de ventas</AlertTitle>
+                <AlertDescription className="flex items-center justify-between gap-3">
+                  <span>{error}</span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => void fetchVentas()}
+                  >
+                    Reintentar
+                  </Button>
+                </AlertDescription>
+              </Alert>
             </div>
           ) : ventas.length === 0 ? (
             <div className="p-12 text-center space-y-3">

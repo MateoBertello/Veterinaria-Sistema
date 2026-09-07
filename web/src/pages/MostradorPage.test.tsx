@@ -677,7 +677,7 @@ describe("MostradorPage (F4·T1 & F4·T2)", () => {
     });
   });
 
-  it("Sin candidatos, la línea dice 'Sin stock disponible' y bloquea el cobro", async () => {
+  it("Sin candidatos, la línea dice 'Sin existencia disponible' y bloquea el cobro", async () => {
     const user = userEvent.setup();
     vi.spyOn(stockApi, "candidatosFefo").mockResolvedValue([]);
 
@@ -688,7 +688,7 @@ describe("MostradorPage (F4·T1 & F4·T2)", () => {
     const btnAdd = within(rowProd.parentElement!).getByRole("button", { name: /Agregar/i });
     await user.click(btnAdd);
 
-    expect(await screen.findByText("Sin stock disponible")).toBeInTheDocument();
+    expect(await screen.findByText("Sin existencia disponible")).toBeInTheDocument();
 
     const btnCobrar = screen.getByRole("button", { name: "Cobrar" });
     expect(btnCobrar).toBeDisabled();

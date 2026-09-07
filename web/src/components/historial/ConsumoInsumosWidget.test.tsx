@@ -375,7 +375,7 @@ describe("ConsumoInsumosWidget", () => {
 
     // Debe mostrar advertencia de producto sin stock
     expect(
-      await screen.findByText(/no tiene stock disponible|sin stock disponible/i),
+      await screen.findByText(/no tiene existencia disponible|sin existencia disponible/i),
     ).toBeInTheDocument();
   });
 

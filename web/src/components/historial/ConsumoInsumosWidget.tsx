@@ -254,7 +254,7 @@ export function ConsumoInsumosWidget({
       );
 
       if (totalDisponible <= 0) {
-        setProductoSinStockAviso(`El producto ${producto.nombre} no tiene stock disponible.`);
+        setProductoSinStockAviso(`El producto ${producto.nombre} no tiene existencia disponible.`);
         // También marcamos en la lista si ya estaba o alertamos
         return;
       }

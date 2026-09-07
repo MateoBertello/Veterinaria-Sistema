@@ -47,7 +47,7 @@ export function SelectorLoteFefo({
     return (
       <div className="rounded bg-destructive/10 p-2 text-xs font-medium text-destructive border border-destructive/20 flex items-center gap-1.5">
         <AlertCircle className="size-4 shrink-0" aria-hidden />
-        Sin stock disponible
+        Sin existencia disponible
       </div>
     );
   }
@@ -62,7 +62,7 @@ export function SelectorLoteFefo({
         </Label>
         {stockInsuficiente && (
           <span className="text-[10px] text-amber-600 font-medium">
-            Stock disponible menor al pedido
+            Existencia disponible menor a la pedida
           </span>
         )}
       </div>
