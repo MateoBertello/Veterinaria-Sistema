@@ -1,4 +1,4 @@
-# CLAUDE.md — Sistema de Gestión Veterinaria "Leo" (SaaS multi-tenant)
+# CLAUDE.md — Sistema de Gestión VeterCor (SaaS multi-tenant)
 
 Este archivo define las reglas que **toda** sesión de Claude Code debe respetar en este repositorio. Ante cualquier duda, la fuente de verdad es la documentación en `/docs`:
 

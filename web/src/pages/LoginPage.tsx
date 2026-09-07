@@ -108,7 +108,7 @@ export function LoginPage() {
           <div className="mb-2 flex flex-col items-center gap-3">
             <LogoMarca className="size-20 rounded-2xl shadow-lg" />
             <div>
-              <div className="text-2xl font-semibold text-orange-800">Veterinaria Leo</div>
+              <div className="text-2xl font-semibold text-orange-800">VeterCor</div>
               <div className="text-sm text-muted-foreground">Sistema de Gestión Profesional</div>
             </div>
           </div>

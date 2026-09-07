@@ -43,7 +43,7 @@ export function ModuloNoContratado({ modulo }: ModuloNoContratadoProps) {
           <p className="text-sm text-muted-foreground">
             Los módulos adicionales pueden activarse en la suscripción de la clínica en cualquier
             momento. Si necesitás utilizar {nombreModulo}, contactá al administrador de la
-            clínica o al equipo de soporte de Veterinaria Leo para incorporarlo al plan.
+            clínica o al equipo de soporte de VeterCor para incorporarlo al plan.
           </p>
           <Button asChild variant="outline">
             <Link to="/">Volver al inicio</Link>

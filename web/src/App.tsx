@@ -93,7 +93,7 @@ function MobileNav({ items, user, onLogout }: {
         className="flex items-center gap-2 rounded-lg transition-colors hover:bg-sidebar-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       >
         <LogoMarca className="size-8 rounded-lg" />
-        <span className="text-base font-semibold text-sidebar-accent-foreground">Leo</span>
+        <span className="text-base font-semibold text-sidebar-accent-foreground">VeterCor</span>
       </Link>
 
       <Sheet open={open} onOpenChange={setOpen}>

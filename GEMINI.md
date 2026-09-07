@@ -1,4 +1,4 @@
-# Reglas de ejecución — Módulo Comercial · Veterinaria Leo
+# Reglas de ejecución — Módulo Comercial · VeterCor
 
 **Activación: Always On.** Ubicación: `.agents/rules/modulo-comercial.md`
 

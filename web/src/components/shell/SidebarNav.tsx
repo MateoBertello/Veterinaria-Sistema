@@ -93,7 +93,7 @@ export function SidebarNav({ items, user, onLogout, onNavigate }: Props) {
       >
         <LogoMarca className="size-10" />
         <div className="leading-tight">
-          <div className="text-base font-semibold text-sidebar-accent-foreground">Veterinaria Leo</div>
+          <div className="text-base font-semibold text-sidebar-accent-foreground">VeterCor</div>
           <div className="text-xs text-sidebar-foreground">Sistema de Gestión</div>
         </div>
       </Link>

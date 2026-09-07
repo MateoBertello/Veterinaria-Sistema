@@ -136,7 +136,7 @@ export function DashboardPage() {
             {nombre ? `Bienvenido, ${nombre}` : "Bienvenido"}
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Sistema de Gestión Veterinaria Leo
+            Sistema de Gestión VeterCor
           </p>
         </div>
 

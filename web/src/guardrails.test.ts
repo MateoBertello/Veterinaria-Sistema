@@ -97,6 +97,16 @@ function fuentesVigiladas(incluirTests = false): Fuente[] {
   return DIRECTORIOS_VIGILADOS.flatMap((d) => listarFuentes(d, incluirTests));
 }
 
+/**
+ * Todos los fuentes de `src/`, sin acotar a DIRECTORIOS_VIGILADOS. Lo usa la
+ * regla 4: el nombre del sistema no vive en las pantallas del alcance de las
+ * reglas 1-3, vive en el shell (`components/shell/`, `App.tsx`), así que
+ * acotarla a esos tres directorios la dejaría ciega justo donde importa.
+ */
+function todosLosFuentes(incluirTests = false): Fuente[] {
+  return listarFuentes(".", incluirTests);
+}
+
 interface Hallazgo {
   linea: number;
   texto: string;
@@ -198,6 +208,53 @@ const ALLOWLIST_COPY: Array<{ archivo: string; motivo: string }> = [
     motivo:
       "Bloque 'Comprobante Proveedor' del detalle de compra: muestra el tipo y número del " +
       "documento del proveedor cargado en el alta. Mismo motivo que ComprasPage.tsx.",
+  },
+];
+
+// ─── Regla 4 — motor: el nombre viejo del sistema ──────────────────────────
+
+/**
+ * Sintáctico: busca el nombre anterior del sistema en los fuentes del front.
+ * El sistema se llama VeterCor; antes se llamaba "Veterinaria Leo". El renombre
+ * tocó cinco pantallas y el <title>, y la forma en que un nombre viejo vuelve
+ * no es que alguien lo reescriba a propósito: es que copie el encabezado de una
+ * pantalla vieja para armar una nueva. Sin esta regla, el nombre viejo reaparece
+ * en la próxima pantalla que alguien clone.
+ *
+ * Cubre las tres grafías que aparecían en el repo: "Veterinaria Leo" (sidebar,
+ * login, dashboard, módulo no contratado, <title>), "Veterinaria-Leo" y
+ * "veterinaria-leo" (identificadores). NO busca "Leo" a secas a propósito: es
+ * un nombre de persona legítimo en datos de prueba ("Admin Leo") y buscarlo
+ * suelto llenaría el resultado de falsos positivos.
+ *
+ * Mira adentro de comentarios y strings (fail-safe): un nombre viejo comentado
+ * es igual de propenso a volver por copia que uno vivo.
+ */
+export function detectarNombreViejo(contenido: string): Hallazgo[] {
+  const hallazgos: Hallazgo[] = [];
+  contenido.split("\n").forEach((linea, i) => {
+    if (/veterinaria[\s\-_]+leo/i.test(linea)) {
+      hallazgos.push({ linea: i + 1, texto: linea });
+    }
+  });
+  return hallazgos;
+}
+
+/**
+ * Excepciones de la regla 4. Cada entrada dice por qué ese caso es legítimo.
+ * Hoy está vacía: no hay ningún lugar del front donde el nombre viejo tenga
+ * que sobrevivir. Los documentos históricos (reportes de auditoría, prompts de
+ * etapas cerradas) no entran acá porque no son fuentes del front — reescribir
+ * un reporte de auditoría lo convertiría en un documento falsificado.
+ */
+const ALLOWLIST_NOMBRE_VIEJO: Array<{ archivo: string; motivo: string }> = [
+  {
+    archivo: "src/guardrails.test.ts",
+    motivo:
+      "Este archivo. Tiene que nombrar el nombre viejo dos veces por diseño: en el " +
+      "doc comment del motor, para que se entienda qué busca, y en los fragmentos " +
+      "sintéticos que verifican que el detector efectivamente lo detecta. Sin esos " +
+      "fragmentos el guardrail no tendría cómo avisar si mañana deja de funcionar.",
   },
 ];
 
@@ -456,6 +513,30 @@ describe("motor de detección — regla 2 (copy prohibido §2.6)", () => {
   });
 });
 
+describe("motor de detección — regla 4 (nombre viejo del sistema)", () => {
+  it("detecta el nombre viejo en texto visible", () => {
+    expect(detectarNombreViejo('<div>Veterinaria Leo</div>')).toHaveLength(1);
+  });
+
+  it("detecta las grafías con guion y en minúscula de los identificadores", () => {
+    expect(detectarNombreViejo('name: "veterinaria-leo"')).toHaveLength(1);
+    expect(detectarNombreViejo("// carpeta Veterinaria-Leo")).toHaveLength(1);
+  });
+
+  it("detecta el nombre viejo aunque esté partido por salto de línea en el copy", () => {
+    expect(detectarNombreViejo("soporte de Veterinaria   Leo para el plan")).toHaveLength(1);
+  });
+
+  it("no marca el nombre nuevo", () => {
+    expect(detectarNombreViejo('<div>VeterCor</div>')).toEqual([]);
+  });
+
+  it("no marca a una persona llamada Leo, que es un dato legítimo", () => {
+    expect(detectarNombreViejo('fullName: "Admin Leo"')).toEqual([]);
+    expect(detectarNombreViejo('callerName: "Recepción Leo"')).toEqual([]);
+  });
+});
+
 describe("motor de detección — regla 3 (el error se anuncia)", () => {
   it("marca el error renderizado en un <p> pelado", () => {
     const jsx = '<p className="text-sm text-destructive">{error}</p>';
@@ -615,6 +696,61 @@ describe("BLOQUEANTE: reglas transversales del frontend", () => {
       "pantallas de compras, que está en ALLOWLIST_COPY. Si aparece otro caso legítimo, " +
       "agregalo ahí con el motivo escrito al lado.\n" +
       infractores.join("\n"),
+    ).toEqual([]);
+  });
+
+  it("Regla 4 — ningún fuente del front nombra al sistema por su nombre viejo", () => {
+    const permitidos = new Set(ALLOWLIST_NOMBRE_VIEJO.map((e) => e.archivo));
+    const infractores: string[] = [];
+
+    // A diferencia de las reglas 1 y 2, esta SÍ escanea los `*.test.tsx`: un
+    // test que assertea el encabezado de una pantalla lleva el nombre del
+    // sistema adentro, y si el nombre viejo sobrevive ahí el próximo que copie
+    // ese test lo reintroduce en la pantalla.
+    for (const fuente of todosLosFuentes(true)) {
+      if (permitidos.has(fuente.ruta)) continue;
+      const hallazgos = detectarNombreViejo(fuente.contenido);
+      if (hallazgos.length > 0) infractores.push(formatearHallazgos(fuente.ruta, hallazgos));
+    }
+
+    // El <title> del documento no vive en src/, pero es la primera aparición
+    // del nombre que ve el usuario (la pestaña del navegador).
+    const indice = readFileSync(join(process.cwd(), "index.html"), "utf-8");
+    const enIndice = detectarNombreViejo(indice);
+    if (enIndice.length > 0) infractores.push(formatearHallazgos("web/index.html", enIndice));
+
+    expect(
+      infractores,
+      "El sistema se llama VeterCor. Estas líneas todavía lo nombran 'Veterinaria Leo', " +
+      "el nombre anterior. Un nombre viejo no vuelve porque alguien lo reescriba: vuelve " +
+      "porque alguien copia el encabezado de una pantalla vieja para armar una nueva. " +
+      "Cambialo, o si hay un caso legítimo agregalo a ALLOWLIST_NOMBRE_VIEJO con el " +
+      "motivo escrito al lado.\n" +
+      infractores.join("\n"),
+    ).toEqual([]);
+  });
+
+  it("Regla 4b — las tres superficies de identidad nombran al sistema VeterCor", () => {
+    // La regla 4 busca el nombre VIEJO, y no puede buscar "Leo" a secas sin
+    // marcar datos de prueba legítimos ("Admin Leo"). Esta es la contraparte:
+    // en vez de perseguir lo que no debe estar, exige lo que sí. Cubre el caso
+    // que se le escapa al patrón — la barra mobile decía "Leo", sin "Veterinaria".
+    const SUPERFICIES_DE_IDENTIDAD = [
+      "src/components/shell/SidebarNav.tsx", // sidebar de desktop
+      "src/App.tsx",                         // barra superior de mobile
+      "src/pages/LoginPage.tsx",             // login
+    ];
+
+    const sinNombre = SUPERFICIES_DE_IDENTIDAD.filter((ruta) => {
+      const contenido = readFileSync(join(process.cwd(), ...ruta.split("/")), "utf-8");
+      return !/VeterCor/.test(contenido);
+    });
+
+    expect(
+      sinNombre,
+      "Estas son las tres pantallas donde el usuario lee el nombre del sistema. " +
+      "Si alguna deja de nombrarlo, el nombre se perdió en un refactor.\n" +
+      sinNombre.join("\n"),
     ).toEqual([]);
   });
 
