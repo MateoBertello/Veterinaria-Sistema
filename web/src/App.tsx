@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Navigate, Outlet, Route, Routes, useLocation } from "react-router-dom";
+import { Link, Navigate, Outlet, Route, Routes, useLocation } from "react-router-dom";
 import { Dog, Menu } from "lucide-react";
 import { buildNavItems, type NavItem } from "./lib/navigation.ts";
 import { useAuth } from "./auth/AuthContext.tsx";
@@ -85,12 +85,17 @@ function MobileNav({ items, user, onLogout }: {
 
   return (
     <div className="flex items-center justify-between border-b border-sidebar-border bg-sidebar px-4 py-3 md:hidden">
-      <div className="flex items-center gap-2">
+      {/* Misma convención que la identidad del sidebar: el logo vuelve al inicio. */}
+      <Link
+        to="/"
+        aria-label="Ir al inicio"
+        className="flex items-center gap-2 rounded-lg transition-colors hover:bg-sidebar-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      >
         <div className="rounded-lg bg-gradient-to-br from-orange-500 to-orange-600 p-1.5 shadow-md">
           <Dog className="size-5 text-white" aria-hidden />
         </div>
         <span className="text-base font-semibold text-sidebar-accent-foreground">Leo</span>
-      </div>
+      </Link>
 
       <Sheet open={open} onOpenChange={setOpen}>
         <SheetTrigger asChild>

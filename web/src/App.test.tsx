@@ -56,6 +56,21 @@ beforeEach(() => {
 });
 
 describe("navegación mobile del Shell (Etapa 10E)", () => {
+  it("el logo de la barra mobile también lleva al inicio", async () => {
+    const { container } = renderShell("/clientes");
+
+    // El shell monta dos identidades: la del sidebar (que ya enlaza al inicio) y
+    // la de la barra superior de mobile. El test apunta a la segunda, así que se
+    // acota al contenedor `md:hidden` para no aprobarse con el enlace del otro.
+    const barraMobile = container.querySelector(".md\\:hidden");
+    expect(barraMobile).not.toBeNull();
+
+    const enlace = within(barraMobile as HTMLElement).getByRole("link", {
+      name: /ir al inicio/i,
+    });
+    expect(enlace).toHaveAttribute("href", "/");
+  });
+
   it("el botón hamburguesa tiene aria-label 'Abrir menú' y el Sheet arranca cerrado", async () => {
     renderShell();
     await waitFor(() => expect(fetchModulosHabilitadosMock).toHaveBeenCalled());
