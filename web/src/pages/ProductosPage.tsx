@@ -264,11 +264,38 @@ export function ProductosPage() {
   }
 
   const hayFiltros = Boolean(search || familiaId || activoFilter || soloVendibles);
+  // Productos sin precio de venta. El conteo es sobre la página cargada: la API
+  // de productos no expone un filtro "sin precio", así que un total del catálogo
+  // exigiría paginarlo entero desde el cliente.
+  const sinPrecio = useMemo(
+    () => productos.filter((p) => p.precioVenta === null || p.precioVenta === undefined).length,
+    [productos],
+  );
+
   const totalPages = Math.max(1, Math.ceil(meta.total / (meta.limit || PAGE_SIZE)));
 
   return (
     <div className="mx-auto max-w-6xl space-y-6">
       <StockBreadcrumb items={[{ label: "Productos" }]} />
+      {sinPrecio > 0 && (
+        <div
+          role="status"
+          aria-label="Productos sin precio"
+          className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900"
+        >
+          <AlertCircle className="size-4 shrink-0" aria-hidden />
+          <span>
+            Hay <strong>{sinPrecio}</strong>{" "}
+            {sinPrecio === 1 ? "producto sin precio" : "productos sin precio"} en esta página.
+          </span>
+          <Link
+            to="/stock/productos/precios"
+            className="font-semibold underline underline-offset-2 hover:text-amber-950"
+          >
+            Cargarlos en tanda
+          </Link>
+        </div>
+      )}
       <header className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div className="space-y-1">
           <h1 className="flex items-center gap-2 text-2xl font-semibold text-orange-800">

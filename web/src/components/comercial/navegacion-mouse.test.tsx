@@ -76,7 +76,7 @@ describe("Navegación completa por mouse (F9·T1)", () => {
       { cardTitle: "Productos", hrefExpected: "/stock/productos", headingExpected: "Catálogo de Productos" },
       { cardTitle: "Familias", hrefExpected: "/stock/familias", headingExpected: "Familias de Productos" },
       { cardTitle: "Proveedores", hrefExpected: "/stock/proveedores", headingExpected: "Proveedores" },
-      { cardTitle: "Precios", hrefExpected: "/stock/productos/precios", headingExpected: "Carga Asistida de Precios" },
+      { cardTitle: "Carga masiva de precios", hrefExpected: "/stock/productos/precios", headingExpected: "Carga masiva de precios" },
       { cardTitle: "Existencias", hrefExpected: "/stock/existencias", headingExpected: "Existencias de Stock" },
       { cardTitle: "Lotes", hrefExpected: "/stock/lotes", headingExpected: "Lotes de Stock" },
       { cardTitle: "Vencimientos", hrefExpected: "/stock/vencimientos", headingExpected: "Vencimientos Próximos" },

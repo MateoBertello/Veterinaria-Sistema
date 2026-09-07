@@ -63,8 +63,8 @@ const STOCK_GRUPOS: StockGrupo[] = [
       },
       {
         id: "precios",
-        titulo: "Precios",
-        descripcion: "Carga asistida y actualización de precios de venta.",
+        titulo: "Carga masiva de precios",
+        descripcion: "Poner precio a muchos productos y servicios de una sentada.",
         href: "/stock/productos/precios",
         permission: "manage_products",
         icon: Tag,

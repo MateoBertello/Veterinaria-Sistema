@@ -55,7 +55,7 @@ const RUTAS_COMERCIALES = [
   { path: "/stock", tituloEsperado: "Stock" },
   { path: "/stock/existencias", tituloEsperado: "Existencias de Stock" },
   { path: "/stock/productos", tituloEsperado: "Catálogo de Productos" },
-  { path: "/stock/productos/precios", tituloEsperado: "Carga Asistida de Precios" },
+  { path: "/stock/productos/precios", tituloEsperado: "Carga masiva de precios" },
   { path: "/stock/familias", tituloEsperado: "Familias de Productos" },
   { path: "/stock/lotes", tituloEsperado: "Lotes de Stock" },
   { path: "/stock/lotes/l-123", tituloEsperado: "Detalle de Lote" },
@@ -112,8 +112,15 @@ describe("Rutas y Gating Comercial (F1·T1)", () => {
         </MemoryRouter>,
       );
 
-      const heading = await screen.findByRole("heading", { level: 1, name: tituloEsperado });
-      expect(heading).toBeInTheDocument();
+      // Varias pantallas renderizan su h1 en subárboles distintos según el
+      // estado (cargando / error / detalle), así que al pasar de uno a otro
+      // React desmonta el nodo. Se vuelve a consultar en cada intento en vez de
+      // guardar la referencia que devolvió el primer hallazgo.
+      await waitFor(() => {
+        expect(
+          screen.getByRole("heading", { level: 1, name: tituloEsperado }),
+        ).toBeInTheDocument();
+      });
     });
   }
 

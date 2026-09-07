@@ -269,6 +269,29 @@ describe("ProductosPage (F1·T2)", () => {
     });
   });
 
+  it("si hay productos sin precio, avisa cuántos y ofrece la carga en tanda", async () => {
+    renderPage();
+
+    const aviso = await screen.findByRole("status", { name: /productos sin precio/i });
+    // MOCK_PRODUCTOS trae exactamente uno con precioVenta: null.
+    expect(aviso).toHaveTextContent(/1 producto sin precio/i);
+
+    const enlace = within(aviso).getByRole("link", { name: /cargarlos en tanda/i });
+    expect(enlace).toHaveAttribute("href", "/stock/productos/precios");
+  });
+
+  it("si todos los productos tienen precio, el aviso no se muestra", async () => {
+    vi.spyOn(productosApi, "listarProductos").mockResolvedValue({
+      items: MOCK_PRODUCTOS.map((p) => ({ ...p, precioVenta: p.precioVenta ?? 999 })),
+      meta: { page: 1, limit: 20, total: 3 },
+    });
+
+    renderPage();
+
+    await screen.findByRole("heading", { level: 1, name: "Catálogo de Productos" });
+    expect(screen.queryByRole("status", { name: /productos sin precio/i })).not.toBeInTheDocument();
+  });
+
   it("un producto con precioVenta: null muestra el badge 'Sin precio'", async () => {
     renderPage();
     expect(await screen.findByText("Ivermectina Gotas")).toBeInTheDocument();

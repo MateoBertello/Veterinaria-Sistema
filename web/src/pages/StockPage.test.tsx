@@ -108,7 +108,7 @@ describe("StockPage — Hub de Stock y Gating por Permisos", () => {
       expect(screen.getByRole("link", { name: /^Productos/i })).toHaveAttribute("href", "/stock/productos");
       expect(screen.getByRole("link", { name: /^Familias/i })).toHaveAttribute("href", "/stock/familias");
       expect(screen.getByRole("link", { name: /^Proveedores/i })).toHaveAttribute("href", "/stock/proveedores");
-      expect(screen.getByRole("link", { name: /^Precios/i })).toHaveAttribute("href", "/stock/productos/precios");
+      expect(screen.getByRole("link", { name: /^Carga masiva de precios/i })).toHaveAttribute("href", "/stock/productos/precios");
 
       // Existencias
       expect(screen.getByRole("link", { name: /^Existencias/i })).toHaveAttribute("href", "/stock/existencias");
@@ -142,7 +142,7 @@ describe("StockPage — Hub de Stock y Gating por Permisos", () => {
       expect(screen.queryByRole("link", { name: /^Productos/i })).not.toBeInTheDocument();
       expect(screen.queryByRole("link", { name: /^Familias/i })).not.toBeInTheDocument();
       expect(screen.queryByRole("link", { name: /^Proveedores/i })).not.toBeInTheDocument();
-      expect(screen.queryByRole("link", { name: /^Precios/i })).not.toBeInTheDocument();
+      expect(screen.queryByRole("link", { name: /^Carga masiva de precios/i })).not.toBeInTheDocument();
     });
 
     it("renderiza el grupo 'Existencias' completo (view_stock)", () => {
@@ -200,7 +200,7 @@ describe("StockPage — Hub de Stock y Gating por Permisos", () => {
       expect(screen.getByRole("link", { name: /^Proveedores/i })).toBeInTheDocument();
       expect(screen.queryByRole("link", { name: /^Productos/i })).not.toBeInTheDocument();
       expect(screen.queryByRole("link", { name: /^Familias/i })).not.toBeInTheDocument();
-      expect(screen.queryByRole("link", { name: /^Precios/i })).not.toBeInTheDocument();
+      expect(screen.queryByRole("link", { name: /^Carga masiva de precios/i })).not.toBeInTheDocument();
     });
 
     it("renderiza 'Existencias' completo (view_stock)", () => {

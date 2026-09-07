@@ -506,11 +506,15 @@ export function CargaPreciosPage() {
       <header className="space-y-1">
         <h1 className="flex items-center gap-2 text-2xl font-semibold text-orange-800">
           <Tag className="size-6" aria-hidden />
-          Carga Asistida de Precios
+          Carga masiva de precios
         </h1>
         <p className="text-sm text-muted-foreground">
-          Actualización ágil de precios de venta para productos y servicios. Los
-          valores cargados corresponden al <strong>precio final con IVA incluido</strong>{" "}
+          Para poner precio a <strong>cientos de productos y servicios de una sentada</strong>:
+          filtrá los que no tienen precio, cargalos en tanda y seguí el progreso. Para uno
+          solo, el campo de la ficha del producto alcanza.
+        </p>
+        <p className="text-sm text-muted-foreground">
+          Los valores cargados corresponden al <strong>precio final con IVA incluido</strong>{" "}
           (precio de góndola).
         </p>
       </header>

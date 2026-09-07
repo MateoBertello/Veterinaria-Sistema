@@ -172,6 +172,17 @@ describe("CargaPreciosPage (Tanda 0b)", () => {
     );
   });
 
+  it("se llama Carga masiva de precios y su subtítulo dice para qué sirve", async () => {
+    render(<CargaPreciosPage />);
+
+    expect(
+      await screen.findByRole("heading", { level: 1, name: /carga masiva de precios/i }),
+    ).toBeInTheDocument();
+
+    // El subtítulo tiene que distinguirla de la ficha individual del producto.
+    expect(screen.getByText(/cientos/i)).toBeInTheDocument();
+  });
+
   it("renderiza filas con precio y sin precio, y las segundas llevan el badge 'Sin precio'", async () => {
     render(<CargaPreciosPage />);
 
