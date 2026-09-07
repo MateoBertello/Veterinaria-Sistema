@@ -746,10 +746,10 @@ export function AjustesPage() {
         onSuccess={({ estado }) => {
           if (loteParaBloqueo) {
             setLotes((prev) =>
-              prev.map((l) => (l.id === loteParaBloqueo.id ? { ...l, estado: estado as any } : l)),
+              prev.map((l) => (l.id === loteParaBloqueo.id ? { ...l, estado } : l)),
             );
             if (loteSeleccionado?.id === loteParaBloqueo.id) {
-              setLoteSeleccionado((prev) => (prev ? { ...prev, estado: estado as any } : null));
+              setLoteSeleccionado((prev) => (prev ? { ...prev, estado } : null));
             }
           }
         }}
@@ -762,10 +762,10 @@ export function AjustesPage() {
         onSuccess={({ estado }) => {
           if (loteParaBloqueo) {
             setLotes((prev) =>
-              prev.map((l) => (l.id === loteParaBloqueo.id ? { ...l, estado: estado as any } : l)),
+              prev.map((l) => (l.id === loteParaBloqueo.id ? { ...l, estado } : l)),
             );
             if (loteSeleccionado?.id === loteParaBloqueo.id) {
-              setLoteSeleccionado((prev) => (prev ? { ...prev, estado: estado as any } : null));
+              setLoteSeleccionado((prev) => (prev ? { ...prev, estado } : null));
             }
           }
         }}

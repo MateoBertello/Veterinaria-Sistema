@@ -626,7 +626,10 @@ export default function VentaDetallePage() {
 
             {/* Error dentro del diálogo (§2.1) */}
             {errorAnular && (
-              <div className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive flex items-start gap-2">
+              <div
+                role="alert"
+                className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive flex items-start gap-2"
+              >
                 <AlertCircle className="size-4 shrink-0 mt-0.5" />
                 <span>{errorAnular}</span>
               </div>
@@ -800,7 +803,10 @@ export default function VentaDetallePage() {
 
             {/* Error dentro del sheet */}
             {errorDevolver && (
-              <div className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive flex items-start gap-2">
+              <div
+                role="alert"
+                className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive flex items-start gap-2"
+              >
                 <AlertCircle className="size-4 shrink-0 mt-0.5" />
                 <span>{errorDevolver}</span>
               </div>
@@ -861,7 +867,10 @@ export default function VentaDetallePage() {
           </div>
 
           {errorDevolver && (
-            <div className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive flex items-start gap-2">
+            <div
+                role="alert"
+                className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive flex items-start gap-2"
+              >
               <AlertCircle className="size-4 shrink-0 mt-0.5" />
               <span>{errorDevolver}</span>
             </div>

@@ -556,7 +556,7 @@ export function LoteDetallePage() {
         open={bloquearOpen}
         onOpenChange={setBloquearOpen}
         onSuccess={({ estado }) => {
-          setLote((prev) => (prev ? { ...prev, estado: estado as any } : null));
+          setLote((prev) => (prev ? { ...prev, estado } : null));
         }}
       />
       <DesbloquearLoteDialog
@@ -564,7 +564,7 @@ export function LoteDetallePage() {
         open={desbloquearOpen}
         onOpenChange={setDesbloquearOpen}
         onSuccess={({ estado }) => {
-          setLote((prev) => (prev ? { ...prev, estado: estado as any } : null));
+          setLote((prev) => (prev ? { ...prev, estado } : null));
         }}
       />
     </div>

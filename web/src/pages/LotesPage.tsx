@@ -377,7 +377,7 @@ export function LotesPage({
         onSuccess={({ estado }) => {
           if (loteParaAccion) {
             setLotes((prev) =>
-              prev.map((l) => (l.id === loteParaAccion.id ? { ...l, estado: estado as any } : l)),
+              prev.map((l) => (l.id === loteParaAccion.id ? { ...l, estado } : l)),
             );
           }
         }}
@@ -389,7 +389,7 @@ export function LotesPage({
         onSuccess={({ estado }) => {
           if (loteParaAccion) {
             setLotes((prev) =>
-              prev.map((l) => (l.id === loteParaAccion.id ? { ...l, estado: estado as any } : l)),
+              prev.map((l) => (l.id === loteParaAccion.id ? { ...l, estado } : l)),
             );
           }
         }}
