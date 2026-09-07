@@ -483,6 +483,48 @@ describe("MostradorPage (F4·T1 & F4·T2)", () => {
     expect(within(totalContainer).getByText("$ 25.000,00")).toBeInTheDocument();
   });
 
+  it("El total combina cantidad, descuento de línea y descuento global (caso no trivial)", async () => {
+    const user = userEvent.setup();
+
+    renderMostrador();
+
+    await screen.findByText("Antiparasitario Canino");
+
+    // Línea 1: Antiparasitario Canino ($ 1.500) — cantidad 3, sin descuento de línea.
+    const rowProd1 = screen.getByText("Antiparasitario Canino").closest("div.flex")!;
+    await user.click(within(rowProd1.parentElement!).getByRole("button", { name: /Agregar/i }));
+
+    // Línea 2: Alimento Perro Adulto 15kg ($ 25.000) — cantidad 1, 10% de descuento.
+    const rowProd2 = screen.getByText("Alimento Perro Adulto 15kg").closest("div.flex")!;
+    await user.click(within(rowProd2.parentElement!).getByRole("button", { name: /Agregar/i }));
+
+    const cantProd1 = screen.getByRole("spinbutton", {
+      name: "Cantidad para Antiparasitario Canino",
+    });
+    await user.clear(cantProd1);
+    await user.type(cantProd1, "3");
+
+    const descProd2 = screen.getByRole("spinbutton", {
+      name: "Descuento para Alimento Perro Adulto 15kg",
+    });
+    await user.clear(descProd2);
+    await user.type(descProd2, "10");
+
+    // Subtotal esperado: (1500 × 3) + (25000 × 1 − 10%) = 4500 + 22500 = 27000
+    const totalContainer = screen.getByText("Total a pagar").closest("div.flex") as HTMLElement;
+    await waitFor(() =>
+      expect(within(totalContainer).getByText("$ 27.000,00")).toBeInTheDocument(),
+    );
+
+    // Descuento global de $ 1.500 sobre el subtotal: 27000 − 1500 = 25500
+    const descGlobal = screen.getByRole("spinbutton", { name: "Descuento global" });
+    await user.type(descGlobal, "1500");
+
+    await waitFor(() =>
+      expect(within(totalContainer).getByText("$ 25.500,00")).toBeInTheDocument(),
+    );
+  });
+
   it("Con 20 resultados, la cantidad de fetch es constante (no hay N+1)", async () => {
     const muchosProductos: Producto[] = Array.from({ length: 20 }).map((_, i) => ({
       id: `prod-bulk-${i}`,
