@@ -12,6 +12,7 @@ import {
   Search,
   Sparkles,
 } from "lucide-react";
+import { StockBreadcrumb } from "../components/comercial/StockBreadcrumb.tsx";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card.tsx";
 import { Button } from "../components/ui/button.tsx";
 import { Input } from "../components/ui/input.tsx";
@@ -394,6 +395,7 @@ export function FraccionamientoPage() {
 
   return (
     <div className="container mx-auto p-4 md:p-6 space-y-6">
+      <StockBreadcrumb items={[{ label: "Fraccionamiento" }]} />
       {/* Encabezado */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b pb-4">
         <div>

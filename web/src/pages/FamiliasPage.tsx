@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AlertCircle, Boxes, Pencil, Plus, Power, Search } from "lucide-react";
+import { StockBreadcrumb } from "../components/comercial/StockBreadcrumb.tsx";
 import {
   Table,
   TableBody,
@@ -206,6 +207,7 @@ export function FamiliasPage() {
 
   return (
     <div className="mx-auto max-w-5xl space-y-6">
+      <StockBreadcrumb items={[{ label: "Familias" }]} />
       <header className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div className="space-y-1">
           <h1 className="flex items-center gap-2 text-2xl font-semibold text-orange-800">

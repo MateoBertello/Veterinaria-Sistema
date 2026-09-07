@@ -14,6 +14,7 @@ import {
   Trash2,
   Truck,
 } from "lucide-react";
+import { StockBreadcrumb } from "../components/comercial/StockBreadcrumb.tsx";
 import {
   Table,
   TableBody,
@@ -275,16 +276,15 @@ export function CompraDetallePage() {
 
   return (
     <div className="container mx-auto p-4 md:p-6 space-y-6">
+      <StockBreadcrumb
+        items={[
+          { label: "Compras", href: "/stock/compras" },
+          { label: "Detalle de Compra" },
+        ]}
+      />
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <div className="flex items-center gap-2 text-xs text-muted-foreground mb-1">
-            <Link to="/stock/compras" className="hover:text-foreground">
-              Compras
-            </Link>
-            <span>/</span>
-            <span>Detalle</span>
-          </div>
           <h1 className="text-2xl font-bold tracking-tight text-orange-950 flex items-center gap-2">
             <ShoppingBag className="h-6 w-6 text-orange-600" />
             Detalle de Compra

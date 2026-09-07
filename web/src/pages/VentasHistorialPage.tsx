@@ -9,6 +9,7 @@ import {
   Eye,
 } from "lucide-react";
 import { useAuth } from "../auth/AuthContext.tsx";
+import { VentasNav } from "../components/comercial/VentasNav.tsx";
 import { listarVentas, type ListarVentasParams } from "../api/comercial/ventas.ts";
 import { listarUsuarios } from "../api/usuarios.ts";
 import type { EstadoVenta, Usuario, Venta } from "../types/index.ts";
@@ -119,6 +120,7 @@ export default function VentasHistorialPage() {
 
   return (
     <div className="space-y-6">
+      <VentasNav />
       {/* Cabecera */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b pb-4">
         <div>

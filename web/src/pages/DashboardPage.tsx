@@ -125,34 +125,36 @@ export function DashboardPage() {
 
   return (
     <div className="mx-auto max-w-6xl space-y-6">
-      {/* Bienvenida. El degradado, sus tintas y la superficie de los chips salen
-          de los tokens --brand-* (theme.css): el naranja de identidad #f97316 no
-          puede ser fondo de texto blanco (2.80:1), así que la superficie arranca
-          en orange-700 y todo punto del degradado da >= 4.5:1 contra el blanco.
-          Los chips van sobre un velo NEGRO y no blanco por la misma razón: un
-          velo blanco aclara el fondo y hunde el contraste a 3.73:1. */}
-      <header className="rounded-surface bg-[image:var(--brand-gradient)] p-6 text-brand-on-gradient shadow-brand md:p-8">
-        <h1 className="text-2xl font-semibold tracking-tight md:text-3xl">
-          {nombre ? `Bienvenido, ${nombre}` : "Bienvenido"}
-        </h1>
-        <p className="mt-2 text-sm text-brand-on-gradient-muted md:text-base">
-          Sistema de Gestión Veterinaria Leo
-        </p>
+      {/* Bienvenida. El naranja es acento, no fondo (GUIA_ESTILO §1.1): la
+          superficie es neutra (bg-card) y el naranja queda en la línea de
+          acento izquierda y en el badge de rol (el único Badge con la variante
+          por defecto, bg-primary). El resto del sistema — fecha, tipografía —
+          es neutro, igual que cualquier card del dashboard. */}
+      <header className="flex flex-col gap-3 rounded-surface border-l-4 border-l-metric-brand bg-card p-5 shadow-card md:flex-row md:items-center md:justify-between md:p-6">
+        <div>
+          <h1 className="text-xl font-semibold tracking-tight text-foreground md:text-2xl">
+            {nombre ? `Bienvenido, ${nombre}` : "Bienvenido"}
+          </h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Sistema de Gestión Veterinaria Leo
+          </p>
+        </div>
 
         {/* Chips: el rol y la fecha que ya mostraba el header, ahora como piezas
             propias. Mismo Badge del kit con las clases del sistema — sin
-            componente nuevo y sin copy nuevo. */}
-        <ul className="mt-4 flex flex-wrap gap-2">
+            componente nuevo y sin copy nuevo. Solo el rol lleva la variante por
+            defecto (naranja de marca); la fecha es "secondary" (neutra). */}
+        <ul className="flex flex-wrap gap-2">
           {user?.roleName ? (
             <li>
-              <Badge className="gap-1.5 border-brand-chip-border bg-brand-chip-surface px-2.5 py-1 text-brand-on-gradient">
+              <Badge className="gap-1.5 px-2.5 py-1">
                 <UserRound aria-hidden />
                 {rolMeta.displayName || user.roleName}
               </Badge>
             </li>
           ) : null}
           <li>
-            <Badge className="gap-1.5 border-brand-chip-border bg-brand-chip-surface px-2.5 py-1 text-brand-on-gradient">
+            <Badge variant="secondary" className="gap-1.5 px-2.5 py-1">
               <CalendarDays aria-hidden />
               {formatFechaLarga(fecha)}
             </Badge>
@@ -208,9 +210,9 @@ export function DashboardPage() {
 
       {/* Accesos rápidos */}
       {accesos.length > 0 ? (
-        <Card className="border-orange-200 shadow-card">
-          <CardHeader className="bg-gradient-to-r from-orange-50 to-transparent">
-            <CardTitle className="text-base text-orange-800 md:text-lg">Accesos rápidos</CardTitle>
+        <Card className="shadow-card">
+          <CardHeader>
+            <CardTitle className="text-base text-foreground md:text-lg">Accesos rápidos</CardTitle>
             <CardDescription>Las secciones habilitadas para tu rol</CardDescription>
           </CardHeader>
           <CardContent className="pt-4">

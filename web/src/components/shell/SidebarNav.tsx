@@ -88,8 +88,8 @@ export function SidebarNav({ items, user, onLogout, onNavigate }: Props) {
           <Dog className="size-6 text-white" aria-hidden />
         </div>
         <div className="leading-tight">
-          <div className="text-base font-semibold text-orange-800">Veterinaria Leo</div>
-          <div className="text-xs text-orange-600">Sistema de Gestión</div>
+          <div className="text-base font-semibold text-sidebar-accent-foreground">Veterinaria Leo</div>
+          <div className="text-xs text-sidebar-foreground">Sistema de Gestión</div>
         </div>
       </div>
 
@@ -107,7 +107,7 @@ export function SidebarNav({ items, user, onLogout, onNavigate }: Props) {
               {grupo.label ? (
                 <h2
                   id={headingId}
-                  className="px-3 pb-1.5 text-xs font-semibold uppercase tracking-wide text-orange-700/80"
+                  className="px-3 pb-1.5 text-xs font-semibold uppercase tracking-wide text-sidebar-heading"
                 >
                   {grupo.label}
                 </h2>
@@ -139,12 +139,12 @@ export function SidebarNav({ items, user, onLogout, onNavigate }: Props) {
       </nav>
 
       {user ? (
-        <div className="mt-auto border-t px-3 py-4">
+        <div className="mt-auto border-t border-sidebar-border px-3 py-4">
           <div className="px-3 pb-3">
-            <p className="truncate text-sm font-medium text-sidebar-foreground">
+            <p className="truncate text-sm font-medium text-sidebar-accent-foreground">
               {user.fullName}
             </p>
-            <p className="truncate text-xs text-muted-foreground">{user.roleName}</p>
+            <p className="truncate text-xs text-sidebar-foreground">{user.roleName}</p>
           </div>
 
           {/* Menú de cuenta, separado de la navegación de módulos: Preferencias
@@ -161,7 +161,7 @@ export function SidebarNav({ items, user, onLogout, onNavigate }: Props) {
           <Button
             variant="ghost"
             size="sm"
-            className="mt-1 w-full justify-start text-sidebar-foreground"
+            className="mt-1 w-full justify-start text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
             onClick={onLogout}
           >
             <LogOut aria-hidden />

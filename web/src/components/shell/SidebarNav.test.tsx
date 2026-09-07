@@ -53,8 +53,23 @@ describe("SidebarNav", () => {
   });
 
   it("RN-G2: sin módulos contratados no dibuja el encabezado de módulos", () => {
-    renderNav({ modulos: [mod("turnos", false)] });
+    renderNav({ modulos: [mod("turnos", false), mod("stock", false), mod("ventas", false)] });
     expect(screen.queryByRole("heading", { name: "Módulos contratados" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Stock" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Ventas" })).not.toBeInTheDocument();
+  });
+
+  it("RN-G2: con stock y ventas contratados, aparecen bajo Módulos contratados con sus rutas", () => {
+    renderNav({ modulos: [mod("stock", true), mod("ventas", true)] });
+    const seccion = screen
+      .getByRole("heading", { name: "Módulos contratados" })
+      .parentElement!;
+
+    const stockLink = within(seccion).getByRole("link", { name: "Stock" });
+    expect(stockLink).toHaveAttribute("href", "/stock");
+
+    const ventasLink = within(seccion).getByRole("link", { name: "Ventas" });
+    expect(ventasLink).toHaveAttribute("href", "/ventas");
   });
 
   it("N2: expone Preferencias en el menú de cuenta, no en la navegación de módulos", () => {

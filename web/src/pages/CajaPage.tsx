@@ -18,6 +18,7 @@ import { Textarea } from "../components/ui/textarea.tsx";
 import { Badge } from "../components/ui/badge.tsx";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card.tsx";
 import { Skeleton } from "../components/ui/skeleton.tsx";
+import { VentasNav } from "../components/comercial/VentasNav.tsx";
 import {
   Table,
   TableBody,
@@ -225,6 +226,7 @@ export function CajaPage() {
   if (loading) {
     return (
       <div className="space-y-6">
+        <VentasNav />
         <h1 className="text-2xl font-bold tracking-tight">Sesión de Caja</h1>
         <div className="space-y-4">
           <Skeleton className="h-40 w-full" />
@@ -236,6 +238,7 @@ export function CajaPage() {
 
   return (
     <div className="space-y-8">
+      <VentasNav />
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Sesión de Caja</h1>

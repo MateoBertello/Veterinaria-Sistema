@@ -27,51 +27,46 @@
   --font-weight-medium: 500;
   --font-weight-normal: 400;
   --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.646 0.222 41.116);
-  --chart-2: oklch(0.6 0.118 184.704);
-  --chart-3: oklch(0.398 0.07 227.392);
-  --chart-4: oklch(0.828 0.189 84.429);
-  --chart-5: oklch(0.769 0.188 70.08);
+  /* Paleta de gráficos (GUIA_ESTILO §5): desaturada a propósito. Antes chart-1
+     era un naranja de máxima saturación (chroma 0.222, mismo hue que la marca)
+     y chart-2/4/5 rondaban chroma 0.12–0.19 — mucho peso visual para datos de
+     rutina. El naranja de marca queda fuera de esta paleta por defecto: es un
+     acento, se reserva para cuando un dato puntual necesite destacarse (no hay
+     ningún caso así hoy en los gráficos del dashboard). */
+  --chart-1: oklch(0.62 0.08 235);
+  --chart-2: oklch(0.6 0.07 184.704);
+  --chart-3: oklch(0.45 0.05 227.392);
+  --chart-4: oklch(0.75 0.08 84.429);
+  --chart-5: oklch(0.7 0.09 70.08);
   --radius: 0.625rem;
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
+  /* Sidebar oscura (GUIA_ESTILO §3): fondo neutro casi negro, NO naranja oscuro
+     — el naranja queda reservado para el ítem activo (--primary, ver
+     SidebarNav.tsx) y el chip del logo. Medido contra este fondo (#18181b):
+     zinc-400 (texto de ítem inactivo) da 6.91:1, sobra sobre el 4.5:1 de WCAG
+     2.1 SC 1.4.3. Ver docs/GUIA_ESTILO.md §1.6 por la tabla completa. */
+  --sidebar: #18181b; /* zinc-900 */
+  --sidebar-foreground: #a1a1aa; /* zinc-400 — 6.91:1 sobre --sidebar */
   --sidebar-primary: #c2410c;
   --sidebar-primary-foreground: #ffffff;
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
+  --sidebar-accent: #27272a; /* zinc-800 — hover, un escalón sobre el fondo */
+  --sidebar-accent-foreground: #f4f4f5; /* zinc-100 — texto de mayor énfasis (hover, wordmark) */
+  --sidebar-border: #71717a; /* zinc-500 — 3.67:1 sobre --sidebar, visible como separador (SC 1.4.11) */
   --sidebar-ring: oklch(0.708 0 0);
+  /* Encabezados de sección ("CLÍNICA", "MÓDULOS CONTRATADOS"...): gris medio,
+     más discreto que el ítem inactivo pero igual >= 4.5:1 (5.17:1 medido). Antes
+     eran naranjas y competían con el ítem activo (naranja también). */
+  --sidebar-heading: #8a8a92;
 
-  /* ── Sistema visual Leo — superficie de marca y acentos de métrica ─────────
-     Estas variables son la ÚNICA fuente de los degradados, acentos, superficies
-     suaves y elevaciones que usan la tarjeta de bienvenida y las tarjetas de
-     métrica. No repetir el literal en un componente: si un valor aparece dos
-     veces, va acá.
+  /* ── Sistema visual Leo — acentos de métrica y elevación ───────────────────
+     Estas variables son la ÚNICA fuente de los acentos y superficies suaves que
+     usan las tarjetas de métrica. No repetir el literal en un componente: si un
+     valor aparece dos veces, va acá.
 
      Los valores no son estéticos a ojo: están medidos contra el texto que se
      apoya encima (WCAG 2.1 SC 1.4.3, 4.5:1). Ver docs/GUIA_ESTILO.md §1 por la
      tabla de mediciones. El naranja de marca #f97316 se mantiene como identidad
      (logo, iconografía, tints), pero NO puede ser fondo de texto blanco: da
-     2.80:1. Por eso el degradado arranca en orange-700. */
-
-  /* Degradado de marca. Ambas paradas y todo punto intermedio dan >= 4.5:1
-     contra blanco (peor punto 5.18:1, en la parada clara). */
-  --brand-gradient-from: #c2410c; /* orange-700 — blanco 5.18:1 */
-  --brand-gradient-to:   #9a3412; /* orange-800 — blanco 7.51:1 */
-  --brand-gradient: linear-gradient(
-    105deg,
-    var(--brand-gradient-from) 0%,
-    var(--brand-gradient-to) 100%
-  );
-  /* Tintas sobre el degradado. La bajada usa orange-100 y no orange-200:
-     #fed7aa da 3.83:1 sobre la parada clara y no pasa. */
-  --brand-on-gradient:       #ffffff; /* 5.18:1 */
-  --brand-on-gradient-muted: #ffedd5; /* orange-100 — 4.52:1 */
-  /* Superficie de los chips sobre el degradado. Va en NEGRO translúcido, no en
-     blanco: un velo blanco aclara el fondo y hunde el contraste del texto
-     blanco a 3.73:1. El velo negro lo sube a 7.27:1. */
-  --brand-chip-surface: rgb(0 0 0 / 0.20);
-  --brand-chip-border:  rgb(255 255 255 / 0.28);
+     2.80:1. Por eso --primary usa orange-700. */
 
   /* Acentos de métrica: borde izquierdo (línea), superficie del chip del icono
      y tinta del icono. La tinta sobre su superficie da >= 6.3:1; la línea sobre
@@ -92,14 +87,13 @@
   --metric-special-surface: #ede9fe;
   --metric-special-ink:     #5b21b6;
 
-  /* Elevación. Tres escalones y nada más: reposo, hover de tarjeta enlazada y
-     la superficie de marca, que flota sobre el resto del panel. */
+  /* Elevación. Dos escalones: reposo y hover de tarjeta enlazada. */
   --elevation-card:       0 1px 2px 0 rgb(24 24 27 / 0.04), 0 1px 3px 0 rgb(24 24 27 / 0.06);
   --elevation-card-hover: 0 2px 4px -1px rgb(24 24 27 / 0.06), 0 8px 16px -4px rgb(24 24 27 / 0.10);
-  --elevation-brand:      0 4px 6px -2px rgb(154 52 18 / 0.15), 0 12px 24px -6px rgb(154 52 18 / 0.25);
 
-  /* Radio de la superficie de marca: un escalón por encima de la card (rounded-xl)
-     para que lea como panel y no como una tarjeta más de la grilla. */
+  /* Radio de "superficie" (panel destacado, p.ej. la bienvenida del dashboard):
+     un escalón por encima de la card (rounded-xl) para que lea como panel y no
+     como una tarjeta más de la grilla. */
   --surface-radius: calc(var(--radius) + 0.5rem);
 }
 
@@ -138,6 +132,7 @@
   --sidebar-accent-foreground: oklch(0.985 0 0);
   --sidebar-border: oklch(0.269 0 0);
   --sidebar-ring: oklch(0.439 0 0);
+  --sidebar-heading: oklch(0.55 0 0);
 
   /* Sistema visual Leo en oscuro. OJO: hoy es código inalcanzable — nada en la
      app agrega la clase `.dark` al <html> (no hay ThemeProvider montado; ver
@@ -145,13 +140,6 @@
      si algún día se enciende, con el mismo criterio del kit heredado, que ya
      trae variantes `dark:` sin conmutador. Sin medición de contraste real:
      cuando el modo oscuro se encienda, hay que volver a medir. */
-  --brand-gradient-from: #9a3412;
-  --brand-gradient-to:   #7c2d12;
-  --brand-on-gradient:       #ffffff;
-  --brand-on-gradient-muted: #fed7aa;
-  --brand-chip-surface: rgb(0 0 0 / 0.30);
-  --brand-chip-border:  rgb(255 255 255 / 0.22);
-
   --metric-brand-surface:   oklch(0.28 0.06 45);
   --metric-brand-ink:       #fed7aa;
   --metric-amber-surface:   oklch(0.28 0.05 75);
@@ -165,7 +153,6 @@
 
   --elevation-card:       0 1px 2px 0 rgb(0 0 0 / 0.40), 0 1px 3px 0 rgb(0 0 0 / 0.30);
   --elevation-card-hover: 0 2px 4px -1px rgb(0 0 0 / 0.45), 0 8px 16px -4px rgb(0 0 0 / 0.40);
-  --elevation-brand:      0 4px 6px -2px rgb(0 0 0 / 0.45), 0 12px 24px -6px rgb(0 0 0 / 0.50);
 }
 
 @theme inline {
@@ -207,16 +194,9 @@
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-heading: var(--sidebar-heading);
 
-  /* Sistema visual Leo → utilidades de Tailwind. `--color-*` habilita
-     bg-/text-/border-; `--shadow-*` habilita shadow-. El degradado no se mapea:
-     se referencia como bg-[image:var(--brand-gradient)] para que el token siga
-     siendo el único lugar donde vive el valor. */
-  --color-brand-on-gradient:       var(--brand-on-gradient);
-  --color-brand-on-gradient-muted: var(--brand-on-gradient-muted);
-  --color-brand-chip-surface:      var(--brand-chip-surface);
-  --color-brand-chip-border:       var(--brand-chip-border);
-
+  /* Sistema visual Leo → utilidades de Tailwind. `--color-*` habilita bg-/text-/border-. */
   --color-metric-brand:           var(--metric-brand);
   --color-metric-brand-surface:   var(--metric-brand-surface);
   --color-metric-brand-ink:       var(--metric-brand-ink);
@@ -235,7 +215,6 @@
 
   --shadow-card:       var(--elevation-card);
   --shadow-card-hover: var(--elevation-card-hover);
-  --shadow-brand:      var(--elevation-brand);
 
   --radius-surface: var(--surface-radius);
 }

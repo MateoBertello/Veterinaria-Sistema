@@ -10,6 +10,7 @@ import {
   Search,
   SlidersHorizontal,
 } from "lucide-react";
+import { StockBreadcrumb } from "../components/comercial/StockBreadcrumb.tsx";
 import {
   Table,
   TableBody,
@@ -321,6 +322,12 @@ export function RecuentoDetallePage() {
 
   return (
     <div className="container mx-auto p-4 md:p-6 space-y-6">
+      <StockBreadcrumb
+        items={[
+          { label: "Recuentos", href: "/stock/recuentos" },
+          { label: "Detalle de Recuento" },
+        ]}
+      />
       {/* Header de la página */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>

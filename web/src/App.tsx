@@ -51,7 +51,8 @@ import { RecuentoDetallePage } from "./pages/RecuentoDetallePage.tsx";
 import { FraccionamientoPage } from "./pages/FraccionamientoPage.tsx";
 import { ReportesStockPage } from "./pages/ReportesStockPage.tsx";
 import { ReportesVentasPage } from "./pages/ReportesVentasPage.tsx";
-import { PantallaEnConstruccion } from "./components/comercial/PantallaEnConstruccion.tsx";
+import { StockPage } from "./pages/StockPage.tsx";
+import { LotesPage } from "./pages/LotesPage.tsx";
 import { AccessibilityButton } from "./components/accesibilidad/AccessibilityButton.tsx";
 import { Button } from "./components/ui/button.tsx";
 import {
@@ -83,12 +84,12 @@ function MobileNav({ items, user, onLogout }: {
   }, [location.pathname]);
 
   return (
-    <div className="flex items-center justify-between border-b bg-sidebar px-4 py-3 md:hidden">
+    <div className="flex items-center justify-between border-b border-sidebar-border bg-sidebar px-4 py-3 md:hidden">
       <div className="flex items-center gap-2">
         <div className="rounded-lg bg-gradient-to-br from-orange-500 to-orange-600 p-1.5 shadow-md">
           <Dog className="size-5 text-white" aria-hidden />
         </div>
-        <span className="text-base font-semibold text-orange-800">Leo</span>
+        <span className="text-base font-semibold text-sidebar-accent-foreground">Leo</span>
       </div>
 
       <Sheet open={open} onOpenChange={setOpen}>
@@ -98,12 +99,19 @@ function MobileNav({ items, user, onLogout }: {
             variant="ghost"
             size="icon"
             aria-label="Abrir menú"
-            className="h-11 w-11"
+            className="h-11 w-11 text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
           >
             <Menu className="size-6" aria-hidden />
           </Button>
         </SheetTrigger>
-        <SheetContent side="left" className="w-3/4 gap-0 p-0 sm:max-w-xs">
+        {/* bg-sidebar/text-sidebar-foreground explícitos: SheetContent por defecto
+            trae bg-background (claro) del kit, y SidebarNav no fija su propio
+            fondo (lo hereda del <aside> en desktop). Sin esto, el contenido
+            oscuro del sidebar (§3.1 GUIA_ESTILO) queda sobre un panel claro. */}
+        <SheetContent
+          side="left"
+          className="w-3/4 gap-0 bg-sidebar p-0 text-sidebar-foreground sm:max-w-xs"
+        >
           <SheetHeader className="sr-only">
             <SheetTitle>Menú de navegación</SheetTitle>
             <SheetDescription>Accedé a las secciones del sistema.</SheetDescription>
@@ -279,7 +287,15 @@ export function App() {
             path="/stock"
             element={
               <RequirePermission permission="view_stock">
-                <PantallaEnConstruccion titulo="Stock" />
+                <StockPage />
+              </RequirePermission>
+            }
+          />
+          <Route
+            path="/stock/lotes"
+            element={
+              <RequirePermission permission="view_stock">
+                <LotesPage />
               </RequirePermission>
             }
           />

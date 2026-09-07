@@ -65,13 +65,13 @@ export function MetricaCard({ metrica, icon: Icon, accent }: MetricaCardProps) {
             <p className="truncate text-xs font-medium text-muted-foreground md:text-sm">
               {metrica.label}
             </p>
-            <p className="mt-1 text-3xl leading-none font-semibold tracking-tight text-foreground md:text-4xl">
+            <p className="mt-1 text-3xl leading-none font-bold tracking-tight text-foreground md:text-4xl">
               {metrica.valor}
             </p>
             <p className="mt-2 hidden text-xs text-muted-foreground md:block">{metrica.hint}</p>
           </div>
-          <span className={cn("rounded-xl p-2 md:p-2.5", chip)}>
-            <Icon className="size-5 md:size-6" aria-hidden />
+          <span className={cn("rounded-lg p-1.5 md:p-2", chip)}>
+            <Icon className="size-4 md:size-5" aria-hidden />
           </span>
         </Link>
       </CardContent>

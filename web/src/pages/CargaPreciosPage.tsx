@@ -10,6 +10,7 @@ import {
   Tag,
   Wrench,
 } from "lucide-react";
+import { StockBreadcrumb } from "../components/comercial/StockBreadcrumb.tsx";
 import {
   Table,
   TableBody,
@@ -495,6 +496,12 @@ export function CargaPreciosPage() {
 
   return (
     <div className="mx-auto max-w-6xl space-y-6 pb-24">
+      <StockBreadcrumb
+        items={[
+          { label: "Productos", href: "/stock/productos" },
+          { label: "Precios" },
+        ]}
+      />
       {/* Header */}
       <header className="space-y-1">
         <h1 className="flex items-center gap-2 text-2xl font-semibold text-orange-800">

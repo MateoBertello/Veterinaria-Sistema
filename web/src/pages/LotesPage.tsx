@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { AlertCircle, ChevronLeft, ChevronRight, Eye, Layers, Lock, Unlock } from "lucide-react";
+import { StockBreadcrumb } from "../components/comercial/StockBreadcrumb.tsx";
 import { BloquearLoteDialog } from "../components/comercial/BloquearLoteDialog.tsx";
 import { DesbloquearLoteDialog } from "../components/comercial/DesbloquearLoteDialog.tsx";
 import {
@@ -155,6 +156,7 @@ export function LotesPage({
 
   return (
     <div className={embedded ? "space-y-4" : "container mx-auto p-4 md:p-6 space-y-6"}>
+      {!embedded && <StockBreadcrumb items={[{ label: "Lotes" }]} />}
       {!embedded && (
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>

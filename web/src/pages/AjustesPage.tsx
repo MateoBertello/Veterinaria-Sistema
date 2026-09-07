@@ -11,6 +11,7 @@ import {
   Unlock,
   X,
 } from "lucide-react";
+import { StockBreadcrumb } from "../components/comercial/StockBreadcrumb.tsx";
 import {
   Table,
   TableBody,
@@ -248,6 +249,7 @@ export function AjustesPage() {
 
   return (
     <div className="container mx-auto p-4 md:p-6 space-y-6">
+      <StockBreadcrumb items={[{ label: "Ajustes" }]} />
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>

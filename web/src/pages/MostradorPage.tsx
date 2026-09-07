@@ -58,6 +58,7 @@ import {
 } from "../components/ui/select.tsx";
 import { useAuth } from "../auth/AuthContext.tsx";
 import { sesionActual } from "../api/comercial/caja.ts";
+import { VentasNav } from "../components/comercial/VentasNav.tsx";
 import { listarFamilias, listarProductos } from "../api/comercial/productos.ts";
 import { candidatosFefo } from "../api/comercial/stock.ts";
 import { registrarVenta } from "../api/comercial/ventas.ts";
@@ -703,6 +704,7 @@ export function MostradorPage() {
   if (cajaLoading) {
     return (
       <div className="space-y-6">
+        <VentasNav />
         <h1 className="text-2xl font-bold tracking-tight text-orange-950 flex items-center gap-2">
           <ShoppingCart className="size-6 text-orange-600" aria-hidden />
           Mostrador de Ventas
@@ -718,6 +720,7 @@ export function MostradorPage() {
   if (errorCaja) {
     return (
       <div className="space-y-6">
+        <VentasNav />
         <h1 className="text-2xl font-bold tracking-tight text-orange-950 flex items-center gap-2">
           <ShoppingCart className="size-6 text-orange-600" aria-hidden />
           Mostrador de Ventas
@@ -741,6 +744,7 @@ export function MostradorPage() {
   if (!sesion) {
     return (
       <div className="space-y-6">
+        <VentasNav />
         <h1 className="text-2xl font-bold tracking-tight text-orange-950 flex items-center gap-2">
           <ShoppingCart className="size-6 text-orange-600" aria-hidden />
           Mostrador de Ventas
@@ -777,6 +781,7 @@ export function MostradorPage() {
   // ─── RENDER: Mostrador Operativo ───────────────────────────────────────────
   return (
     <div className="space-y-6">
+      <VentasNav />
       {/* Encabezado principal */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b pb-4">
         <div>

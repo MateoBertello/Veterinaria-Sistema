@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import { BloquearLoteDialog } from "../components/comercial/BloquearLoteDialog.tsx";
 import { DesbloquearLoteDialog } from "../components/comercial/DesbloquearLoteDialog.tsx";
+import { StockBreadcrumb } from "../components/comercial/StockBreadcrumb.tsx";
 import {
   Table,
   TableBody,
@@ -174,25 +175,24 @@ export function LoteDetallePage() {
 
   return (
     <div className="container mx-auto p-4 md:p-6 space-y-8">
+      <StockBreadcrumb
+        items={[
+          { label: "Lotes", href: "/stock/lotes" },
+          { label: "Detalle de Lote" },
+        ]}
+      />
       {/* Header con navegación de vuelta */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <div className="flex items-center gap-2 text-xs text-muted-foreground mb-1">
-            <Link to="/stock/existencias" className="hover:text-foreground">
-              Existencias
-            </Link>
-            <span>/</span>
-            <span>Detalle de Lote</span>
-          </div>
           <h1 className="text-2xl font-bold tracking-tight text-orange-950 flex items-center gap-2">
             <Layers className="h-6 w-6 text-orange-600" />
             Detalle de Lote
           </h1>
         </div>
         <Button asChild variant="outline" size="sm" className="gap-1.5 self-start">
-          <Link to="/stock/existencias">
+          <Link to="/stock/lotes">
             <ChevronLeft className="h-4 w-4" />
-            Volver a Existencias
+            Volver a Lotes
           </Link>
         </Button>
       </div>

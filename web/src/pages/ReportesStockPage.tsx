@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Download, RefreshCw, AlertCircle, TrendingDown, Layers, Scissors, UserCheck, Dog } from "lucide-react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "../components/ui/tabs.tsx";
+import { StockBreadcrumb } from "../components/comercial/StockBreadcrumb.tsx";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card.tsx";
 import { Button } from "../components/ui/button.tsx";
 import { Input } from "../components/ui/input.tsx";
@@ -1445,6 +1446,7 @@ export function ReportesStockPage() {
 
   return (
     <div className="space-y-6">
+      <StockBreadcrumb items={[{ label: "Reportes" }]} />
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Reportes de Stock</h1>
         <p className="text-sm text-muted-foreground">

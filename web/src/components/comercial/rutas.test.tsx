@@ -57,6 +57,7 @@ const RUTAS_COMERCIALES = [
   { path: "/stock/productos", tituloEsperado: "Catálogo de Productos" },
   { path: "/stock/productos/precios", tituloEsperado: "Carga Asistida de Precios" },
   { path: "/stock/familias", tituloEsperado: "Familias de Productos" },
+  { path: "/stock/lotes", tituloEsperado: "Lotes de Stock" },
   { path: "/stock/lotes/l-123", tituloEsperado: "Detalle de Lote" },
   { path: "/stock/vencimientos", tituloEsperado: "Vencimientos Próximos" },
   { path: "/stock/proveedores", tituloEsperado: "Proveedores" },
@@ -77,7 +78,7 @@ const RUTAS_COMERCIALES = [
 
 describe("Rutas y Gating Comercial (F1·T1)", () => {
   for (const { path, tituloEsperado } of RUTAS_COMERCIALES) {
-    it(`navegar a '${path}' con módulo contratado y permiso renderiza el placeholder con título '${tituloEsperado}'`, async () => {
+    it(`navegar a '${path}' con módulo contratado y permiso renderiza la pantalla con título '${tituloEsperado}'`, async () => {
       render(
         <MemoryRouter initialEntries={[path]}>
           <App />
@@ -86,35 +87,6 @@ describe("Rutas y Gating Comercial (F1·T1)", () => {
 
       const heading = await screen.findByRole("heading", { level: 1, name: tituloEsperado });
       expect(heading).toBeInTheDocument();
-      if (
-        path !== "/stock/productos/precios" &&
-        path !== "/stock/productos" &&
-        path !== "/stock/familias" &&
-        path !== "/stock/proveedores" &&
-        path !== "/stock/existencias" &&
-        path !== "/stock/lotes/l-123" &&
-        path !== "/stock/vencimientos" &&
-        path !== "/stock/compras" &&
-        path !== "/stock/compras/c-123" &&
-        path !== "/ventas/caja" &&
-        path !== "/ventas/caja/ses-123" &&
-        path !== "/ventas" &&
-        path !== "/ventas/historial" &&
-        path !== "/ventas/v-123" &&
-        path !== "/stock/ajustes" &&
-        path !== "/stock/recuentos" &&
-        path !== "/stock/recuentos/r-123" &&
-        path !== "/stock/fraccionamiento" &&
-        path !== "/stock/reportes" &&
-        path !== "/ventas/reportes"
-      ) {
-        expect(
-          screen.getByText("Esta pantalla se habilitará en las siguientes tandas del módulo comercial."),
-        ).toBeInTheDocument();
-        expect(
-          screen.getByText(/Ruta configurada y protegida por permisos/),
-        ).toBeInTheDocument();
-      }
     });
   }
 

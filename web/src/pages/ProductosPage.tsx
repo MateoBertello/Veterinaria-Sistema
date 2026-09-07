@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { AlertCircle, Package, Pencil, Plus, Power, Search, Tag } from "lucide-react";
+import { StockBreadcrumb } from "../components/comercial/StockBreadcrumb.tsx";
 import {
   Table,
   TableBody,
@@ -267,6 +268,7 @@ export function ProductosPage() {
 
   return (
     <div className="mx-auto max-w-6xl space-y-6">
+      <StockBreadcrumb items={[{ label: "Productos" }]} />
       <header className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div className="space-y-1">
           <h1 className="flex items-center gap-2 text-2xl font-semibold text-orange-800">

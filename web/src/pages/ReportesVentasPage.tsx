@@ -13,6 +13,7 @@ import {
   ExternalLink,
 } from "lucide-react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "../components/ui/tabs.tsx";
+import { VentasNav } from "../components/comercial/VentasNav.tsx";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card.tsx";
 import { Button } from "../components/ui/button.tsx";
 import { Input } from "../components/ui/input.tsx";
@@ -1723,6 +1724,7 @@ export function ReportesVentasPage() {
 
   return (
     <div className="space-y-6">
+      <VentasNav />
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Reportes de Ventas</h1>
         <p className="text-sm text-muted-foreground">

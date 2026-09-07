@@ -67,10 +67,10 @@ export function OcupacionGuarderiaCard({ fecha }: OcupacionGuarderiaCardProps) {
   const sinOcupacion = datos.length > 0 && datos.every((d) => d.ocupados === 0);
 
   return (
-    <Card className="border-orange-200">
-      <CardHeader className="bg-gradient-to-r from-orange-50 to-transparent">
-        <CardTitle className="flex items-center gap-2 text-base text-orange-800 md:text-lg">
-          <Home className="size-5" aria-hidden />
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-base text-foreground md:text-lg">
+          <Home className="size-5 text-primary/60" aria-hidden />
           Ocupación de guardería
         </CardTitle>
         <CardDescription>Próximos {DIAS} días, sobre el cupo diario configurado</CardDescription>
