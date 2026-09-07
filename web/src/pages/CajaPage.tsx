@@ -47,6 +47,7 @@ import {
 } from "../api/comercial/caja.ts";
 import { listarMediosPago } from "../api/catalogos-comercial.ts";
 import { formatMoneda } from "./LotesPage.tsx";
+import { StockBreadcrumb } from "../components/comercial/StockBreadcrumb.tsx";
 import type {
   ApiMeta,
   Caja,
@@ -239,6 +240,10 @@ export function CajaPage() {
   return (
     <div className="space-y-8">
       <VentasNav />
+      <StockBreadcrumb
+        raiz={{ label: "Ventas", href: "/ventas" }}
+        items={[{ label: "Caja" }]}
+      />
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Sesión de Caja</h1>

@@ -35,6 +35,7 @@ import {
 } from "../components/ui/table.tsx";
 import { Skeleton } from "../components/ui/skeleton.tsx";
 import { Alert, AlertDescription, AlertTitle } from "../components/ui/alert.tsx";
+import { StockBreadcrumb } from "../components/comercial/StockBreadcrumb.tsx";
 
 export default function VentasHistorialPage() {
   const { user } = useAuth();
@@ -122,6 +123,10 @@ export default function VentasHistorialPage() {
   return (
     <div className="space-y-6">
       <VentasNav />
+      <StockBreadcrumb
+        raiz={{ label: "Ventas", href: "/ventas" }}
+        items={[{ label: "Historial" }]}
+      />
       {/* Cabecera */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b pb-4">
         <div>

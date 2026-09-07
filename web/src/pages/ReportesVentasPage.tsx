@@ -44,6 +44,7 @@ import { listarFamilias, listarProductos } from "../api/comercial/productos.ts";
 import { listarUsuarios } from "../api/usuarios.ts";
 import { listarCajas } from "../api/comercial/caja.ts";
 import { listarMediosPago } from "../api/catalogos-comercial.ts";
+import { StockBreadcrumb } from "../components/comercial/StockBreadcrumb.tsx";
 import type {
   Caja,
   Familia,
@@ -1725,6 +1726,10 @@ export function ReportesVentasPage() {
   return (
     <div className="space-y-6">
       <VentasNav />
+      <StockBreadcrumb
+        raiz={{ label: "Ventas", href: "/ventas" }}
+        items={[{ label: "Reportes" }]}
+      />
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Reportes de Ventas</h1>
         <p className="text-sm text-muted-foreground">

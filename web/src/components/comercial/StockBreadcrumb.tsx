@@ -13,8 +13,17 @@ export interface StockBreadcrumbItem {
   href?: string;
 }
 
+/** Índice del módulo al que vuelve la primera miga. Stock por defecto. */
+export interface StockBreadcrumbRaiz {
+  label: string;
+  href: string;
+}
+
+const RAIZ_STOCK: StockBreadcrumbRaiz = { label: "Stock", href: "/stock" };
+
 interface StockBreadcrumbProps {
   items: StockBreadcrumbItem[];
+  raiz?: StockBreadcrumbRaiz;
   className?: string;
 }
 
@@ -26,13 +35,13 @@ function NavAnchor({ href, children }: { href: string; children: React.ReactNode
   return <a href={href}>{children}</a>;
 }
 
-export function StockBreadcrumb({ items, className }: StockBreadcrumbProps) {
+export function StockBreadcrumb({ items, raiz = RAIZ_STOCK, className }: StockBreadcrumbProps) {
   return (
     <Breadcrumb className={className}>
       <BreadcrumbList>
         <BreadcrumbItem>
           <BreadcrumbLink asChild>
-            <NavAnchor href="/stock">Stock</NavAnchor>
+            <NavAnchor href={raiz.href}>{raiz.label}</NavAnchor>
           </BreadcrumbLink>
         </BreadcrumbItem>
         {items.map((item, index) => {

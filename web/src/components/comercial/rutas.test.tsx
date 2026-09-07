@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import type { AuthUser, ModuloContratado } from "../../types/index.ts";
 
@@ -75,6 +75,33 @@ const RUTAS_COMERCIALES = [
   { path: "/ventas/caja/ses-123", tituloEsperado: "Detalle de Sesión de Caja" },
   { path: "/ventas/reportes", tituloEsperado: "Reportes de Ventas" },
 ];
+
+/** Índices de módulo: son el destino del breadcrumb, no tienen a dónde volver. */
+const INDICES_DE_MODULO = new Set(["/stock", "/ventas"]);
+
+describe("Salida de toda pantalla comercial (breadcrumb)", () => {
+  for (const { path, tituloEsperado } of RUTAS_COMERCIALES) {
+    if (INDICES_DE_MODULO.has(path)) continue;
+
+    it(`'${path}' ofrece un breadcrumb con al menos un enlace de vuelta`, async () => {
+      render(
+        <MemoryRouter initialEntries={[path]}>
+          <App />
+        </MemoryRouter>,
+      );
+
+      await screen.findByRole("heading", { level: 1, name: tituloEsperado });
+
+      const migas = await screen.findByRole("navigation", { name: "breadcrumb" });
+      const enlaces = within(migas).getAllByRole("link");
+      expect(enlaces.length).toBeGreaterThan(0);
+
+      // El primer enlace es siempre el índice del módulo al que pertenece.
+      const raiz = path.startsWith("/stock") ? "/stock" : "/ventas";
+      expect(enlaces[0]).toHaveAttribute("href", raiz);
+    });
+  }
+});
 
 describe("Rutas y Gating Comercial (F1·T1)", () => {
   for (const { path, tituloEsperado } of RUTAS_COMERCIALES) {

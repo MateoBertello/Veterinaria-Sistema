@@ -39,6 +39,7 @@ import {
 import { cerrarSesion, obtenerSesion, resumenSesion } from "../api/comercial/caja.ts";
 import { formatMoneda } from "./LotesPage.tsx";
 import type { ResumenSesion, SesionCaja, TotalMedioPago } from "../types/index.ts";
+import { StockBreadcrumb } from "../components/comercial/StockBreadcrumb.tsx";
 
 const DENOMINACIONES = [20000, 10000, 2000, 1000, 500, 200, 100];
 
@@ -150,9 +151,22 @@ export function ArqueoCajaPage() {
     }
   }
 
+  // La salida es la misma en los tres estados de la pantalla (cargando, error
+  // y detalle), así que se declara una vez y se reusa.
+  const migas = (
+    <StockBreadcrumb
+      raiz={{ label: "Ventas", href: "/ventas" }}
+      items={[
+        { label: "Caja", href: "/ventas/caja" },
+        { label: "Detalle de Sesión de Caja" },
+      ]}
+    />
+  );
+
   if (loading) {
     return (
       <div className="space-y-6">
+        {migas}
         <h1 className="text-2xl font-bold tracking-tight">Detalle de Sesión de Caja</h1>
         <div className="space-y-4">
           <Skeleton className="h-32 w-full" />
@@ -165,6 +179,7 @@ export function ArqueoCajaPage() {
   if (errorCarga || !sesion || !resumen) {
     return (
       <div className="space-y-6">
+        {migas}
         <h1 className="text-2xl font-bold tracking-tight">Detalle de Sesión de Caja</h1>
         <div role="alert" className="p-4 bg-rose-50 border border-rose-200 text-rose-700 rounded-md">
           {errorCarga || "No se encontró la sesión solicitada."}
@@ -183,6 +198,7 @@ export function ArqueoCajaPage() {
 
   return (
     <div className="space-y-8">
+      {migas}
       {/* Cabecera de página */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
