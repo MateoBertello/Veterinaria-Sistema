@@ -32,6 +32,31 @@ function renderNav(
 }
 
 describe("SidebarNav", () => {
+  it("el logo es un enlace a la pantalla principal", () => {
+    renderNav({ modulos: [mod("turnos", true)] });
+
+    const inicio = screen.getByRole("link", { name: /ir al inicio/i });
+    expect(inicio).toHaveAttribute("href", "/");
+  });
+
+  it("al navegar desde el logo se cierra el menú mobile", async () => {
+    const { default: userEvent } = await import("@testing-library/user-event");
+    let cerrado = false;
+    render(
+      <MemoryRouter>
+        <SidebarNav
+          items={buildNavItems([mod("turnos", true)], ADMIN.permissions)}
+          user={ADMIN}
+          onLogout={() => {}}
+          onNavigate={() => { cerrado = true; }}
+        />
+      </MemoryRouter>,
+    );
+
+    await userEvent.setup().click(screen.getByRole("link", { name: /ir al inicio/i }));
+    expect(cerrado).toBe(true);
+  });
+
   it("rotula cada sección con su encabezado", () => {
     renderNav({ modulos: [mod("turnos", true)] });
     const nav = screen.getByRole("navigation", { name: "Navegación principal" });

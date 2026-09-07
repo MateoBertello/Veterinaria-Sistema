@@ -1,4 +1,4 @@
-import { NavLink } from "react-router-dom";
+import { Link, NavLink } from "react-router-dom";
 import {
   Accessibility,
   BedDouble,
@@ -83,7 +83,14 @@ export function SidebarNav({ items, user, onLogout, onNavigate }: Props) {
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex items-center gap-3 px-6 py-5">
+      {/* La identidad es el atajo al inicio: es la convención que la gente usa
+          sin pensarla, así que el bloque entero es un enlace al dashboard. */}
+      <Link
+        to="/"
+        onClick={onNavigate}
+        aria-label="Ir al inicio"
+        className="flex items-center gap-3 px-6 py-5 rounded-xl transition-colors hover:bg-sidebar-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      >
         <div className="rounded-xl bg-gradient-to-br from-orange-500 to-orange-600 p-2 shadow-md">
           <Dog className="size-6 text-white" aria-hidden />
         </div>
@@ -91,7 +98,7 @@ export function SidebarNav({ items, user, onLogout, onNavigate }: Props) {
           <div className="text-base font-semibold text-sidebar-accent-foreground">Veterinaria Leo</div>
           <div className="text-xs text-sidebar-foreground">Sistema de Gestión</div>
         </div>
-      </div>
+      </Link>
 
       {/* `overflow-y-auto` propio: con el `<aside>` sticky de alto de viewport,
           una lista larga scrollea acá adentro y la identidad y el menú de cuenta
