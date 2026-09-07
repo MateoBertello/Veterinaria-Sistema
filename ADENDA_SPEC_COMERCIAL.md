@@ -213,3 +213,42 @@ Actualmente:
 **Parche temporal en frontend:**
 Para no romper el contrato del backend auditado, el frontend implementó la normalización aislada mediante la función `toVenta(row: VentaRow): Venta` en [`web/src/api/comercial/ventas.ts`](file:///home/mateo/Veterinaria-Sistema/web/src/api/comercial/ventas.ts).
 Queda documentado como deuda técnica del backend para unificar la salida de `GET /ventas` y `GET /ventas/:id` en `camelCase` directamente desde el Service, eliminando la necesidad de `toVenta()` en el cliente.
+
+---
+
+## Deuda anotada — `GET /caja/sesiones/:id` no devuelve la `referencia` de los movimientos
+
+**Defecto de backend:**
+`POST /caja/sesiones/:id/movimientos` acepta `referencia` (`caja.schemas.ts:25`) y la **exige** cuando el medio de pago tiene `requiere_referencia` (`caja.service.ts:270`, RN-CJ9), pero `GET /caja/sesiones/:id` no la devuelve: `mapMovimientoRow` (`caja.service.ts:135`) proyecta `id`, `sesionCajaId`, `tipo`, `medioPagoId`, `medioPago`, `importe`, `motivo`, `usuarioId` y `createdAt`, y deja afuera `referencia` aunque la consulta la traiga con `select("*")`. El dato se escribe, se guarda y no se puede leer.
+
+**Qué hace el frontend mientras tanto:**
+La tabla de movimientos de la sesión en [`web/src/pages/CajaPage.tsx`](file:///home/mateo/Veterinaria-Sistema/web/src/pages/CajaPage.tsx) **no tiene columna "Referencia"**. Antes existía, alimentada con un `(m as any).referencia` que resolvía a `undefined` y renderizaba `"—"` en todas las filas: una columna que informaba "sin referencia" justo donde el sistema había obligado al usuario a cargar una. El formulario de alta sí sigue pidiendo el dato, porque el POST lo exige.
+
+**Por qué no se corrige ahora:**
+La corrección es del backend —agregar `referencia` a `MovimientoCajaPublico` y a `mapMovimientoRow`—, y el backend del Módulo Comercial es superficie auditada y cerrada para este trabajo. Inventar el campo en el tipo del frontend no lo haría aparecer en la respuesta; sólo movería la mentira de lugar.
+
+---
+
+## Deuda anotada — `GET /productos` no tiene filtro `sinPrecio`
+
+**Defecto de backend:**
+`ListarProductosQuerySchema` (`productos.schemas.ts:47`) admite `search`, `familiaId`, `codigoBarras`, `activo`, `vendible`, `page` y `limit`. No hay forma de pedir al servidor sólo los productos con `precio_venta IS NULL`, que es exactamente la pregunta que hace la pantalla de carga de precios.
+
+**Qué hace el frontend mientras tanto:**
+[`CargaPreciosPage`](file:///home/mateo/Veterinaria-Sistema/web/src/pages/CargaPreciosPage.tsx) pide la lista con `limit: 100` (líneas 189 y 215) y filtra en el cliente: `productosVisibles` y `serviciosVisibles` (líneas 478 y 488) descartan las filas con precio cargado cuando el usuario activa "sólo sin precio", y las filas se marcan con `isSinPrecio` en el render (líneas 697 y 888). El filtro funciona, pero sólo sobre la página traída: con más de 100 productos, un producto sin precio que caiga fuera de la primera página no aparece aunque el filtro esté activo, y el usuario no tiene manera de saberlo.
+
+**Por qué no se corrige ahora:**
+Requiere agregar el parámetro al esquema Zod y la condición al Service del backend, superficie cerrada para este trabajo. El filtro en el cliente es un parche que no cambia el contrato.
+
+---
+
+## Deuda anotada — `GET /fraccionamiento/historial` no devuelve los lotes ni el usuario
+
+**Defecto de backend:**
+`FraccionamientoService.listarHistorial` (`fraccionamiento.service.ts:147`) lee la vista `v_costo_fraccionamiento`, que agrupa por `(tenant_id, operacion_id)` y proyecta productos, cantidades y costos (`20261006000002_comercial_vistas_fraccionamiento.sql`). No proyecta el **código del lote origen**, el **código del lote destino** ni el **usuario que fraccionó**, aunque `movimientos_stock` tiene las tres cosas (`lote_id`, `lote_destino_id`, `usuario_id`). Por eso `ItemHistorialFraccionamiento` (`web/src/types/comercial.ts:712`) tampoco las declara.
+
+**Qué hace el frontend mientras tanto:**
+La tabla de historial de [`FraccionamientoPage`](file:///home/mateo/Veterinaria-Sistema/web/src/pages/FraccionamientoPage.tsx) (líneas 959–971) muestra las nueve columnas que la vista sí devuelve —fecha, operación, productos origen y destino, cantidades, merma y costo unitario del hijo— y **no dibuja columnas de lote ni de usuario**, en vez de dibujarlas vacías. La trazabilidad lote a lote se sigue consultando desde la pantalla de trazabilidad del lote.
+
+**Por qué no se corrige ahora:**
+La corrección es una migración que amplíe la vista, más el mapeo en el Service: backend, superficie cerrada para este trabajo. Queda anotado que el dato existe en `movimientos_stock` y que la vista es el único punto donde se pierde.
