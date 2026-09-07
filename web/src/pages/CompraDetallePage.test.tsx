@@ -54,6 +54,18 @@ const MOCK_PRODUCTO: Producto = {
   updatedAt: "2026-01-01T00:00:00Z",
 };
 
+const MOCK_PRODUCTO_SIN_CONTROL: Producto = {
+  ...MOCK_PRODUCTO,
+  id: "prod-2",
+  codigo: "ACC-001",
+  nombre: "Collar de nylon",
+  condicionVenta: "libre",
+  controlaLote: false,
+  controlaVencimiento: false,
+  esConsumibleClinico: false,
+  trazable: false,
+};
+
 const MOCK_COMPRA_BORRADOR: Compra = {
   id: "c-123",
   fecha: "2026-03-01",
@@ -190,6 +202,85 @@ describe("CompraDetallePage (F2·T3)", () => {
         }),
       );
     });
+  });
+
+  it("RN-LO2: un producto que no controla vencimiento ni lote no muestra esos campos y se agrega sin ellos", async () => {
+    vi.spyOn(productosApi, "listarProductos").mockResolvedValue({
+      items: [MOCK_PRODUCTO_SIN_CONTROL],
+      meta: { page: 1, limit: 100, total: 1 },
+    });
+    const spy = vi.spyOn(comprasApi, "agregarItem").mockResolvedValue({
+      id: "item-3",
+      productoId: "prod-2",
+      cantidad: 2,
+      costoUnitarioNeto: 100,
+      alicuotaIva: 21,
+      codigoLote: null,
+      fechaVencimiento: null,
+      importeNeto: 200,
+      importeIva: 42,
+      importeTotal: 242,
+    });
+
+    const user = userEvent.setup();
+    renderComponent();
+
+    await screen.findByRole("heading", { level: 1, name: "Detalle de Compra" });
+    await user.click(await screen.findByRole("button", { name: /agregar ítem/i }));
+
+    // El collar no vence ni se lotea: los campos no se piden.
+    expect(screen.queryByLabelText(/fecha de vencimiento/i)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/código de lote/i)).not.toBeInTheDocument();
+
+    const inputCantidad = screen.getByLabelText(/cantidad/i);
+    await user.clear(inputCantidad);
+    await user.type(inputCantidad, "2");
+
+    await user.click(screen.getByRole("button", { name: /guardar ítem/i }));
+
+    await waitFor(() => {
+      expect(spy).toHaveBeenCalledWith(
+        "c-123",
+        expect.objectContaining({
+          productoId: "prod-2",
+          cantidad: 2,
+          codigoLote: null,
+          fechaVencimiento: null,
+        }),
+      );
+    });
+  });
+
+  it("RN-LO2: un producto que controla vencimiento sin fecha falla con mensaje visible y no llama a la API", async () => {
+    const spy = vi.spyOn(comprasApi, "agregarItem").mockResolvedValue({
+      id: "item-4",
+      productoId: "prod-1",
+      cantidad: 1,
+      costoUnitarioNeto: 100,
+      alicuotaIva: 21,
+      codigoLote: "LOT-X",
+      fechaVencimiento: null,
+      importeNeto: 100,
+      importeIva: 21,
+      importeTotal: 121,
+    });
+
+    const user = userEvent.setup();
+    renderComponent();
+
+    await screen.findByRole("heading", { level: 1, name: "Detalle de Compra" });
+    await user.click(await screen.findByRole("button", { name: /agregar ítem/i }));
+
+    // MOCK_PRODUCTO sí controla vencimiento: los campos se piden.
+    expect(screen.getByLabelText(/fecha de vencimiento/i)).toBeInTheDocument();
+
+    await user.type(screen.getByLabelText(/código de lote/i), "LOT-X");
+    // Se deja la fecha de vencimiento vacía a propósito.
+
+    await user.click(screen.getByRole("button", { name: /guardar ítem/i }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/fecha de vencimiento/i);
+    expect(spy).not.toHaveBeenCalled();
   });
 
   it("los totales se calculan bien: neto × cantidad, IVA por alícuota, total", async () => {

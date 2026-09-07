@@ -142,6 +142,9 @@ export function CompraDetallePage() {
       if (prod.costoReposicion !== null && prod.costoReposicion !== undefined) {
         setItemCostoNeto(String(prod.costoReposicion));
       }
+      // RN-LO2: lo que el producto no controla no se pide ni se arrastra del anterior.
+      if (!prod.controlaLote) setItemCodigoLote("");
+      if (!prod.controlaVencimiento) setItemFechaVenc("");
     }
   };
 
@@ -191,8 +194,8 @@ export function CompraDetallePage() {
         cantidad: cant,
         costoUnitarioNeto: costo,
         alicuotaIva: alic,
-        codigoLote: itemCodigoLote.trim() || null,
-        fechaVencimiento: itemFechaVenc || null,
+        codigoLote: productoActual?.controlaLote ? itemCodigoLote.trim() || null : null,
+        fechaVencimiento: productoActual?.controlaVencimiento ? itemFechaVenc || null : null,
       });
 
       setModalItem(false);
@@ -701,33 +704,36 @@ export function CompraDetallePage() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-3 pt-2 border-t border-slate-100">
-                <div className="space-y-1.5">
-                  <Label htmlFor="item-lote">
-                    Código de lote {productoActual?.controlaLote ? "*" : ""}
-                  </Label>
-                  <Input
-                    id="item-lote"
-                    placeholder="LOT-..."
-                    value={itemCodigoLote}
-                    onChange={(e) => setItemCodigoLote(e.target.value)}
-                    required={productoActual?.controlaLote}
-                  />
-                </div>
+              {/* RN-LO2: lote y vencimiento solo para los productos que los controlan. */}
+              {(productoActual?.controlaLote || productoActual?.controlaVencimiento) && (
+                <div className="grid grid-cols-2 gap-3 pt-2 border-t border-slate-100">
+                  {productoActual?.controlaLote && (
+                    <div className="space-y-1.5">
+                      <Label htmlFor="item-lote">Código de lote *</Label>
+                      <Input
+                        id="item-lote"
+                        placeholder="LOT-..."
+                        value={itemCodigoLote}
+                        onChange={(e) => setItemCodigoLote(e.target.value)}
+                        aria-required="true"
+                      />
+                    </div>
+                  )}
 
-                <div className="space-y-1.5">
-                  <Label htmlFor="item-venc">
-                    Fecha de vencimiento {productoActual?.controlaVencimiento ? "*" : ""}
-                  </Label>
-                  <Input
-                    id="item-venc"
-                    type="date"
-                    value={itemFechaVenc}
-                    onChange={(e) => setItemFechaVenc(e.target.value)}
-                    required={productoActual?.controlaVencimiento}
-                  />
+                  {productoActual?.controlaVencimiento && (
+                    <div className="space-y-1.5">
+                      <Label htmlFor="item-venc">Fecha de vencimiento *</Label>
+                      <Input
+                        id="item-venc"
+                        type="date"
+                        value={itemFechaVenc}
+                        onChange={(e) => setItemFechaVenc(e.target.value)}
+                        aria-required="true"
+                      />
+                    </div>
+                  )}
                 </div>
-              </div>
+              )}
             </div>
 
             <DialogFooter>
