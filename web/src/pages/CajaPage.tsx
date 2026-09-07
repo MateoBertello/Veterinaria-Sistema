@@ -726,7 +726,10 @@ export function CajaPage() {
                   required={Boolean(medioPagoSeleccionado?.requiere_referencia)}
                   placeholder={
                     medioPagoSeleccionado?.requiere_referencia
-                      ? "N° de comprobante / operación"
+                      // §2.6: es el identificador externo que devuelve el medio de pago
+                      // (autorización de tarjeta, N° de transferencia), no el numero_operacion
+                      // de la venta. El copy no puede usar las cuatro palabras prohibidas.
+                      ? "N° de autorización o transferencia"
                       : "Identificador opcional"
                   }
                 />

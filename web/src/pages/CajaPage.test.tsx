@@ -254,6 +254,50 @@ describe("CajaPage (F3·T1)", () => {
     expect(within(dialog).getByText(/\(requerido\)/i)).toBeInTheDocument();
   });
 
+  it("§2.6: no aparece 'Comprobante', 'Factura', 'Ticket' ni 'Recibo', ni en el texto ni en los placeholders", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(cajaApi, "sesionActual").mockResolvedValue(MOCK_SESION_ABIERTA);
+    vi.spyOn(cajaApi, "obtenerSesion").mockResolvedValue(MOCK_SESION_ABIERTA);
+    vi.spyOn(cajaApi, "resumenSesion").mockResolvedValue(MOCK_RESUMEN);
+
+    render(
+      <MemoryRouter>
+        <CajaPage />
+      </MemoryRouter>,
+    );
+
+    const prohibidas = /comprobante|factura|ticket|recibo/i;
+
+    /**
+     * El copy prohibido también puede esconderse en un atributo: el placeholder de la
+     * referencia del movimiento no forma parte de textContent. Se revisan las dos cosas.
+     */
+    const revisarTodo = () => {
+      expect(document.body.textContent ?? "").not.toMatch(prohibidas);
+      for (const el of Array.from(document.body.querySelectorAll("*"))) {
+        for (const attr of ["placeholder", "aria-label", "title", "alt"]) {
+          const valor = el.getAttribute(attr);
+          if (valor) expect(valor).not.toMatch(prohibidas);
+        }
+      }
+    };
+
+    await screen.findByRole("button", { name: /nuevo movimiento/i });
+    revisarTodo();
+
+    // El placeholder de la referencia sólo se dibuja con el diálogo abierto, y su
+    // variante "requerida" sólo cuando el medio elegido pide referencia.
+    await user.click(screen.getByRole("button", { name: /nuevo movimiento/i }));
+    const dialog = await screen.findByRole("dialog");
+    await user.selectOptions(
+      within(dialog).getByLabelText(/medio de pago/i),
+      "mp-transferencia",
+    );
+    expect(within(dialog).getByLabelText(/referencia/i)).toHaveAttribute("required");
+
+    revisarTodo();
+  });
+
   it("el importe negativo o cero se rechaza en el cliente", async () => {
     const user = userEvent.setup();
     vi.spyOn(cajaApi, "sesionActual").mockResolvedValue(MOCK_SESION_ABIERTA);
