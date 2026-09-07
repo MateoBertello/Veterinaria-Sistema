@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, Navigate, Outlet, Route, Routes, useLocation } from "react-router-dom";
-import { Dog, Menu } from "lucide-react";
+import { LogoMarca } from "./components/shell/LogoMarca.tsx";
+import { Menu } from "lucide-react";
 import { buildNavItems, type NavItem } from "./lib/navigation.ts";
 import { useAuth } from "./auth/AuthContext.tsx";
 import { ModulosProvider, useModulos } from "./auth/ModulosContext.tsx";
@@ -91,9 +92,7 @@ function MobileNav({ items, user, onLogout }: {
         aria-label="Ir al inicio"
         className="flex items-center gap-2 rounded-lg transition-colors hover:bg-sidebar-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       >
-        <div className="rounded-lg bg-gradient-to-br from-orange-500 to-orange-600 p-1.5 shadow-md">
-          <Dog className="size-5 text-white" aria-hidden />
-        </div>
+        <LogoMarca className="size-8 rounded-lg" />
         <span className="text-base font-semibold text-sidebar-accent-foreground">Leo</span>
       </Link>
 

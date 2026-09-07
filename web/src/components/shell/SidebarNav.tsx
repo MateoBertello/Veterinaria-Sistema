@@ -1,10 +1,10 @@
 import { Link, NavLink } from "react-router-dom";
+import { LogoMarca } from "./LogoMarca.tsx";
 import {
   Accessibility,
   BedDouble,
   CalendarClock,
   CalendarDays,
-  Dog,
   FileText,
   History,
   Home,
@@ -91,9 +91,7 @@ export function SidebarNav({ items, user, onLogout, onNavigate }: Props) {
         aria-label="Ir al inicio"
         className="flex items-center gap-3 px-6 py-5 rounded-xl transition-colors hover:bg-sidebar-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       >
-        <div className="rounded-xl bg-gradient-to-br from-orange-500 to-orange-600 p-2 shadow-md">
-          <Dog className="size-6 text-white" aria-hidden />
-        </div>
+        <LogoMarca className="size-10" />
         <div className="leading-tight">
           <div className="text-base font-semibold text-sidebar-accent-foreground">Veterinaria Leo</div>
           <div className="text-xs text-sidebar-foreground">Sistema de Gestión</div>

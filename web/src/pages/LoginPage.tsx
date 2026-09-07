@@ -7,7 +7,8 @@ import {
   type FieldErrors,
   type RegisterOptions,
 } from "react-hook-form";
-import { Dog, Loader2 } from "lucide-react";
+import { Loader2 } from "lucide-react";
+import { LogoMarca } from "../components/shell/LogoMarca.tsx";
 import {
   Card,
   CardContent,
@@ -105,9 +106,7 @@ export function LoginPage() {
       <Card className="w-full max-w-sm">
         <CardHeader className="items-center text-center">
           <div className="mb-2 flex flex-col items-center gap-3">
-            <div className="rounded-2xl bg-gradient-to-br from-orange-500 to-orange-600 p-3 shadow-lg">
-              <Dog className="size-9 text-white" aria-hidden />
-            </div>
+            <LogoMarca className="size-20 rounded-2xl shadow-lg" />
             <div>
               <div className="text-2xl font-semibold text-orange-800">Veterinaria Leo</div>
               <div className="text-sm text-muted-foreground">Sistema de Gestión Profesional</div>

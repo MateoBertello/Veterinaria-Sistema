@@ -36,6 +36,29 @@ un literal de color de marca.
 En Tailwind v4 el valor crudo se declara en `:root` y se mapea en `@theme inline`
 para que existan las utilidades.
 
+### 0.1 El logo de la marca
+
+El logo vive en `web/public/logo-vetercor.png` y se usa **únicamente** a través de
+`LogoMarca` (`web/src/components/shell/LogoMarca.tsx`), que es donde está la ruta:
+la identidad aparece en tres superficies (sidebar, barra superior de mobile y
+login) y la regla de §1 —si un valor aparece dos veces, es un token— también vale
+para la ruta de un asset.
+
+- **Es decorativo.** Va con `alt=""`. En las tres superficies el nombre del
+  sistema ya está en el texto contiguo o en el `aria-label` del enlace que lo
+  envuelve; un texto alternativo lo anunciaría dos veces.
+- **Trae su propio fondo de marca**, así que no lleva la caja con degradado que
+  envolvía al ícono anterior. El redondeo se pasa por `className`
+  (`rounded-xl` en sidebar, `rounded-lg` en mobile, `rounded-2xl` en login).
+- **El naranja del logo no es el token.** El archivo es `#F36326`; el naranja de
+  identidad del sistema es `#f97316` y el `--primary` de controles es `#c2410c`.
+  Son tres naranjas distintos y el logo queda al lado de los otros dos en el
+  sidebar. Alinearlos es una decisión de marca pendiente, no un bug de la
+  pantalla.
+- **Tamaño del archivo.** Se sirve una versión de 256×256 con paleta de 32
+  colores (26 KB). El original de 2048×2048 pesa 1,7 MB: no se referencia desde
+  la app, porque se muestra a 40 px.
+
 ### 1.0 Regla del sistema: el naranja es acento, no fondo
 
 El naranja de marca (`#f97316` como identidad, `#c2410c`/orange-700 como

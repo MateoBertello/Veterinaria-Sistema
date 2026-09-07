@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { LOGO_MARCA_SRC } from "./components/shell/LogoMarca.tsx";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import type { AuthUser, ModuloContratado } from "./types/index.ts";
 
@@ -56,6 +57,15 @@ beforeEach(() => {
 });
 
 describe("navegación mobile del Shell (Etapa 10E)", () => {
+  it("la barra mobile muestra el logo de la marca", async () => {
+    const { container } = renderShell("/clientes");
+
+    const barraMobile = container.querySelector(".md\\:hidden") as HTMLElement;
+    const logo = barraMobile.querySelector(`img[src="${LOGO_MARCA_SRC}"]`);
+    expect(logo).not.toBeNull();
+    expect(logo).toHaveAttribute("alt", "");
+  });
+
   it("el logo de la barra mobile también lleva al inicio", async () => {
     const { container } = renderShell("/clientes");
 

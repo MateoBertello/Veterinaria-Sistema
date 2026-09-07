@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { render, screen, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { SidebarNav } from "./SidebarNav.tsx";
+import { LOGO_MARCA_SRC } from "./LogoMarca.tsx";
 import { buildNavItems } from "../../lib/navigation.ts";
 import type { AuthUser, ModuloContratado, ModuloVendible } from "../../types/index.ts";
 
@@ -32,6 +33,16 @@ function renderNav(
 }
 
 describe("SidebarNav", () => {
+  it("la identidad muestra el logo de la marca", () => {
+    const { container } = renderNav({ modulos: [mod("turnos", true)] });
+
+    const logo = container.querySelector(`img[src="${LOGO_MARCA_SRC}"]`);
+    expect(logo).not.toBeNull();
+    // El enlace ya se llama "Ir al inicio": el logo es decorativo y no debe
+    // sumar un segundo anuncio al lector de pantalla.
+    expect(logo).toHaveAttribute("alt", "");
+  });
+
   it("el logo es un enlace a la pantalla principal", () => {
     renderNav({ modulos: [mod("turnos", true)] });
 
