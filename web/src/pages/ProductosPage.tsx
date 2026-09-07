@@ -842,7 +842,14 @@ function ProductoFormSheet({
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent className="overflow-y-auto sm:max-w-lg">
-        <form onSubmit={handleSubmit} className="space-y-6">
+        {/*
+          noValidate: sin esto la validación nativa del navegador (los min/max de
+          los inputs numéricos) bloquea el submit antes de handleSubmit, validar()
+          nunca corre para esos campos y el usuario sólo ve el tooltip nativo en vez
+          del mensaje con role="alert" del formulario. validar() cubre las mismas
+          restricciones (precio, costo, margen, vida útil y stock mínimo).
+        */}
+        <form onSubmit={handleSubmit} className="space-y-6" noValidate>
           <SheetHeader>
             <SheetTitle>{esEdicion ? "Editar producto" : "Nuevo producto"}</SheetTitle>
             <SheetDescription>

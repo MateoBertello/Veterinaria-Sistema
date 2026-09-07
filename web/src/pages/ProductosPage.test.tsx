@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { ProductosPage } from "./ProductosPage.tsx";
@@ -368,6 +368,140 @@ describe("ProductosPage (F1·T2)", () => {
       requiereFrio: false,
       trazable: false,
       codigoBarras: null,
+    });
+  });
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // Validación del formulario de producto — validar() (ProductosPage.tsx:688).
+  // Cada caso asserta el mensaje visible y que no se llamó a la API de escritura.
+  // ───────────────────────────────────────────────────────────────────────────
+  describe("validación del formulario de producto", () => {
+    type Usuario = ReturnType<typeof userEvent.setup>;
+
+    async function abrirFormulario(user: Usuario) {
+      renderPage();
+      expect(await screen.findByText("Amoxicilina 500mg")).toBeInTheDocument();
+      await user.click(screen.getByRole("button", { name: /Nuevo producto/i }));
+      expect(
+        await screen.findByRole("heading", { name: "Nuevo producto" }),
+      ).toBeInTheDocument();
+    }
+
+    async function guardar(user: Usuario) {
+      await user.click(screen.getByRole("button", { name: /Crear producto/i }));
+    }
+
+    function noGuardo() {
+      expect(productosApi.crearProducto).not.toHaveBeenCalled();
+      expect(productosApi.actualizarProducto).not.toHaveBeenCalled();
+    }
+
+    it("código vacío: 'El código es obligatorio' y no guarda", async () => {
+      const user = userEvent.setup();
+      await abrirFormulario(user);
+
+      await user.type(screen.getByLabelText(/Nombre \*/i), "Amoxicilina 500mg");
+      await guardar(user);
+
+      expect(await screen.findByText("El código es obligatorio")).toBeInTheDocument();
+      noGuardo();
+    });
+
+    it("código de más de 50 caracteres: muestra el límite y no guarda", async () => {
+      const user = userEvent.setup();
+      await abrirFormulario(user);
+
+      fireEvent.change(screen.getByLabelText(/Código \*/i), {
+        target: { value: "C".repeat(51) },
+      });
+      await user.type(screen.getByLabelText(/Nombre \*/i), "Amoxicilina 500mg");
+      await guardar(user);
+
+      expect(
+        await screen.findByText("El código no puede superar 50 caracteres"),
+      ).toBeInTheDocument();
+      noGuardo();
+    });
+
+    it("nombre de menos de 3 caracteres: muestra el mínimo y no guarda", async () => {
+      const user = userEvent.setup();
+      await abrirFormulario(user);
+
+      await user.type(screen.getByLabelText(/Código \*/i), "AMOX-500");
+      await user.type(screen.getByLabelText(/Nombre \*/i), "Am");
+      await guardar(user);
+
+      expect(
+        await screen.findByText("El nombre debe tener al menos 3 caracteres"),
+      ).toBeInTheDocument();
+      noGuardo();
+    });
+
+    it("nombre de más de 150 caracteres: muestra el límite y no guarda", async () => {
+      const user = userEvent.setup();
+      await abrirFormulario(user);
+
+      await user.type(screen.getByLabelText(/Código \*/i), "AMOX-500");
+      fireEvent.change(screen.getByLabelText(/Nombre \*/i), {
+        target: { value: "N".repeat(151) },
+      });
+      await guardar(user);
+
+      expect(
+        await screen.findByText("El nombre no puede superar 150 caracteres"),
+      ).toBeInTheDocument();
+      noGuardo();
+    });
+
+    it("descripción de más de 500 caracteres: muestra el límite y no guarda", async () => {
+      const user = userEvent.setup();
+      await abrirFormulario(user);
+
+      await user.type(screen.getByLabelText(/Código \*/i), "AMOX-500");
+      await user.type(screen.getByLabelText(/Nombre \*/i), "Amoxicilina 500mg");
+      fireEvent.change(screen.getByLabelText(/Descripción/i), {
+        target: { value: "D".repeat(501) },
+      });
+      await guardar(user);
+
+      expect(
+        await screen.findByText("La descripción no puede superar 500 caracteres"),
+      ).toBeInTheDocument();
+      noGuardo();
+    });
+
+    it("margen objetivo por encima de 999.99: muestra el rango y no guarda", async () => {
+      const user = userEvent.setup();
+      await abrirFormulario(user);
+
+      await user.type(screen.getByLabelText(/Código \*/i), "AMOX-500");
+      await user.type(screen.getByLabelText(/Nombre \*/i), "Amoxicilina 500mg");
+      fireEvent.change(screen.getByLabelText(/Margen objetivo \(%\)/i), {
+        target: { value: "1000" },
+      });
+      await guardar(user);
+
+      expect(
+        await screen.findByText("El margen objetivo debe estar entre 0 y 999.99%"),
+      ).toBeInTheDocument();
+      noGuardo();
+    });
+
+    it("margen objetivo negativo: muestra el rango y no guarda", async () => {
+      const user = userEvent.setup();
+      await abrirFormulario(user);
+
+      await user.type(screen.getByLabelText(/Código \*/i), "AMOX-500");
+      await user.type(screen.getByLabelText(/Nombre \*/i), "Amoxicilina 500mg");
+      fireEvent.change(screen.getByLabelText(/Margen objetivo \(%\)/i), {
+        target: { value: "-5" },
+      });
+      await guardar(user);
+
+      expect(
+        await screen.findByText("El margen objetivo debe estar entre 0 y 999.99%"),
+      ).toBeInTheDocument();
+      noGuardo();
     });
   });
 
