@@ -451,18 +451,10 @@ export function ConsumoInsumosWidget({
       ) : (
         <ul className="space-y-2 text-xs">
           {consumos.map((c) => {
-            const prodNombre =
-              c.producto?.nombre ||
-              (c as any).productos?.nombre ||
-              (c as any).productoNombre ||
-              "Insumo";
-            const loteCodigo =
-              c.lote?.codigoLote ||
-              (c as any).lotes?.codigo_lote ||
-              (c as any).lotes?.codigoLote ||
-              (c as any).codigoLote ||
-              "Sin lote";
-            const motivoFefo = c.motivo || (c as any).motivoFefo || (c as any).motivo_fefo;
+            const prodNombre = c.producto?.nombre || "Insumo";
+            const loteCodigo = c.lote?.codigoLote || "Sin lote";
+            // El RPC de consumo guarda el motivo FEFO en `motivo`; no hay campo aparte.
+            const motivoFefo = c.motivo;
 
             return (
               <li

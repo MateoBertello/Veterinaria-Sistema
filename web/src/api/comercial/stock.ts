@@ -8,6 +8,7 @@ import type {
   Lote,
   LoteCandidato,
   MovimientoStock,
+  MovimientoStockRow,
   TipoMovimientoStock,
   TrazabilidadNodo,
   ValorizacionStock,
@@ -84,12 +85,21 @@ export interface ListarMovimientosParams {
   limit?:       number;
 }
 
-export function listarMovimientos(
+export async function listarMovimientos(
   params: ListarMovimientosParams = {},
 ): Promise<{ items: MovimientoStock[]; meta: ApiMeta }> {
-  return apiClientList<MovimientoStock>(
+  // El Service pasa el embed `lote` tal como lo devuelve PostgREST (`codigo_lote`);
+  // se normaliza acá para que MovimientoStock tenga una sola forma en todo el frontend.
+  const { items, meta } = await apiClientList<MovimientoStockRow>(
     `/movimientos-stock${buildQuery(params as Record<string, unknown>)}`,
   );
+  return {
+    items: items.map((m) => ({
+      ...m,
+      lote: m.lote ? { id: m.lote.id, codigoLote: m.lote.codigo_lote } : null,
+    })),
+    meta,
+  };
 }
 
 export interface ListarExistenciasParams {

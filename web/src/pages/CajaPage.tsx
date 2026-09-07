@@ -471,7 +471,14 @@ export function CajaPage() {
                         <TableHead>Medio de pago</TableHead>
                         <TableHead className="text-right">Importe</TableHead>
                         <TableHead>Motivo</TableHead>
-                        <TableHead>Referencia</TableHead>
+                        {/*
+                          Sin columna "Referencia": POST /caja/sesiones/:id/movimientos
+                          acepta y exige `referencia` cuando el medio de pago la pide,
+                          pero GET /caja/sesiones/:id no la devuelve (caja.service.ts,
+                          mapMovimientoRow no la mapea). Una columna que siempre muestra
+                          "—" da a entender que no se cargó ninguna referencia.
+                          Deuda anotada en ADENDA_SPEC_COMERCIAL.md.
+                        */}
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -510,15 +517,12 @@ export function CajaPage() {
                               <TableCell className="max-w-xs truncate text-sm">
                                 {m.motivo || "—"}
                               </TableCell>
-                              <TableCell className="text-sm text-muted-foreground">
-                                {(m as any).referencia || "—"}
-                              </TableCell>
                             </TableRow>
                           );
                         })
                       ) : (
                         <TableRow>
-                          <TableCell colSpan={6} className="h-24 text-center text-muted-foreground">
+                          <TableCell colSpan={5} className="h-24 text-center text-muted-foreground">
                             Aún no hay movimientos registrados en esta sesión.
                           </TableCell>
                         </TableRow>

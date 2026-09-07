@@ -564,11 +564,52 @@ describe("API Comercial - Fraccionamiento y Consumo Clínico", () => {
     });
     expect(fetchMock.mock.calls[0][0]).toBe("/api/v1/consumos");
 
+    fetchMock.mockResolvedValueOnce(envelopeOk([]));
     await consumosPorEvento("evt-100");
     expect(fetchMock.mock.calls[1][0]).toBe("/api/v1/consumos/evento/evt-100");
 
     await disponibilidadConsumo("p-1");
     expect(fetchMock.mock.calls[2][0]).toBe("/api/v1/consumos/disponibilidad?productoId=p-1");
+  });
+
+  it("consumosPorEvento normaliza la fila cruda de PostgREST a camelCase", async () => {
+    // GET /consumos/evento/:historialId responde el resultado de la consulta sin mapear:
+    // columnas en snake_case y embeds con el nombre de la tabla (`productos`, `lotes`).
+    fetchMock.mockResolvedValue(
+      envelopeOk([
+        {
+          id:                 "mov-1",
+          operacion_id:       "op-1",
+          tipo:               "consumo_clinico",
+          cantidad:           "2.000",
+          cantidad_con_signo: "-2.000",
+          costo_unitario:     "150.0000",
+          costo_total:        "300.00",
+          motivo:             "Se usó el lote abierto para no descartarlo",
+          created_at:         "2026-09-05T10:00:00.000Z",
+          productos:          { id: "prod-1", codigo: "AMOX-500", nombre: "Amoxicilina 500mg" },
+          lotes:              { id: "lote-1", codigo_lote: "LOT-2026-01" },
+        },
+      ]),
+    );
+
+    const items = await consumosPorEvento("evt-100");
+
+    expect(items).toEqual([
+      {
+        id:               "mov-1",
+        operacionId:      "op-1",
+        tipo:             "consumo_clinico",
+        cantidad:         2,
+        cantidadConSigno: -2,
+        costoUnitario:    150,
+        costoTotal:       300,
+        motivo:           "Se usó el lote abierto para no descartarlo",
+        createdAt:        "2026-09-05T10:00:00.000Z",
+        producto:         { id: "prod-1", codigo: "AMOX-500", nombre: "Amoxicilina 500mg" },
+        lote:             { id: "lote-1", codigoLote: "LOT-2026-01" },
+      },
+    ]);
   });
 });
 

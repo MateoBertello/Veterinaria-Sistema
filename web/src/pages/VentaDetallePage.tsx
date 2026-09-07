@@ -144,7 +144,6 @@ export default function VentaDetallePage() {
     const itemsState: ItemDevolucionState[] = (venta.items || []).map((it) => {
       const nombre =
         it.descripcionSnapshot ||
-        (it as unknown as Record<string, unknown>).descripcion_snapshot as string ||
         (it.tipoItem === "producto" ? "Producto" : "Servicio");
       return {
         ventaItemId: it.id,
@@ -446,21 +445,14 @@ export default function VentaDetallePage() {
               </TableHeader>
               <TableBody>
                 {venta.items.map((item, idx) => {
-                  const rawItem = item as unknown as Record<string, unknown>;
+                  // Sin fallbacks snake_case: toVenta (api/comercial/ventas.ts) normaliza
+                  // estos cuatro campos incondicionalmente antes de que la fila llegue acá.
                   const desc =
                     item.descripcionSnapshot ||
-                    (rawItem.descripcion_snapshot as string) ||
                     (item.tipoItem === "producto" ? "Producto" : "Servicio");
-                  const motivoFefo =
-                    item.motivoFefo || (rawItem.motivo_fefo as string) || null;
-                  const loteInfo =
-                    item.lote?.codigoLote ||
-                    (rawItem.lote as Record<string, string>)?.codigo_lote ||
-                    null;
-                  const venceInfo =
-                    item.lote?.fechaVencimiento ||
-                    (rawItem.lote as Record<string, string>)?.fecha_vencimiento ||
-                    null;
+                  const motivoFefo = item.motivoFefo || null;
+                  const loteInfo = item.lote?.codigoLote || null;
+                  const venceInfo = item.lote?.fechaVencimiento || null;
 
                   return (
                     <TableRow key={item.id || idx}>

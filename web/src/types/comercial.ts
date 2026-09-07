@@ -259,6 +259,36 @@ export interface MovimientoStock {
   lote?:            { id: string; codigoLote: string } | null;
 }
 
+/**
+ * Fila cruda de `movimientos_stock` tal como la devuelve GET /consumos/evento/:historialId.
+ * Ese endpoint responde el resultado de PostgREST sin mapear (consumo.service.ts, porEvento):
+ * columnas en snake_case y embeds nombrados como la tabla (`productos`, `lotes`).
+ * Se normaliza a MovimientoStock en api/comercial/consumo.ts.
+ */
+export interface MovimientoStockConsumoRow {
+  id:                 string;
+  operacion_id:       string | null;
+  tipo:               TipoMovimientoStock | string;
+  cantidad:           number | string;
+  cantidad_con_signo: number | string;
+  costo_unitario:     number | string;
+  costo_total:        number | string;
+  motivo:             string | null;
+  created_at:         string;
+  productos?:         { id: string; codigo: string; nombre: string } | null;
+  lotes?:             { id: string; codigo_lote: string } | null;
+}
+
+/**
+ * Fila de GET /movimientos-stock: el Service mapea los escalares a camelCase pero
+ * pasa los embeds `producto` y `lote` tal como vienen de PostgREST, con las columnas
+ * en snake_case (stock.service.ts, listarMovimientos). Se normaliza en
+ * api/comercial/stock.ts para que MovimientoStock tenga una única forma.
+ */
+export interface MovimientoStockRow extends Omit<MovimientoStock, "lote"> {
+  lote?: { id: string; codigo_lote: string } | null;
+}
+
 export interface ExistenciaFila {
   productoId: string;
   cantidad:   number;
