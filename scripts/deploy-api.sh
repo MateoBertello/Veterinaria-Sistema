@@ -25,7 +25,10 @@ REF="origin/main"
 PROJECT_REF="${SUPABASE_PROJECT_REF:-}"
 DRY_RUN=0
 SKIP_SCHEMA=0
-BLOQUEADOS=(stock ventas)
+# Vacío = no hay módulos retenidos. `stock` y `ventas` estuvieron acá desde el
+# deploy accidental del 2026-09-04 hasta que su esquema llegó a producción.
+# Se agregan de nuevo con --block <modulo> si vuelve a hacer falta retener uno.
+BLOQUEADOS=()
 
 uso() {
   sed -n '3,20p' "$0" | sed 's/^# \{0,1\}//'
@@ -87,6 +90,12 @@ API_SRC="$WORKTREE/supabase/functions/api/src"
 # Busca los identificadores de módulo bloqueados en TODO el código de la API.
 # Alcanza con que aparezcan: si `main.ts` los monta, si `requireModule` los
 # acepta o si el enum de Zod los valida, el commit no está listo para prod.
+# Con la lista vacía la guarda se omite. No se deja correr con un patrón vacío:
+# `grep -E "\b()\b"` casa con CUALQUIER línea, así que un array vacío haría
+# abortar todo deploy con un listado sin sentido.
+if [[ ${#BLOQUEADOS[@]} -eq 0 ]]; then
+  echo "→ Guarda 1: sin módulos bloqueados (omitida)"
+else
 PATRON="$(IFS='|'; echo "${BLOQUEADOS[*]}")"
 echo "→ Guarda 1: módulos bloqueados (${BLOQUEADOS[*]})"
 
@@ -97,6 +106,7 @@ if COINCIDENCIAS="$(grep -rniE "\\b(${PATRON})\\b" "$API_SRC" 2>/dev/null)"; the
   Desplegá un commit anterior con --ref, o sacá --block <modulo> si ya está liberado."
 fi
 echo "  ✓ sin rastros de: ${BLOQUEADOS[*]}"
+fi
 
 # ─── 4. Guarda: el código no puede ir adelante del esquema ──────────────────
 # La causa raíz del incidente no fueron los módulos en sí, sino desplegar código
