@@ -53,18 +53,28 @@ BEGIN
 
   -- 2. Poblar datos por tenant
   FOREACH t_id IN ARRAY ARRAY[v_tenant_a, v_tenant_b, v_tenant_c] LOOP
-    -- Roles si no existen
-    IF NOT EXISTS (SELECT 1 FROM roles WHERE tenant_id = t_id AND name = 'admin') THEN
-      INSERT INTO roles (tenant_id, name, display_name, description, is_system)
-      VALUES (t_id, 'admin', 'Administrador', 'Acceso total a la clínica', true);
-    END IF;
-    IF NOT EXISTS (SELECT 1 FROM roles WHERE tenant_id = t_id AND name = 'veterinario') THEN
-      INSERT INTO roles (tenant_id, name, display_name, description, is_system)
-      VALUES (t_id, 'veterinario', 'Veterinario', 'Atención médica', true);
-    END IF;
-    IF NOT EXISTS (SELECT 1 FROM roles WHERE tenant_id = t_id AND name = 'recepcionista') THEN
-      INSERT INTO roles (tenant_id, name, display_name, description, is_system)
-      VALUES (t_id, 'recepcionista', 'Recepcionista', 'Atención al público', true);
+    -- Aprovisionamiento Nivel 2 por el MISMO camino que usa el alta real.
+    --
+    -- Antes este bloque insertaba los tres roles a mano. Eso dejaba los tenants
+    -- del fixture a medias: sin `rol_permiso` (el rol admin con CERO permisos),
+    -- sin `configuracion_tenant` y —lo más visible— sin ninguna fila en
+    -- `modulos_contratados`, así que todo endpoint detrás de `requireModule`
+    -- respondía 403 MODULE_NOT_LICENSED para estos tres tenants.
+    --
+    -- El backfill de la migración 20261029000003 no los rescata: las migraciones
+    -- corren ANTES que los seeds, así que cuando el backfill se ejecuta estos
+    -- tenants todavía no existen.
+    --
+    -- `on_tenant_created` es exactamente lo que dispara `crear_tenant` en el
+    -- alta por la API. No se llama a `crear_tenant` directamente porque este
+    -- fixture necesita ids fijos (11111111-…, 22222222-…, 33333333-…) y el RPC
+    -- genera el suyo. El INSERT de arriba fija el id; esta llamada aporta todo
+    -- lo demás, sin duplicar la lógica.
+    --
+    -- La guarda por `roles` da la idempotencia: `on_tenant_created` hace INSERTs
+    -- planos y correrlo dos veces sobre el mismo tenant duplicaría los roles.
+    IF NOT EXISTS (SELECT 1 FROM roles WHERE tenant_id = t_id) THEN
+      PERFORM public.on_tenant_created(t_id);
     END IF;
 
     -- Usuarios en auth.users y public.usuarios
