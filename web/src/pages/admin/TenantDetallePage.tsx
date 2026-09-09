@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { ArrowLeft, MailPlus, Pencil, Power } from "lucide-react";
+import { ArrowLeft, Pencil, Power } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "../../components/ui/badge.tsx";
 import { Button } from "../../components/ui/button.tsx";
@@ -20,7 +20,6 @@ import {
   cambiarEstadoTenant,
   crearTenant,
   editarTenant,
-  invitarAdminTenant,
   listarModulosTenant,
   obtenerTenant,
   setModuloTenant,
@@ -36,7 +35,6 @@ export function TenantDetallePage() {
 
   const [formOpen,  setFormOpen]  = useState(false);
   const [estadoOpen, setEstadoOpen] = useState(false);
-  const [invitando, setInvitando] = useState(false);
 
   const cargar = useCallback(async () => {
     setLoading(true);
@@ -53,30 +51,6 @@ export function TenantDetallePage() {
   useEffect(() => {
     void cargar();
   }, [cargar]);
-
-  /**
-   * RN-SA2: la invitación es idempotente. Si el tenant ya estaba invitado el
-   * backend no reenvía nada y devuelve el mismo estado — por eso el mensaje
-   * distingue "enviada" de "ya estaba invitado" mirando el estado previo.
-   */
-  async function invitarAdmin() {
-    if (!tenant) return;
-    const yaInvitado = tenant.adminInvitado;
-    setInvitando(true);
-    try {
-      const actualizado = await invitarAdminTenant(tenant.id);
-      setTenant(actualizado);
-      toast.success(
-        yaInvitado
-          ? "El administrador ya había sido invitado; no se reenvió la invitación."
-          : `Invitación enviada a ${actualizado.emailContacto}`,
-      );
-    } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : "No se pudo invitar al administrador");
-    } finally {
-      setInvitando(false);
-    }
-  }
 
   if (loading) {
     return (
@@ -160,23 +134,23 @@ export function TenantDetallePage() {
         <CardHeader>
           <CardTitle>Administrador de la clínica</CardTitle>
           <CardDescription>
-            La invitación se envía a {tenant.emailContacto} por email. Reintentarla es seguro: si ya
-            fue invitado, no se reenvía.
+            El administrador se da de alta por la API, con{" "}
+            <code>POST /admin/tenants/{tenant.id}/admin</code>. Ya no se envía ningún mail de
+            invitación: la contraseña inicial la elige quien da el alta y el administrador la
+            cambia al entrar.
           </CardDescription>
         </CardHeader>
-        <CardContent className="flex flex-wrap items-center justify-between gap-3">
+        <CardContent>
           <p className="text-sm">
             Estado:{" "}
             {tenant.adminInvitado ? (
-              <Badge className="bg-green-100 text-green-800 hover:bg-green-100">Invitado</Badge>
+              <Badge className="bg-green-100 text-green-800 hover:bg-green-100">
+                Con administrador
+              </Badge>
             ) : (
-              <Badge variant="secondary">Pendiente de invitar</Badge>
+              <Badge variant="secondary">Sin administrador</Badge>
             )}
           </p>
-          <Button onClick={() => void invitarAdmin()} disabled={invitando}>
-            <MailPlus className="size-4" aria-hidden />
-            {tenant.adminInvitado ? "Reintentar invitación" : "Invitar admin"}
-          </Button>
         </CardContent>
       </Card>
 

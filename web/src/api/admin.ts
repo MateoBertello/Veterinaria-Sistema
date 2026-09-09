@@ -52,8 +52,8 @@ export function obtenerTenant(id: string): Promise<Tenant> {
 /**
  * POST /admin/tenants — alta de clínica (RN-SA1/SA2): el backend crea el tenant
  * y su aprovisionamiento (roles, configuración y módulos del plan) de forma
- * atómica, y luego invita al Admin por email — si la invitación falla, el tenant
- * queda creado con `adminInvitado=false` y se reintenta desde el detalle.
+ * atómica. La clínica nace SIN usuarios: el administrador se da de alta después,
+ * con `POST /admin/tenants/:id/admin`. Ya no se manda ningún mail de invitación.
  */
 export function crearTenant(input: CrearTenantInput): Promise<Tenant> {
   return apiClient<Tenant>("/admin/tenants", {
@@ -80,15 +80,6 @@ export function cambiarEstadoTenant(id: string, activo: boolean): Promise<Tenant
     method: "PATCH",
     body: JSON.stringify({ activo }),
   });
-}
-
-/**
- * POST /admin/tenants/:id/invitar-admin — RN-SA2: reintento idempotente de la
- * invitación al Admin del tenant. Si ya fue invitado, el backend no reenvía nada
- * y devuelve el tenant tal cual.
- */
-export function invitarAdminTenant(id: string): Promise<Tenant> {
-  return apiClient<Tenant>(`/admin/tenants/${id}/invitar-admin`, { method: "POST" });
 }
 
 /** GET /admin/tenants/:id/modulos — estado de los módulos vendibles del tenant. */

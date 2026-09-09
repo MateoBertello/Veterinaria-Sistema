@@ -184,7 +184,7 @@ export function TenantsPage() {
               <TableHead className="hidden md:table-cell">Email de contacto</TableHead>
               <TableHead>Plan</TableHead>
               <TableHead>Estado</TableHead>
-              <TableHead className="hidden lg:table-cell">Admin</TableHead>
+              <TableHead className="hidden lg:table-cell">Administrador</TableHead>
               <TableHead className="text-right">Acciones</TableHead>
             </TableRow>
           </TableHeader>
@@ -231,9 +231,9 @@ export function TenantsPage() {
                   </TableCell>
                   <TableCell className="hidden lg:table-cell">
                     {t.adminInvitado ? (
-                      <span className="text-sm text-muted-foreground">Invitado</span>
+                      <span className="text-sm text-muted-foreground">Con administrador</span>
                     ) : (
-                      <Badge variant="secondary">Pendiente de invitar</Badge>
+                      <Badge variant="secondary">Sin administrador</Badge>
                     )}
                   </TableCell>
                   <TableCell>

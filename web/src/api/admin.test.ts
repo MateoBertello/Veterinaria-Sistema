@@ -8,7 +8,6 @@ import {
   cambiarEstadoTenant,
   crearTenant,
   editarTenant,
-  invitarAdminTenant,
   listarModulosTenant,
   listarTenants,
   obtenerTenant,
@@ -174,20 +173,6 @@ describe("cambiarEstadoTenant", () => {
     expect(init.method).toBe("PATCH");
     expect(JSON.parse(init.body as string)).toEqual({ activo: false });
     expect(tenant.activo).toBe(false);
-  });
-});
-
-describe("invitarAdminTenant", () => {
-  it("hace POST a /invitar-admin sin body (reintento idempotente, RN-SA2)", async () => {
-    fetchMock.mockResolvedValue(envelope({ ...TENANT, adminInvitado: true }));
-
-    const tenant = await invitarAdminTenant("t-1");
-
-    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(url).toBe("/api/v1/admin/tenants/t-1/invitar-admin");
-    expect(init.method).toBe("POST");
-    expect(init.body).toBeUndefined();
-    expect(tenant.adminInvitado).toBe(true);
   });
 });
 

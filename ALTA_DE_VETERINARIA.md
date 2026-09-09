@@ -388,22 +388,17 @@ ningún precio, ningún proveedor y ninguna caja. Todo eso es el paso 6.
 
 ## 3. El usuario administrador de la clínica
 
-> ### Ignorá el mail de invitación
->
-> El alta del paso 2 manda automáticamente un mail de invitación al email de
-> contacto, y la respuesta trae `adminInvitado: true`. **Ese mail no alcanza para
-> entrar.** Está verificado contra el sistema corriendo, y falla por tres motivos
-> independientes:
->
-> 1. El `tenant_id` termina en la metadata de usuario y no en la de aplicación,
->    que es donde lo busca la API. Cualquier llamada devuelve `401`.
-> 2. No se crea la fila correspondiente en la tabla `usuarios`, y el login de
->    clínica resuelve el nombre de usuario contra esa tabla. Nunca lo encuentra.
-> 3. El rol que se guarda en la invitación no lo lee nadie, y la aplicación no
->    tiene ninguna pantalla que procese la vuelta del link.
->
-> El paso 3.1 es el camino que funciona, y además **adopta** la cuenta que esa
-> invitación haya dejado si el email coincide: no hace falta borrarla antes.
+La clínica que creaste en el paso 2 no tiene ningún usuario todavía. El alta deja
+los roles, los permisos, la configuración y los módulos, pero nadie con quien
+entrar. Este paso lo resuelve.
+
+**El sistema no manda ningún mail de invitación.** El alta de la clínica no crea
+ninguna cuenta y el email de contacto es solo un dato comercial. Si venís de una
+versión anterior y esperabas ese mail, ya no existe: creaba una cuenta que nunca
+podía entrar y quedaba dando vueltas en Supabase Auth.
+
+El camino es corto: creás el administrador con una contraseña inicial que elegís
+vos, se la pasás, y él la cambia al entrar.
 
 ### 3.1 Crear el administrador por la API
 
@@ -714,32 +709,52 @@ revisalo con alguien y hacé un backup antes.
 
 Cosas que este runbook rodea porque hoy no funcionan.
 
-### La invitación por email quedó redundante
+### Cuentas huérfanas de altas anteriores
 
-El hueco original —no había forma de crear el administrador de una clínica por la
-API— **está cerrado**: es el endpoint del paso 3.1, que además deja el asiento de
-auditoría que el script no dejaba.
+El flujo de invitación por mail **se sacó del sistema**: `TenantService.crear` ya
+no llama a `inviteUserByEmail`, la ruta de reintento no existe más, y la columna
+`tenants.admin_invitado` pasó a significar **la clínica ya tiene
+administrador** — la pone en true el alta del administrador del paso 3.1. El
+nombre de la columna quedó viejo y no se renombró: eso exigiría una migración
+nueva sobre producción sin cambiar ningún comportamiento.
 
-Lo que queda abierto es el flujo de invitación por mail, que sigue roto y ahora
-además sobra. Su razón de ser era que el administrador eligiera su propia
-contraseña sin que el operador la conociera, y eso hoy lo cubre la recuperación
-de contraseña que ya existe: se da el alta con una contraseña inicial y el
-cliente la cambia en su primera entrada.
+Lo que queda es el rastro: **cada alta hecha antes de este cambio dejó una cuenta
+en Supabase Auth sin fila en `usuarios`**, creada por la invitación. No rompen
+nada, pero no las ve ninguna herramienta que recorra tablas de negocio, y son
+cuentas de correo reales de tus clientes.
 
-Mientras siga ahí, cada alta de clínica deja una cuenta huérfana en Supabase
-Auth: creada por la invitación, sin fila en `usuarios`, invisible para las
-herramientas que recorren tablas de negocio. Los tests de integración tienen que
-borrarla a mano por su email para que no se acumule corrida tras corrida.
+Contalas antes de decidir qué hacer. Contra la base del entorno que quieras
+revisar, en el SQL Editor del Dashboard:
 
-Las opciones, de menor a mayor costo:
+```sql
+SELECT au.email,
+       au.invited_at,
+       au.raw_user_meta_data->>'tenant_id' AS tenant_de_la_invitacion
+FROM auth.users au
+LEFT JOIN public.usuarios u ON u.id = au.id
+WHERE u.id IS NULL
+  AND COALESCE(au.raw_app_meta_data->>'platform_role', '') <> 'super_admin'
+ORDER BY au.created_at;
+```
 
-1. **Sacar la invitación del alta.** `TenantService.crear` deja de llamar a
-   `inviteUserByEmail`; la columna `admin_invitado` pasa a reflejar si la clínica
-   ya tiene administrador. Deja de generar cuentas huérfanas.
-2. **Dejarla como está** y convivir con las huérfanas, documentado.
-3. **Arreglarla de verdad**: mover el `tenant_id` a la metadata de aplicación,
-   crear la fila en `usuarios` al aceptar, construir la pantalla de aceptación y
-   configurar el redirect. Es el más caro y duplica lo que el endpoint ya hace.
+En la base local de desarrollo hoy son **cero**, porque el último `db reset` la
+reconstruyó. En producción hay que correr la consulta para saberlo.
+
+Con la lista en la mano hay dos caminos limpios, y ninguno pasa por borrar filas
+a mano:
+
+1. **Adoptarlas.** Si la cuenta es del administrador que esa clínica iba a tener,
+   corré el alta del paso 3.1 con **ese mismo email**. El endpoint detecta la
+   cuenta huérfana, la adopta, le pone el `tenant_id` donde la API lo lee, le
+   asigna la contraseña que elijas y le crea la fila en `usuarios`. Queda
+   utilizable en vez de tirada.
+2. **Borrarlas.** Si esa clínica ya tiene administrador por otro email, o la
+   cuenta no corresponde a nadie, la baja va por la API de administración de
+   Supabase Auth (`DELETE /auth/v1/admin/users/<id>` con la service-role key), no
+   por SQL: así se lleva también las identidades asociadas.
+
+Revisá la lista antes de borrar nada. Una de esas cuentas puede ser el email de
+un cliente real.
 
 ### El módulo comercial no está en producción
 

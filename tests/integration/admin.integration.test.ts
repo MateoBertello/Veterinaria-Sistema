@@ -53,6 +53,28 @@ async function callApp(path: string, opts: { method?: string; jwt?: string; body
   });
 }
 
+/**
+ * Total de cuentas en `auth.users`, paginando el listado admin.
+ *
+ * GoTrue no expone un COUNT y la tabla `auth.users` no se lee por PostgREST, así
+ * que se recorre. Es el instrumento del test que verifica que el alta de una
+ * clínica no deja cuentas huérfanas.
+ */
+async function contarUsuariosAuth(): Promise<number> {
+  let total = 0;
+  for (let page = 1; page <= 50; page++) {
+    const res = await fetch(
+      `${SUPABASE_URL}/auth/v1/admin/users?page=${page}&per_page=200`,
+      { headers: adminHeaders() },
+    );
+    const body = await res.json() as { users?: unknown[] };
+    const n = body.users?.length ?? 0;
+    total += n;
+    if (n < 200) break;
+  }
+  return total;
+}
+
 beforeAll(async () => {
   if (skipIfNoCredentials()) return;
 
@@ -90,13 +112,16 @@ afterAll(async () => {
   if (!serviceDb) return;
   for (const tid of createdTenantIds) await limpiarTenant(serviceDb, tid);
   // Borrar el super admin.
+  //
+  // Acá se borraban además las cuentas de contacto `alta@test.com` y
+  // `alta-admin@test.com`: `TenantService.crear` las creaba con
+  // `inviteUserByEmail`, quedaban en auth.users sin fila en `usuarios` y
+  // `limpiarTenant` —que recorre tablas de negocio— no las veía. Desde que la
+  // invitación se sacó del alta, el alta no crea ninguna cuenta y esa limpieza
+  // no tenía nada que borrar. La cobertura de `borrarUsuarioAuthPorEmail` la
+  // sigue sosteniendo tests/integration/teardown-pagination.test.ts (H3b), que
+  // no depende de estas líneas.
   await borrarUsuarioAuthPorEmail("super@admin-test.com");
-  // Y la cuenta de contacto del tenant dado de alta por RN-SA2: `TenantService.crear`
-  // la crea con `inviteUserByEmail`, así que existe en auth.users pero NO tiene fila
-  // en `usuarios` — `limpiarTenant` recorre tablas de negocio y no la ve. Sin esto
-  // sobrevive a cada corrida. Es la misma clase de huérfana de Auth que motivó H3.
-  await borrarUsuarioAuthPorEmail("alta@test.com");
-  await borrarUsuarioAuthPorEmail("alta-admin@test.com");
 });
 
 // ─── Aislamiento ────────────────────────────────────────────────────────────
@@ -140,6 +165,56 @@ describeIntegration("RN-SA1 / RN-SA2: alta de tenant", () => {
     expect(roles).toBe(3);
     expect(modulos).toBe(5);
   });
+
+  /**
+   * El alta no crea NINGUNA cuenta en Supabase Auth.
+   *
+   * Este es el test que sostiene el cierre del flujo de invitación. Antes,
+   * `TenantService.crear` llamaba a `inviteUserByEmail` con el email de contacto
+   * y eso dejaba una cuenta en `auth.users` sin fila en `usuarios`: invisible
+   * para `limpiarTenant` y para cualquier herramienta que recorra tablas de
+   * negocio, y acumulándose una por cada alta.
+   *
+   * MUTACIÓN: si se vuelve a poner la llamada a `inviteUserByEmail` en
+   * `TenantService.crear`, el conteo posterior queda en +1 y este test se pone
+   * rojo. El 201 y el aprovisionamiento siguen verdes, así que es el único
+   * assert que lo detecta.
+   */
+  it("RN-SA2: el alta no deja ninguna cuenta en auth.users (sin invitación por mail)", async () => {
+    if (skipIfNoCredentials() || !jwtSuperAdmin) return;
+
+    const antes = await contarUsuariosAuth();
+
+    const res = await callApp("/admin/tenants", {
+      method: "POST", jwt: jwtSuperAdmin,
+      body: {
+        nombre:        "Clínica Sin Invitación",
+        cuitRut:       `30-${Date.now().toString().slice(-8)}-7`,
+        emailContacto: "sin-invitacion@test.com",
+        plan:          "basico",
+      },
+    });
+    const body = await res.json() as { data: { id: string; adminInvitado: boolean } };
+    expect(res.status).toBe(201);
+    createdTenantIds.push(body.data.id);
+
+    const despues = await contarUsuariosAuth();
+    expect(despues).toBe(antes);
+
+    // Y en particular, nada creado para el email de contacto.
+    const buscar = await fetch(
+      `${SUPABASE_URL}/auth/v1/admin/users?page=1&per_page=200`,
+      { headers: adminHeaders() },
+    );
+    const lista = await buscar.json() as { users?: Array<{ email?: string }> };
+    const contacto = (lista.users ?? []).find(
+      (u) => (u.email ?? "").toLowerCase() === "sin-invitacion@test.com",
+    );
+    expect(contacto).toBeUndefined();
+
+    // El tenant nace sin administrador.
+    expect(body.data.adminInvitado).toBe(false);
+  }, 30_000);
 
   it("RN-SA1: CUIT/RUT duplicado → 409 TENANT_DUPLICATE_TAXID", async () => {
     if (skipIfNoCredentials() || !jwtSuperAdmin) return;
@@ -285,6 +360,48 @@ describeIntegration("RN-SA6: alta del usuario administrador de la clínica", () 
     const datos = await callApp("/modulos-habilitados", { jwt: jwtAdmin });
     expect(datos.status).not.toBe(401);
     expect(datos.status).toBe(200);
+  }, 30_000);
+
+  /**
+   * `tenants.admin_invitado` cambió de significado: nació como "ya se cursó la
+   * invitación por mail" y hoy es "la clínica ya tiene administrador". El nombre
+   * de la columna quedó viejo —renombrarla exigiría una migración nueva sobre
+   * producción sin cambiar ningún comportamiento— pero quien la pone en true es
+   * este endpoint, no ningún envío de mail.
+   */
+  it("RN-SA6: adminInvitado pasa de false a true al crear el administrador", async () => {
+    if (skipIfNoCredentials() || !jwtSuperAdmin || !tenantAdminId) return;
+
+    // El estado quedó en true por el test anterior de esta misma suite, así que
+    // el antes/después se mide sobre una clínica recién creada.
+    const alta = await callApp("/admin/tenants", {
+      method: "POST", jwt: jwtSuperAdmin,
+      body: {
+        nombre:        "Clínica Flag Admin",
+        cuitRut:       `30-${Date.now().toString().slice(-8)}-8`,
+        emailContacto: "flag-admin@test.com",
+        plan:          "basico",
+      },
+    });
+    const altaBody = await alta.json() as { data: { id: string; adminInvitado: boolean } };
+    expect(alta.status).toBe(201);
+    const tid = altaBody.data.id;
+    createdTenantIds.push(tid);
+
+    expect(altaBody.data.adminInvitado).toBe(false);
+
+    const crea = await callApp(`/admin/tenants/${tid}/admin`, {
+      method: "POST", jwt: jwtSuperAdmin,
+      body: {
+        email: "flag.admin@alta-test.com", fullName: "Flag Admin",
+        rol: "admin", password: "FlagAdmin123!",
+      },
+    });
+    expect(crea.status).toBe(201);
+
+    const detalle = await callApp(`/admin/tenants/${tid}`, { jwt: jwtSuperAdmin });
+    const detBody = await detalle.json() as { data: { adminInvitado: boolean } };
+    expect(detBody.data.adminInvitado).toBe(true);
   }, 30_000);
 
   it("RN-SA6: sin platform_role → 403 FORBIDDEN, no crea nada", async () => {

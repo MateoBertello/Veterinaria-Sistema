@@ -91,14 +91,11 @@ describe("RN-SA1: unicidad fiscal", () => {
 
 // ─── RN-SA2 ───────────────────────────────────────────────────────────────────
 
-describe("RN-SA2: alta atómica + invitación posterior reintentable", () => {
+describe("RN-SA2: alta atómica del tenant, sin invitación por mail", () => {
   it("RN-SA2: crear invoca rpc('crear_tenant') una sola vez (alta atómica)", async () => {
     const db = buildMockDb({
       singleResults: [
-        { data: null, error: null },                              // precheck cuit_rut
-        { data: tenantRow(), error: null },                       // invitarAdmin lookup
-        { data: tenantRow({ admin_invitado: true }), error: null }, // update admin_invitado
-        { data: tenantRow({ admin_invitado: true }), error: null }, // re-read en crear
+        { data: null, error: null },        // precheck cuit_rut
       ],
       rpcResult: { data: tenantRow(), error: null },
     });
@@ -114,18 +111,37 @@ describe("RN-SA2: alta atómica + invitación posterior reintentable", () => {
       p_nombre: "Clínica Demo",
       p_cuit_rut: "30-12345678-9",
     }));
-    expect(result.adminInvitado).toBe(true);
+    expect(result.id).toBe(TENANT_ID);
   });
 
-  it("RN-SA2: si invitarAdmin falla, el tenant queda creado con admin_invitado=false (sin borrar)", async () => {
+  /**
+   * El alta NO manda ningún mail y no crea ninguna cuenta de Auth.
+   *
+   * `inviteUserByEmail` mandaba el `tenant_id` a `user_metadata` —donde la API
+   * no lo lee— y no creaba fila en `usuarios`, así que el invitado nunca podía
+   * entrar; mientras tanto, cada alta dejaba una cuenta huérfana en `auth.users`.
+   * Este assert es la contraparte unitaria del test de integración que cuenta
+   * filas en `auth.users` antes y después del alta.
+   */
+  it("RN-SA2: crear NO invita por email (la invitación se sacó del alta)", async () => {
     const db = buildMockDb({
-      singleResults: [
-        { data: null, error: null },                  // precheck cuit_rut
-        { data: tenantRow(), error: null },           // invitarAdmin lookup
-        { data: tenantRow(), error: null },           // re-read en crear (admin_invitado=false)
-      ],
-      rpcResult:    { data: tenantRow(), error: null },
-      inviteResult: { error: { message: "SMTP down" } },
+      singleResults: [{ data: null, error: null }],
+      rpcResult:     { data: tenantRow(), error: null },
+    });
+    mockGetServiceDb.mockReturnValue(db as never);
+
+    await TenantService.crear(
+      { nombre: "Clínica Demo", cuitRut: "30-12345678-9", emailContacto: "demo@clinica.com", plan: "basico" },
+      SA_CTX,
+    );
+
+    expect(db.auth.admin.inviteUserByEmail).not.toHaveBeenCalled();
+  });
+
+  it("RN-SA2: el tenant nace sin administrador (adminInvitado=false)", async () => {
+    const db = buildMockDb({
+      singleResults: [{ data: null, error: null }],
+      rpcResult:     { data: tenantRow(), error: null },
     });
     mockGetServiceDb.mockReturnValue(db as never);
 
@@ -134,38 +150,7 @@ describe("RN-SA2: alta atómica + invitación posterior reintentable", () => {
       SA_CTX,
     );
 
-    // El alta NO se revierte: el tenant existe, pendiente de invitar admin.
-    expect(db.rpc).toHaveBeenCalledOnce();
-    expect(result.id).toBe(TENANT_ID);
     expect(result.adminInvitado).toBe(false);
-  });
-
-  it("RN-SA2: invitarAdmin es reintentable y marca admin_invitado=true", async () => {
-    const db = buildMockDb({
-      singleResults: [
-        { data: tenantRow(), error: null },                          // lookup
-        { data: tenantRow({ admin_invitado: true }), error: null },  // update
-      ],
-      inviteResult: { error: null },
-    });
-    mockGetServiceDb.mockReturnValue(db as never);
-
-    const result = await TenantService.invitarAdmin(TENANT_ID);
-
-    expect(db.auth.admin.inviteUserByEmail).toHaveBeenCalledOnce();
-    expect(result.adminInvitado).toBe(true);
-  });
-
-  it("RN-SA2: invitarAdmin es idempotente (no reenvía si ya fue invitado)", async () => {
-    const db = buildMockDb({
-      singleResults: [{ data: tenantRow({ admin_invitado: true }), error: null }],
-    });
-    mockGetServiceDb.mockReturnValue(db as never);
-
-    const result = await TenantService.invitarAdmin(TENANT_ID);
-
-    expect(db.auth.admin.inviteUserByEmail).not.toHaveBeenCalled();
-    expect(result.adminInvitado).toBe(true);
   });
 });
 
@@ -196,12 +181,7 @@ describe("RN-SA4: aislamiento de datos de negocio", () => {
 describe("RN-SA5: auditoría de plataforma", () => {
   it("RN-SA5: crear audita CREATE con module='platform'", async () => {
     const db = buildMockDb({
-      singleResults: [
-        { data: null, error: null },
-        { data: tenantRow(), error: null },
-        { data: tenantRow({ admin_invitado: true }), error: null },
-        { data: tenantRow({ admin_invitado: true }), error: null },
-      ],
+      singleResults: [{ data: null, error: null }],
     });
     mockGetServiceDb.mockReturnValue(db as never);
 

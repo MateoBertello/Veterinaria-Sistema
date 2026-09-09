@@ -873,7 +873,11 @@ export const PLANES_TENANT: PlanTenant[] = ["basico", "profesional", "premium"];
 /**
  * Espejo camelCase de `TenantPublico` del backend (`/admin/tenants`). RN-SA4: son
  * metadatos comerciales, NUNCA datos de negocio internos del tenant.
- * `adminInvitado` refleja si ya se cursó la invitación del Admin (RN-SA2).
+ * `adminInvitado` dice si la clínica YA TIENE administrador. El nombre viene del
+ * flujo de invitación por mail, que se sacó del alta; la columna de la base
+ * (`tenants.admin_invitado`) conserva el nombre viejo porque su migración ya está
+ * aplicada, pero hoy la pone en true el alta del administrador
+ * (`POST /admin/tenants/:id/admin`), no ningún envío de mail.
  */
 export interface Tenant {
   id:            string;
@@ -886,8 +890,9 @@ export interface Tenant {
   createdAt:     string;
 }
 
-/** Body de `POST /admin/tenants` (espejo de `CrearTenantSchema`). El email del
- *  Admin invitado ES `emailContacto`: el backend invita a esa casilla (RN-SA2). */
+/** Body de `POST /admin/tenants` (espejo de `CrearTenantSchema`). `emailContacto`
+ *  es la casilla comercial de la clínica; NO crea ninguna cuenta ni recibe mail.
+ *  El administrador se da de alta aparte, con `POST /admin/tenants/:id/admin`. */
 export interface CrearTenantInput {
   nombre:        string;
   cuitRut:       string;

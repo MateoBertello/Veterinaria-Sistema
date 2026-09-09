@@ -188,18 +188,27 @@ se niega contra URLs remotas salvo `SEED_ALLOW_REMOTE=1`). El alta real es:
    por (tenant, email): repetirlo devuelve `200` con el usuario que ya estaba, en
    vez de `201`.
 
-   > **No uses el mail de invitación que dispara el alta del tenant.**
-   > `TenantService.crear` llama a `inviteUserByEmail`, que manda el `tenant_id`
-   > a `user_metadata` en vez de `app_metadata` y no crea fila en `usuarios`: el
-   > invitado se autentica pero la API le responde 401. Es un hueco conocido.
-   > Este endpoint es el camino que funciona, y adopta la cuenta de Auth que esa
-   > invitación haya dejado si el email coincide.
+   > **El alta del tenant no manda ningún mail y no crea ninguna cuenta.**
+   > `TenantService.crear` invitaba por mail a la casilla de contacto con
+   > `inviteUserByEmail`; se sacó, porque mandaba el `tenant_id` a
+   > `user_metadata` en vez de `app_metadata` y no creaba fila en `usuarios` —el
+   > invitado se autenticaba y después la API le respondía 401— y de paso dejaba
+   > una cuenta huérfana en `auth.users` por cada alta. Este endpoint **adopta**
+   > las que quedaron de altas anteriores si el email coincide: correrlo con ese
+   > email las deja utilizables en vez de tiradas.
 
    Alternativa de bootstrap, cuando la Edge Function todavía no está desplegada:
    `scripts/crear-usuario-tenant.mjs`, que hace lo mismo con la service-role key
    pero **no deja auditoría**.
 4. Lo demás (usuarios, servicios, horarios, clientes) se carga desde la app
    con el admin del tenant.
+
+> **`tenants.admin_invitado` cambió de significado.** Nació como "ya se cursó la
+> invitación por mail"; desde que la invitación se sacó, significa **la clínica
+> ya tiene administrador**, y la pone en true el paso 3 cuando el rol creado es
+> `admin`. La columna conserva el nombre viejo porque su migración ya está
+> aplicada. En la API sale como `adminInvitado` y la consola de plataforma la
+> muestra como "Con administrador" / "Sin administrador".
 
 Para **staging/demo** sí puede usarse el seeder completo (tenant "Veterinaria
 Demo" + usuarios por rol + datos operativos de los 3 módulos + mascota

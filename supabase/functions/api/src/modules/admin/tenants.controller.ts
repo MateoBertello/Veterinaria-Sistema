@@ -101,12 +101,6 @@ tenantsRouter.patch("/:id/estado", async (c) => {
   return c.json(ok(tenant), 200);
 });
 
-// ── POST /admin/tenants/:id/invitar-admin (reintento idempotente, RN-SA2) ───────
-tenantsRouter.post("/:id/invitar-admin", async (c) => {
-  const tenant = await TenantService.invitarAdmin(c.req.param("id"));
-  return c.json(ok(tenant), 200);
-});
-
 // ── POST /admin/tenants/:id/admin (usuario inicial de la clínica) ───────────────
 // El tenant destino sale del `:id` de la ruta y de ningún otro lado: un
 // `tenantId` en el body no lo redirige (el schema lo descarta).

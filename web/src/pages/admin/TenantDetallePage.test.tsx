@@ -9,7 +9,6 @@ vi.mock("../../api/admin.ts", () => ({
   editarTenant: vi.fn(),
   crearTenant: vi.fn(),
   cambiarEstadoTenant: vi.fn(),
-  invitarAdminTenant: vi.fn(),
   listarModulosTenant: vi.fn(),
   setModuloTenant: vi.fn(),
 }));
@@ -21,7 +20,6 @@ import {
   obtenerTenant,
   editarTenant,
   cambiarEstadoTenant,
-  invitarAdminTenant,
   listarModulosTenant,
   setModuloTenant,
 } from "../../api/admin.ts";
@@ -30,7 +28,6 @@ import { toast } from "sonner";
 const mockObtener = vi.mocked(obtenerTenant);
 const mockEditar = vi.mocked(editarTenant);
 const mockCambiarEstado = vi.mocked(cambiarEstadoTenant);
-const mockInvitar = vi.mocked(invitarAdminTenant);
 const mockListarModulos = vi.mocked(listarModulosTenant);
 const mockSetModulo = vi.mocked(setModuloTenant);
 
@@ -118,52 +115,26 @@ describe("TenantDetallePage", () => {
     expect(await screen.findAllByText("Premium")).not.toHaveLength(0);
   });
 
-  it("invitar admin: con invitación pendiente informa el envío (RN-SA2)", async () => {
+  it("administrador: sin administrador muestra el estado y NO ofrece invitar por mail", async () => {
     mockObtener.mockResolvedValue(makeTenant({ adminInvitado: false }));
-    mockInvitar.mockResolvedValue(makeTenant({ adminInvitado: true }));
 
     renderPage();
     await screen.findByRole("heading", { name: "Veterinaria San Roque" });
-    expect(screen.getAllByText("Pendiente de invitar").length).toBeGreaterThan(0);
 
-    await userEvent.click(screen.getByRole("button", { name: /Invitar admin/i }));
-
-    await waitFor(() => expect(mockInvitar).toHaveBeenCalledWith("t-1"));
-    expect(toast.success).toHaveBeenCalledWith("Invitación enviada a contacto@sanroque.vet");
-    expect(await screen.findByText("Invitado")).toBeInTheDocument();
+    expect(screen.getAllByText("Sin administrador").length).toBeGreaterThan(0);
+    // La invitación por mail se sacó del sistema: no debe quedar ningún botón
+    // que la ofrezca, porque no hay nada detrás que la cumpla.
+    expect(screen.queryByRole("button", { name: /invit/i })).toBeNull();
   });
 
-  it("invitar admin: reintento idempotente avisa que no se reenvió (RN-SA2)", async () => {
+  it("administrador: con administrador el estado lo refleja", async () => {
     mockObtener.mockResolvedValue(makeTenant({ adminInvitado: true }));
-    mockInvitar.mockResolvedValue(makeTenant({ adminInvitado: true }));
 
     renderPage();
     await screen.findByRole("heading", { name: "Veterinaria San Roque" });
 
-    await userEvent.click(screen.getByRole("button", { name: /Reintentar invitación/i }));
-
-    await waitFor(() =>
-      expect(toast.success).toHaveBeenCalledWith(
-        "El administrador ya había sido invitado; no se reenvió la invitación.",
-      ),
-    );
-  });
-
-  it("invitar admin: un error del envelope se informa sin romper la pantalla", async () => {
-    mockObtener.mockResolvedValue(makeTenant({ adminInvitado: false }));
-    mockInvitar.mockRejectedValue(
-      new ApiError("INTERNAL_ERROR", 500, "No se pudo invitar al administrador: SMTP caído"),
-    );
-
-    renderPage();
-    await screen.findByRole("heading", { name: "Veterinaria San Roque" });
-
-    await userEvent.click(screen.getByRole("button", { name: /Invitar admin/i }));
-
-    await waitFor(() =>
-      expect(toast.error).toHaveBeenCalledWith("No se pudo invitar al administrador: SMTP caído"),
-    );
-    expect(screen.getAllByText("Pendiente de invitar").length).toBeGreaterThan(0);
+    expect(await screen.findByText("Con administrador")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /invit/i })).toBeNull();
   });
 
   it("suspender desde el detalle confirma y refleja el nuevo estado (RN-SA3)", async () => {

@@ -144,16 +144,47 @@ async function derivarUsername(
   return `${base}${Math.random().toString(36).slice(2, 8)}`.slice(0, 50);
 }
 
+/**
+ * Marca que la clínica ya tiene administrador (`tenants.admin_invitado`).
+ *
+ * El nombre de la columna es herencia del flujo de invitación por mail, que ya
+ * no existe. Renombrarla exigiría una migración nueva sobre una tabla en
+ * producción y no cambiaría ningún comportamiento, así que se documenta el
+ * significado nuevo acá y en la API sale como `adminInvitado`.
+ *
+ * No rompe el alta si falla: es un indicador de la consola de plataforma, no un
+ * invariante del usuario que se acaba de crear.
+ */
+async function marcarTenantConAdmin(
+  db: ReturnType<typeof getServiceDb>,
+  tenantId: string,
+): Promise<void> {
+  await db
+    .from("tenants")
+    .update({ admin_invitado: true })
+    .eq("id", tenantId)
+    .then(undefined, () => undefined);
+}
+
 // ─── TenantService ────────────────────────────────────────────────────────────
 
 export const TenantService = {
   /**
-   * RN-SA1 (unicidad fiscal), RN-SA2 (alta atómica + invitación posterior).
+   * RN-SA1 (unicidad fiscal), RN-SA2 (alta atómica del tenant).
    *
    * El alta del tenant y su aprovisionamiento (on_tenant_created) son atómicos
-   * vía el RPC crear_tenant. La invitación del Admin es un paso POSTERIOR,
-   * idempotente y reintentable: si falla, el tenant queda creado con
-   * admin_invitado=false ("pendiente de invitar admin"), sin borrar nada.
+   * vía el RPC crear_tenant. El tenant nace SIN usuarios: el administrador se
+   * da de alta después, con `crearAdmin`.
+   *
+   * Acá se llamaba a `inviteUserByEmail` para invitar por mail a la cuenta de
+   * contacto. Se sacó: esa invitación mandaba el `tenant_id` a `user_metadata`
+   * —donde la API no lo lee— y no creaba fila en `usuarios`, así que el invitado
+   * se autenticaba y después recibía 401 en todo. Nunca sirvió para entrar, y
+   * mientras tanto cada alta dejaba una cuenta huérfana en `auth.users`: sin
+   * fila en `usuarios`, invisible para cualquier herramienta que recorra tablas
+   * de negocio. Lo que la invitación quería dar —que el administrador eligiera
+   * su propia contraseña— hoy lo dan `crearAdmin` más la recuperación de
+   * contraseña, que sí funciona.
    */
   async crear(dto: CrearTenantDto, ctx: SuperAdminContext): Promise<TenantPublico> {
     const parsed = CrearTenantSchema.safeParse(dto);
@@ -228,72 +259,10 @@ export const TenantService = {
       },
     });
 
-    // RN-SA2: invitación del Admin como paso posterior, NO bloqueante.
-    // Si falla, el tenant queda con admin_invitado=false y se puede reintentar.
-    await TenantService.invitarAdmin(tenantRow["id"] as string).catch(() => {
-      // Silenciado a propósito: el alta no se revierte por una invitación fallida.
-    });
-
-    // Releer el estado actual (admin_invitado puede haberse marcado en la invitación).
-    const { data: fresh } = await db
-      .from("tenants")
-      .select("id, nombre, cuit_rut, email_contacto, plan, activo, admin_invitado, created_at")
-      .eq("id", tenantRow["id"] as string)
-      .single();
-
-    return toPublicTenant((fresh ?? tenantRow) as Record<string, unknown>);
-  },
-
-  /**
-   * RN-SA2: invitación idempotente y reintentable del Admin del tenant.
-   * Invita por email vía Supabase Auth y marca admin_invitado=true al éxito.
-   * Reusable por el endpoint POST /admin/tenants/:id/invitar-admin.
-   */
-  async invitarAdmin(tenantId: string): Promise<TenantPublico> {
-    const db = getServiceDb();
-
-    const { data: tenant, error: findError } = await db
-      .from("tenants")
-      .select("id, nombre, cuit_rut, email_contacto, plan, activo, admin_invitado, created_at")
-      .eq("id", tenantId)
-      .single();
-
-    if (findError || !tenant) {
-      throw new DomainError(ErrorCode.TENANT_NOT_FOUND, 404, "Tenant no encontrado");
-    }
-
-    // Idempotencia: si ya fue invitado, no se reenvía.
-    if ((tenant as { admin_invitado: boolean }).admin_invitado) {
-      return toPublicTenant(tenant as Record<string, unknown>);
-    }
-
-    const emailContacto = (tenant as { email_contacto: string }).email_contacto;
-
-    const { error: inviteError } = await (db.auth.admin as {
-      inviteUserByEmail: (
-        email: string,
-        opts?: { data?: Record<string, unknown> },
-      ) => Promise<{ error: { message: string } | null }>;
-    }).inviteUserByEmail(emailContacto, {
-      data: { tenant_id: tenantId, rol_inicial: "admin" },
-    });
-
-    if (inviteError) {
-      throw new DomainError(
-        ErrorCode.INTERNAL_ERROR,
-        500,
-        `No se pudo invitar al administrador: ${inviteError.message}`,
-      );
-    }
-
-    const { data: updated } = await db
-      .from("tenants")
-      .update({ admin_invitado: true })
-      .eq("id", tenantId)
-      .select("id, nombre, cuit_rut, email_contacto, plan, activo, admin_invitado, created_at")
-      .single();
-
-    return toPublicTenant((updated ?? { ...tenant, admin_invitado: true }) as Record<string, unknown>);
+    // El tenant recién creado no tiene administrador todavía: `admin_invitado`
+    // nace en false (default de la columna) y lo pone en true `crearAdmin`.
+    // Ya no hace falta releer la fila: nada la modificó después del RPC.
+    return toPublicTenant(tenantRow);
   },
 
   /**
@@ -307,10 +276,11 @@ export const TenantService = {
    * bootstrap (sirve cuando la API todavía no está desplegada), pero escribe con
    * la llave maestra y NO deja asiento de auditoría. Este endpoint sí.
    *
-   * Qué NO hace: la invitación por email (`invitarAdmin`). Esa manda el
-   * `tenant_id` a `user_metadata` en vez de `app_metadata` y no crea fila en
-   * `usuarios`, con lo cual el invitado no puede entrar. Este método es el
-   * camino que funciona; el de la invitación queda para arreglarse aparte.
+   * Es también lo que marca `tenants.admin_invitado`. Esa columna nació con el
+   * significado "ya se le mandó el mail de invitación"; desde que la invitación
+   * se sacó del alta, significa **la clínica ya tiene administrador**, y la pone
+   * en true este método cuando el usuario creado tiene rol `admin`. El nombre de
+   * la columna quedó viejo pero no se renombra: es una migración ya aplicada.
    *
    * Idempotente por (tenant, email): si el usuario ya existe en esa clínica se
    * devuelve tal cual está, sin duplicar, sin pisar su contraseña y sin escribir
@@ -380,6 +350,13 @@ export const TenantService = {
 
     if (yaExiste) {
       const fila = yaExiste as Record<string, unknown>;
+
+      // Autocuración: una clínica dada de alta ANTES de este cambio puede tener
+      // administrador y la columna todavía en false. El reintento la corrige.
+      if (rolDestino.name === "admin") {
+        await marcarTenantConAdmin(db, tenantId);
+      }
+
       return {
         created: false,
         usuario: {
@@ -554,6 +531,12 @@ export const TenantService = {
       },
       details:   "Alta del usuario inicial de la clínica desde la consola de plataforma",
     });
+
+    // 8. La clínica ya tiene administrador. Solo cuenta el rol `admin`: un
+    //    veterinario o un recepcionista no dejan a la clínica administrada.
+    if (rolDestino.name === "admin") {
+      await marcarTenantConAdmin(db, tenantId);
+    }
 
     return {
       created: true,
