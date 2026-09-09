@@ -37,6 +37,29 @@ import {
   razasRouter,
   tiposVacunaRouter,
 } from "./modules/catalogos/catalogos.controller.ts";
+import {
+  productosRouter,
+  familiasRouter,
+  conversionesRouter,
+} from "./modules/productos/productos.controller.ts";
+import { proveedoresRouter } from "./modules/proveedores/proveedores.controller.ts";
+import {
+  lotesRouter,
+  movimientosRouter,
+  existenciasRouter,
+} from "./modules/stock/stock.controller.ts";
+import { comprasRouter } from "./modules/compras/compras.controller.ts";
+import { cajaRouter } from "./modules/caja/caja.controller.ts";
+import { ventasRouter } from "./modules/ventas/ventas.controller.ts";
+import {
+  ajustesRouter,
+  lotesAjustesRouter,
+  recuentosRouter,
+  devolucionesRouter,
+} from "./modules/ajustes/ajustes.controller.ts";
+import { fraccionamientoRouter } from "./modules/fraccionamiento/fraccionamiento.controller.ts";
+import { consumoRouter } from "./modules/consumo/consumo.controller.ts";
+import { reportesRouter } from "./modules/reportes/reportes.controller.ts";
 
 const app = new Hono().basePath("/api/v1");
 
@@ -88,6 +111,39 @@ app.route("/configuracion", configuracionRouter);
 app.route("/especies", especiesRouter);
 app.route("/razas", razasRouter);
 app.route("/tipos-vacuna", tiposVacunaRouter);
+
+// ─── Catálogo comercial (módulo vendible stock — Etapa C1) ─────────────────────
+app.route("/productos", productosRouter);
+app.route("/familias-producto", familiasRouter);
+app.route("/producto-conversiones", conversionesRouter);
+app.route("/proveedores", proveedoresRouter);
+
+// ─── Stock y Compras (módulo vendible stock — Etapa C2) ────────────────────────
+app.route("/lotes", lotesRouter);
+app.route("/movimientos-stock", movimientosRouter);
+app.route("/existencias", existenciasRouter);
+app.route("/compras", comprasRouter);
+
+// ─── Caja (módulo vendible ventas — Etapa C3) ─────────────────────────────────
+app.route("/caja", cajaRouter);
+
+// ─── Ventas (módulo vendible ventas — Etapa C4) ───────────────────────────────
+app.route("/ventas", ventasRouter);
+
+// ─── Ajustes, Recuentos y Devoluciones (módulos stock / ventas — Etapa C5) ─────
+app.route("/ajustes", ajustesRouter);
+app.route("/lotes", lotesAjustesRouter); // aditivo: /:id/bloquear y /:id/desbloquear
+app.route("/recuentos", recuentosRouter);
+app.route("/devoluciones", devolucionesRouter);
+
+// ─── Fraccionamiento (módulo stock — Etapa C6) ─────────────────────────────────
+app.route("/fraccionamiento", fraccionamientoRouter);
+
+// ─── Consumo clínico (módulo vendible stock — Etapa C7) ───────────────────────
+app.route("/consumos", consumoRouter);
+
+// ─── Reportes comerciales (módulos stock / ventas — Etapa C8) ────────────────
+app.route("/reportes", reportesRouter);
 
 // ─── Doctores + Horarios de Atención (Transversal — Etapa 4) ───────────────────
 // Doctores: ABM (listar/editar) bajo manage_users.

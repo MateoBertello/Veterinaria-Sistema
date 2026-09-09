@@ -76,10 +76,12 @@ const MODULE_NAV: Record<ModuloVendible, { label: string; href: string }> = {
   historial_clinico: { label: "Historial Clínico", href: "/historial" },
   turnos:            { label: "Turnos",            href: "/turnos" },
   guarderia:         { label: "Guardería",         href: "/guarderia" },
+  stock:             { label: "Stock",             href: "/stock" },
+  ventas:            { label: "Ventas",            href: "/ventas" },
 };
 
 // Orden estable de los módulos vendibles en el sidebar.
-const MODULE_ORDER: ModuloVendible[] = ["historial_clinico", "turnos", "guarderia"];
+const MODULE_ORDER: ModuloVendible[] = ["historial_clinico", "turnos", "guarderia", "stock", "ventas"];
 
 /**
  * Construye los ítems de navegación del tenant: ítems base siempre visibles más

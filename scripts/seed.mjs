@@ -83,9 +83,15 @@ const db = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
 // ---------------------------------------------------------------------------
 // Datos de demo (valores EXACTOS de los enums del DDL).
 // ---------------------------------------------------------------------------
+// El `cuit_rut` DEBE ser byte a byte el mismo que usa `supabase/seed.sql` (el seed
+// SQL que `supabase db reset`/`supabase start` corren solos): ese valor es la clave
+// de idempotencia del tenant demo. Si difieren —pasó con "20999999999" vs
+// "20-99999999-9"— cada seed crea su propio "Veterinaria Demo" y este script
+// termina reventando contra `usuarios_pkey`, porque el auth user admin@demo.local
+// que reutiliza ya tiene su fila en `usuarios` bajo el OTRO tenant.
 const TENANT = {
   nombre: "Veterinaria Demo",
-  cuitRut: "20999999999",
+  cuitRut: "20-99999999-9",
   emailContacto: "contacto@demo.local",
   plan: "premium", // habilita los 3 módulos vendibles
 };
@@ -252,17 +258,23 @@ async function ensureUser(tenantId, spec) {
     console.log(`✓ Auth user ${spec.email} creado → ${authUserId}`);
   }
 
-  // 3. Asegurar la fila en `usuarios` (idempotente por email dentro del tenant).
+  // 3. Asegurar la fila en `usuarios`.
+  //
+  // La idempotencia va por el PK (`usuarios.id` = auth user id), NO por
+  // (tenant_id, email): `supabase/seed.sql` ya pudo haber creado la fila de
+  // admin@demo.local, y buscarla filtrando por un tenant distinto la deja
+  // invisible → el INSERT choca contra `usuarios_pkey` y el seed muere. El
+  // upsert por id además repara una fila que haya quedado en el tenant
+  // equivocado, en vez de dejar el entorno a medio sembrar.
   const { data: existeUsuario, error: usuSelErr } = await db
     .from("usuarios")
-    .select("id")
-    .eq("tenant_id", tenantId)
-    .eq("email", spec.email)
+    .select("id, tenant_id")
+    .eq("id", authUserId)
     .maybeSingle();
   if (usuSelErr) die("No pude consultar usuarios", usuSelErr);
 
-  if (!existeUsuario) {
-    const { error: insErr } = await db.from("usuarios").insert({
+  const { error: upsertErr } = await db.from("usuarios").upsert(
+    {
       id: authUserId,
       tenant_id: tenantId,
       username: spec.username,
@@ -270,9 +282,15 @@ async function ensureUser(tenantId, spec) {
       full_name: spec.fullName,
       rol_id: rol.id,
       active: true,
-    });
-    if (insErr) die(`No pude insertar la fila usuarios de ${spec.email}`, insErr);
+    },
+    { onConflict: "id" },
+  );
+  if (upsertErr) die(`No pude asegurar la fila usuarios de ${spec.email}`, upsertErr);
+
+  if (!existeUsuario) {
     console.log(`  ↳ fila usuarios creada (${spec.roleName})`);
+  } else if (existeUsuario.tenant_id !== tenantId) {
+    console.log(`  ↳ fila usuarios reapuntada al tenant demo (${spec.roleName})`);
   } else {
     console.log(`  ↳ fila usuarios ya existía (${spec.roleName})`);
   }

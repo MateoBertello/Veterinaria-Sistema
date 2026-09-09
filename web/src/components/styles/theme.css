@@ -27,20 +27,74 @@
   --font-weight-medium: 500;
   --font-weight-normal: 400;
   --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.646 0.222 41.116);
-  --chart-2: oklch(0.6 0.118 184.704);
-  --chart-3: oklch(0.398 0.07 227.392);
-  --chart-4: oklch(0.828 0.189 84.429);
-  --chart-5: oklch(0.769 0.188 70.08);
+  /* Paleta de gráficos (GUIA_ESTILO §5): desaturada a propósito. Antes chart-1
+     era un naranja de máxima saturación (chroma 0.222, mismo hue que la marca)
+     y chart-2/4/5 rondaban chroma 0.12–0.19 — mucho peso visual para datos de
+     rutina. El naranja de marca queda fuera de esta paleta por defecto: es un
+     acento, se reserva para cuando un dato puntual necesite destacarse (no hay
+     ningún caso así hoy en los gráficos del dashboard). */
+  --chart-1: oklch(0.62 0.08 235);
+  --chart-2: oklch(0.6 0.07 184.704);
+  --chart-3: oklch(0.45 0.05 227.392);
+  --chart-4: oklch(0.75 0.08 84.429);
+  --chart-5: oklch(0.7 0.09 70.08);
   --radius: 0.625rem;
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
+  /* Sidebar oscura (GUIA_ESTILO §3): fondo neutro casi negro, NO naranja oscuro
+     — el naranja queda reservado para el ítem activo (--primary, ver
+     SidebarNav.tsx) y el chip del logo. Medido contra este fondo (#18181b):
+     zinc-400 (texto de ítem inactivo) da 6.91:1, sobra sobre el 4.5:1 de WCAG
+     2.1 SC 1.4.3. Ver docs/GUIA_ESTILO.md §1.6 por la tabla completa. */
+  --sidebar: #18181b; /* zinc-900 */
+  --sidebar-foreground: #a1a1aa; /* zinc-400 — 6.91:1 sobre --sidebar */
   --sidebar-primary: #c2410c;
   --sidebar-primary-foreground: #ffffff;
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
+  --sidebar-accent: #27272a; /* zinc-800 — hover, un escalón sobre el fondo */
+  --sidebar-accent-foreground: #f4f4f5; /* zinc-100 — texto de mayor énfasis (hover, wordmark) */
+  --sidebar-border: #71717a; /* zinc-500 — 3.67:1 sobre --sidebar, visible como separador (SC 1.4.11) */
   --sidebar-ring: oklch(0.708 0 0);
+  /* Encabezados de sección ("CLÍNICA", "MÓDULOS CONTRATADOS"...): gris medio,
+     más discreto que el ítem inactivo pero igual >= 4.5:1 (5.17:1 medido). Antes
+     eran naranjas y competían con el ítem activo (naranja también). */
+  --sidebar-heading: #8a8a92;
+
+  /* ── Sistema visual Leo — acentos de métrica y elevación ───────────────────
+     Estas variables son la ÚNICA fuente de los acentos y superficies suaves que
+     usan las tarjetas de métrica. No repetir el literal en un componente: si un
+     valor aparece dos veces, va acá.
+
+     Los valores no son estéticos a ojo: están medidos contra el texto que se
+     apoya encima (WCAG 2.1 SC 1.4.3, 4.5:1). Ver docs/GUIA_ESTILO.md §1 por la
+     tabla de mediciones. El naranja de marca #f97316 se mantiene como identidad
+     (logo, iconografía, tints), pero NO puede ser fondo de texto blanco: da
+     2.80:1. Por eso --primary usa orange-700. */
+
+  /* Acentos de métrica: borde izquierdo (línea), superficie del chip del icono
+     y tinta del icono. La tinta sobre su superficie da >= 6.3:1; la línea sobre
+     card blanca da >= 5:1 (holgado sobre el 3:1 de SC 1.4.11 para no-texto). */
+  --metric-brand:           #c2410c;
+  --metric-brand-surface:   #ffedd5;
+  --metric-brand-ink:       #9a3412;
+  --metric-amber:           #b45309;
+  --metric-amber-surface:   #fef3c7;
+  --metric-amber-ink:       #92400e;
+  --metric-info:            #1d4ed8;
+  --metric-info-surface:    #dbeafe;
+  --metric-info-ink:        #1e40af;
+  --metric-success:         #047857;
+  --metric-success-surface: #d1fae5;
+  --metric-success-ink:     #065f46;
+  --metric-special:         #6d28d9;
+  --metric-special-surface: #ede9fe;
+  --metric-special-ink:     #5b21b6;
+
+  /* Elevación. Dos escalones: reposo y hover de tarjeta enlazada. */
+  --elevation-card:       0 1px 2px 0 rgb(24 24 27 / 0.04), 0 1px 3px 0 rgb(24 24 27 / 0.06);
+  --elevation-card-hover: 0 2px 4px -1px rgb(24 24 27 / 0.06), 0 8px 16px -4px rgb(24 24 27 / 0.10);
+
+  /* Radio de "superficie" (panel destacado, p.ej. la bienvenida del dashboard):
+     un escalón por encima de la card (rounded-xl) para que lea como panel y no
+     como una tarjeta más de la grilla. */
+  --surface-radius: calc(var(--radius) + 0.5rem);
 }
 
 .dark {
@@ -78,6 +132,27 @@
   --sidebar-accent-foreground: oklch(0.985 0 0);
   --sidebar-border: oklch(0.269 0 0);
   --sidebar-ring: oklch(0.439 0 0);
+  --sidebar-heading: oklch(0.55 0 0);
+
+  /* Sistema visual Leo en oscuro. OJO: hoy es código inalcanzable — nada en la
+     app agrega la clase `.dark` al <html> (no hay ThemeProvider montado; ver
+     main.tsx). Se define igual para que el bloque de tokens no quede a medias
+     si algún día se enciende, con el mismo criterio del kit heredado, que ya
+     trae variantes `dark:` sin conmutador. Sin medición de contraste real:
+     cuando el modo oscuro se encienda, hay que volver a medir. */
+  --metric-brand-surface:   oklch(0.28 0.06 45);
+  --metric-brand-ink:       #fed7aa;
+  --metric-amber-surface:   oklch(0.28 0.05 75);
+  --metric-amber-ink:       #fde68a;
+  --metric-info-surface:    oklch(0.28 0.06 265);
+  --metric-info-ink:        #bfdbfe;
+  --metric-success-surface: oklch(0.28 0.05 165);
+  --metric-success-ink:     #a7f3d0;
+  --metric-special-surface: oklch(0.28 0.06 300);
+  --metric-special-ink:     #ddd6fe;
+
+  --elevation-card:       0 1px 2px 0 rgb(0 0 0 / 0.40), 0 1px 3px 0 rgb(0 0 0 / 0.30);
+  --elevation-card-hover: 0 2px 4px -1px rgb(0 0 0 / 0.45), 0 8px 16px -4px rgb(0 0 0 / 0.40);
 }
 
 @theme inline {
@@ -119,4 +194,27 @@
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-heading: var(--sidebar-heading);
+
+  /* Sistema visual Leo → utilidades de Tailwind. `--color-*` habilita bg-/text-/border-. */
+  --color-metric-brand:           var(--metric-brand);
+  --color-metric-brand-surface:   var(--metric-brand-surface);
+  --color-metric-brand-ink:       var(--metric-brand-ink);
+  --color-metric-amber:           var(--metric-amber);
+  --color-metric-amber-surface:   var(--metric-amber-surface);
+  --color-metric-amber-ink:       var(--metric-amber-ink);
+  --color-metric-info:            var(--metric-info);
+  --color-metric-info-surface:    var(--metric-info-surface);
+  --color-metric-info-ink:        var(--metric-info-ink);
+  --color-metric-success:         var(--metric-success);
+  --color-metric-success-surface: var(--metric-success-surface);
+  --color-metric-success-ink:     var(--metric-success-ink);
+  --color-metric-special:         var(--metric-special);
+  --color-metric-special-surface: var(--metric-special-surface);
+  --color-metric-special-ink:     var(--metric-special-ink);
+
+  --shadow-card:       var(--elevation-card);
+  --shadow-card-hover: var(--elevation-card-hover);
+
+  --radius-surface: var(--surface-radius);
 }

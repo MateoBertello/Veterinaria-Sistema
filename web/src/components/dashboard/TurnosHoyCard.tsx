@@ -75,10 +75,10 @@ export function TurnosHoyCard({ fecha }: TurnosHoyCardProps) {
   const resumenTexto = datos.map((d) => `${d.estado}: ${d.cantidad}`).join("; ");
 
   return (
-    <Card className="border-orange-200">
-      <CardHeader className="bg-gradient-to-r from-orange-50 to-transparent">
-        <CardTitle className="flex items-center gap-2 text-base text-orange-800 md:text-lg">
-          <Calendar className="size-5" aria-hidden />
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-base text-foreground md:text-lg">
+          <Calendar className="size-5 text-primary/60" aria-hidden />
           Turnos de hoy
         </CardTitle>
         <CardDescription>Agenda vigente del día</CardDescription>
@@ -104,10 +104,10 @@ export function TurnosHoyCard({ fecha }: TurnosHoyCardProps) {
               {turnos.slice(0, MAX_FILAS).map((turno) => (
                 <li
                   key={turno.id}
-                  className={`rounded-lg border border-l-4 bg-orange-50/60 p-3 ${ESTADO_ROW_ACCENT[turno.status]}`}
+                  className={`rounded-lg border border-l-4 bg-muted/40 p-3 ${ESTADO_ROW_ACCENT[turno.status]}`}
                 >
                   <div className="flex flex-wrap items-center justify-between gap-2">
-                    <span className="text-sm font-medium text-orange-800">{turno.startTime}</span>
+                    <span className="text-sm font-medium text-foreground">{turno.startTime}</span>
                     <Badge className={ESTADO_BADGE_CLASS[turno.status]}>{turno.status}</Badge>
                   </div>
                   <p className="text-sm">

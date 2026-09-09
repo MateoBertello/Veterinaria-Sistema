@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { esFechaISO, formatFechaISO, sumarMeses } from "./fechas.ts";
+import { diferenciaDias, esFechaISO, formatFechaISO, sumarDias, sumarMeses } from "./fechas.ts";
 
 describe("sumarMeses", () => {
   it("suma meses dentro del mismo año", () => {
@@ -45,5 +45,33 @@ describe("esFechaISO", () => {
 describe("formatFechaISO", () => {
   it("formatea en es-AR sin correrse de día", () => {
     expect(formatFechaISO("2026-03-01")).toMatch(/1.*mar.*2026/);
+  });
+});
+
+describe("sumarDias", () => {
+  it("suma días dentro del mismo mes", () => {
+    expect(sumarDias("2026-03-10", 5)).toBe("2026-03-15");
+  });
+
+  it("cruza de mes", () => {
+    expect(sumarDias("2026-03-28", 5)).toBe("2026-04-02");
+  });
+
+  it("cruza de año", () => {
+    expect(sumarDias("2026-12-30", 5)).toBe("2027-01-04");
+  });
+});
+
+describe("diferenciaDias", () => {
+  it("calcula diferencia positiva cuando fecha2 > fecha1", () => {
+    expect(diferenciaDias("2026-03-10", "2026-03-15")).toBe(5);
+  });
+
+  it("calcula diferencia negativa cuando fecha2 < fecha1", () => {
+    expect(diferenciaDias("2026-03-15", "2026-03-10")).toBe(-5);
+  });
+
+  it("da 0 para la misma fecha", () => {
+    expect(diferenciaDias("2026-03-10", "2026-03-10")).toBe(0);
   });
 });

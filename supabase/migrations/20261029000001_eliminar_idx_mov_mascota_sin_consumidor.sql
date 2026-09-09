@@ -1,0 +1,27 @@
+-- =====================================================================
+-- MIGRACIÓN 20261029000001: Eliminar idx_mov_mascota sin consumidor
+-- =====================================================================
+-- Justificación técnica (H7 post re-auditoría):
+-- El índice idx_mov_mascota fue creado sobre movimientos_stock(tenant_id, mascota_id).
+-- Sin embargo, ninguna consulta en el código base filtra directamente
+-- movimientos_stock por mascota_id.
+--
+-- Las consultas de consumo clínico (ConsumoService.lotesDeMascota y
+-- ConsumoService.costoPorAtencion) consultan la vista v_consumo_clinico:
+--   SELECT ... FROM v_consumo_clinico WHERE tenant_id = $1 AND mascota_id = $2;
+--
+-- En dicha vista, mascota_id se proyecta estructuralmente desde historial_clinico hc
+-- (hc.pet_id AS mascota_id). El motor de PostgreSQL filtra la tabla historial_clinico
+-- por (tenant_id, pet_id) y luego realiza el JOIN con movimientos_stock mediante
+-- historial_clinico_id, utilizando el índice idx_mov_historial.
+--
+-- Por lo tanto, un índice sobre movimientos_stock(tenant_id, mascota_id) no puede
+-- servir a dicha vista ni es utilizado por ninguna otra consulta del sistema.
+-- El plan de ejecución de v_consumo_clinico es estructuralmente idéntico con y sin
+-- idx_mov_mascota.
+--
+-- Conclusión: idx_mov_mascota es un índice sin consumidor que penaliza las inserciones
+-- en movimientos_stock sin aportar beneficio a ningún plan de ejecución.
+-- Se elimina formalmente.
+
+DROP INDEX IF EXISTS public.idx_mov_mascota;

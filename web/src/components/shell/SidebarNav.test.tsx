@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { render, screen, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { SidebarNav } from "./SidebarNav.tsx";
+import { LOGO_MARCA_SRC } from "./LogoMarca.tsx";
 import { buildNavItems } from "../../lib/navigation.ts";
 import type { AuthUser, ModuloContratado, ModuloVendible } from "../../types/index.ts";
 
@@ -32,6 +33,41 @@ function renderNav(
 }
 
 describe("SidebarNav", () => {
+  it("la identidad muestra el logo de la marca", () => {
+    const { container } = renderNav({ modulos: [mod("turnos", true)] });
+
+    const logo = container.querySelector(`img[src="${LOGO_MARCA_SRC}"]`);
+    expect(logo).not.toBeNull();
+    // El enlace ya se llama "Ir al inicio": el logo es decorativo y no debe
+    // sumar un segundo anuncio al lector de pantalla.
+    expect(logo).toHaveAttribute("alt", "");
+  });
+
+  it("el logo es un enlace a la pantalla principal", () => {
+    renderNav({ modulos: [mod("turnos", true)] });
+
+    const inicio = screen.getByRole("link", { name: /ir al inicio/i });
+    expect(inicio).toHaveAttribute("href", "/");
+  });
+
+  it("al navegar desde el logo se cierra el menú mobile", async () => {
+    const { default: userEvent } = await import("@testing-library/user-event");
+    let cerrado = false;
+    render(
+      <MemoryRouter>
+        <SidebarNav
+          items={buildNavItems([mod("turnos", true)], ADMIN.permissions)}
+          user={ADMIN}
+          onLogout={() => {}}
+          onNavigate={() => { cerrado = true; }}
+        />
+      </MemoryRouter>,
+    );
+
+    await userEvent.setup().click(screen.getByRole("link", { name: /ir al inicio/i }));
+    expect(cerrado).toBe(true);
+  });
+
   it("rotula cada sección con su encabezado", () => {
     renderNav({ modulos: [mod("turnos", true)] });
     const nav = screen.getByRole("navigation", { name: "Navegación principal" });
@@ -53,8 +89,23 @@ describe("SidebarNav", () => {
   });
 
   it("RN-G2: sin módulos contratados no dibuja el encabezado de módulos", () => {
-    renderNav({ modulos: [mod("turnos", false)] });
+    renderNav({ modulos: [mod("turnos", false), mod("stock", false), mod("ventas", false)] });
     expect(screen.queryByRole("heading", { name: "Módulos contratados" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Stock" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Ventas" })).not.toBeInTheDocument();
+  });
+
+  it("RN-G2: con stock y ventas contratados, aparecen bajo Módulos contratados con sus rutas", () => {
+    renderNav({ modulos: [mod("stock", true), mod("ventas", true)] });
+    const seccion = screen
+      .getByRole("heading", { name: "Módulos contratados" })
+      .parentElement!;
+
+    const stockLink = within(seccion).getByRole("link", { name: "Stock" });
+    expect(stockLink).toHaveAttribute("href", "/stock");
+
+    const ventasLink = within(seccion).getByRole("link", { name: "Ventas" });
+    expect(ventasLink).toHaveAttribute("href", "/ventas");
   });
 
   it("N2: expone Preferencias en el menú de cuenta, no en la navegación de módulos", () => {

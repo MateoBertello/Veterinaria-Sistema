@@ -28,6 +28,8 @@ export interface ServicioPublico {
   descripcion:         string | null;
   activo:              boolean;
   createdAt:           string;
+  precio:              number | null;
+  alicuotaIva:         number;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -42,6 +44,8 @@ function toPublic(row: Record<string, unknown>): ServicioPublico {
     descripcion:         (row["descripcion"]         as string | null) ?? null,
     activo:              row["activo"]               as boolean,
     createdAt:           row["created_at"]           as string,
+    precio:              row["precio"] != null ? Number(row["precio"]) : null,
+    alicuotaIva:         Number(row["alicuota_iva"]),
   };
 }
 
@@ -107,6 +111,8 @@ export const ServicioService = {
       requiere_profesional: data.requiereProfesional, // RN-SV4: persiste el flag tal cual
       descripcion:          data.descripcion ?? null,
       activo:               true,
+      precio:               data.precio ?? null,
+      alicuota_iva:         data.alicuotaIva,
     };
 
     const { data: row, error } = await db
@@ -196,6 +202,8 @@ export const ServicioService = {
     if (data.duracionMinutos     !== undefined) updatePayload["duracion_minutos"]     = data.duracionMinutos;
     if (data.requiereProfesional !== undefined) updatePayload["requiere_profesional"] = data.requiereProfesional;
     if (data.descripcion         !== undefined) updatePayload["descripcion"]          = data.descripcion ?? null;
+    if (data.precio              !== undefined) updatePayload["precio"]               = data.precio;
+    if (data.alicuotaIva         !== undefined) updatePayload["alicuota_iva"]          = data.alicuotaIva;
 
     const { data: row, error } = await db
       .from("servicios")

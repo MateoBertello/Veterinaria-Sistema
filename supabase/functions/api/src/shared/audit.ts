@@ -8,7 +8,13 @@ export type AuditModule =
   | "clients" | "pets" | "medical_records" | "appointments" | "daycare"
   | "users"   | "security" | "services" | "system" | "platform"
   // Catálogos clínicos del tenant (especies, razas, tipos de vacuna).
-  | "catalogs";
+  | "catalogs"
+  // Módulo comercial. Los seis valores existen en el ENUM modulo_auditoria desde
+  // 20260901000001_comercial_enums.sql. Si un valor está acá y NO en el ENUM,
+  // recordAudit loguea el error y sigue: la operación funciona y el asiento se
+  // pierde en silencio. Ese es el bug que el guardrail de
+  // tests/unit/audit-modulo-enum.test.ts existe para atrapar.
+  | "products" | "suppliers" | "purchases" | "inventory" | "sales" | "cash_register";
 
 export interface AuditPayload {
   tenantId:   string | null;

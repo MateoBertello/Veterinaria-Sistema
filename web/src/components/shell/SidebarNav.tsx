@@ -1,16 +1,18 @@
-import { NavLink } from "react-router-dom";
+import { Link, NavLink } from "react-router-dom";
+import { LogoMarca } from "./LogoMarca.tsx";
 import {
   Accessibility,
   BedDouble,
   CalendarClock,
   CalendarDays,
-  Dog,
   FileText,
   History,
   Home,
   LogOut,
+  Package,
   PawPrint,
   Settings,
+  ShoppingCart,
   Stethoscope,
   UserCog,
   Users,
@@ -39,6 +41,8 @@ const NAV_ICON: Record<string, LucideIcon> = {
   historial_clinico: FileText,
   turnos:            CalendarDays,
   guarderia:         BedDouble,
+  stock:             Package,
+  ventas:            ShoppingCart,
   servicios:         Wrench,
   doctores:          Stethoscope,
   horarios:          CalendarClock,
@@ -79,15 +83,20 @@ export function SidebarNav({ items, user, onLogout, onNavigate }: Props) {
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex items-center gap-3 px-6 py-5">
-        <div className="rounded-xl bg-gradient-to-br from-orange-500 to-orange-600 p-2 shadow-md">
-          <Dog className="size-6 text-white" aria-hidden />
-        </div>
+      {/* La identidad es el atajo al inicio: es la convención que la gente usa
+          sin pensarla, así que el bloque entero es un enlace al dashboard. */}
+      <Link
+        to="/"
+        onClick={onNavigate}
+        aria-label="Ir al inicio"
+        className="flex items-center gap-3 px-6 py-5 rounded-xl transition-colors hover:bg-sidebar-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        <LogoMarca className="size-10" />
         <div className="leading-tight">
-          <div className="text-base font-semibold text-orange-800">Veterinaria Leo</div>
-          <div className="text-xs text-orange-600">Sistema de Gestión</div>
+          <div className="text-base font-semibold text-sidebar-accent-foreground">VeterCor</div>
+          <div className="text-xs text-sidebar-foreground">Sistema de Gestión</div>
         </div>
-      </div>
+      </Link>
 
       {/* `overflow-y-auto` propio: con el `<aside>` sticky de alto de viewport,
           una lista larga scrollea acá adentro y la identidad y el menú de cuenta
@@ -103,7 +112,7 @@ export function SidebarNav({ items, user, onLogout, onNavigate }: Props) {
               {grupo.label ? (
                 <h2
                   id={headingId}
-                  className="px-3 pb-1.5 text-xs font-semibold uppercase tracking-wide text-orange-700/80"
+                  className="px-3 pb-1.5 text-xs font-semibold uppercase tracking-wide text-sidebar-heading"
                 >
                   {grupo.label}
                 </h2>
@@ -135,12 +144,12 @@ export function SidebarNav({ items, user, onLogout, onNavigate }: Props) {
       </nav>
 
       {user ? (
-        <div className="mt-auto border-t px-3 py-4">
+        <div className="mt-auto border-t border-sidebar-border px-3 py-4">
           <div className="px-3 pb-3">
-            <p className="truncate text-sm font-medium text-sidebar-foreground">
+            <p className="truncate text-sm font-medium text-sidebar-accent-foreground">
               {user.fullName}
             </p>
-            <p className="truncate text-xs text-muted-foreground">{user.roleName}</p>
+            <p className="truncate text-xs text-sidebar-foreground">{user.roleName}</p>
           </div>
 
           {/* Menú de cuenta, separado de la navegación de módulos: Preferencias
@@ -157,7 +166,7 @@ export function SidebarNav({ items, user, onLogout, onNavigate }: Props) {
           <Button
             variant="ghost"
             size="sm"
-            className="mt-1 w-full justify-start text-sidebar-foreground"
+            className="mt-1 w-full justify-start text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
             onClick={onLogout}
           >
             <LogOut aria-hidden />

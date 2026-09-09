@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
-import { BookMarked, Pencil, Plus, Power, Search, Syringe } from "lucide-react";
+import { AlertCircle, BookMarked, Pencil, Plus, Power, Search, Syringe } from "lucide-react";
 import {
   Table,
   TableScrollContainer,
@@ -15,6 +15,7 @@ import { Badge } from "../components/ui/badge.tsx";
 import { Skeleton } from "../components/ui/skeleton.tsx";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../components/ui/tooltip.tsx";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs.tsx";
+import { Alert, AlertDescription } from "../components/ui/alert.tsx";
 import {
   Select,
   SelectContent,
@@ -313,9 +314,14 @@ function filaEstado({
   if (error) {
     return (
       <TableRow>
-        <TableCell colSpan={columnas} className="py-10 text-center">
-          <p className="text-sm text-destructive">{error}</p>
-          <Button variant="outline" className="mt-3" onClick={onReintentar}>Reintentar</Button>
+        <TableCell colSpan={columnas} className="py-10">
+          <Alert variant="destructive">
+            <AlertCircle className="size-4" />
+            <AlertDescription className="flex items-center justify-between gap-3">
+              <span>{error}</span>
+              <Button variant="outline" size="sm" onClick={onReintentar}>Reintentar</Button>
+            </AlertDescription>
+          </Alert>
         </TableCell>
       </TableRow>
     );

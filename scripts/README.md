@@ -30,14 +30,14 @@ demo listo para usar, sin crear nada a mano por SQL ni por la consola de Supabas
 # 1. Levantar el stack local (Postgres, Auth, PostgREST, Studio, Inbucket…)
 supabase start
 
-# 2. Aplicar migraciones + seed global de catálogos.
-#    `supabase db reset` reaplica TODAS las migraciones desde cero, incluido
-#    20260614000004_seed_global.sql (permisos) + on_tenant_created, que siembra
-#    el catálogo clínico (especies, razas, tipos_vacuna) de cada tenant.
-#    Ese seed corre como migración: NO hay que invocarlo aparte.
+# 2. Aplicar migraciones + seed de desarrollo y volumen.
+#    `supabase db reset` reaplica TODAS las migraciones desde cero e invoca los
+#    seeds configurados en `[db.seed]` (supabase/seed.sql con el tenant demo
+#    "Veterinaria Demo" y su admin, y el fixture de volumen comercial).
 supabase db reset
 
-# 3. Configurar .env (ver más abajo) y sembrar el entorno de demo.
+# 3. Configurar .env (ver más abajo). El tenant demo ya queda listo desde el reset;
+#    opcionalmente `npm run seed` siembra además clientes demo y mascotas.
 npm run seed
 
 # 4. Servir la Edge Function de la API (Hono).
@@ -70,7 +70,9 @@ SUPABASE_ANON_KEY=<anon key que imprime `supabase start`>
 
 Es **idempotente**: corrércelo dos veces no duplica ni rompe.
 
-1. **Tenant demo** "Veterinaria Demo" (`cuit_rut 20999999999`, plan `premium`)
+1. **Tenant demo** "Veterinaria Demo" (`cuit_rut 20-99999999-9`, plan `premium`)
+   — el MISMO valor que usa `supabase/seed.sql`, para que ambos seeds converjan en
+   un único tenant demo en vez de crear uno cada uno —
    provisionado por el **camino real**: el RPC `crear_tenant` → `on_tenant_created`,
    que crea los 3 roles con sus permisos, la `configuracion_tenant (10, 7)` y los
    módulos contratados según el plan (premium ⇒ historial + turnos + guardería).
@@ -192,6 +194,48 @@ node scripts/super-admins.mjs revoke viejo@leo.vet
 # 4. Confirmar cómo quedó
 node scripts/super-admins.mjs list
 ```
+
+## Deploy de la API a producción (`deploy-api.sh`)
+
+`supabase functions deploy api` empaqueta **los archivos que hay en disco**, no
+los del commit en el que creés estar parado. Con un módulo a medio desarrollar
+en el working tree, un deploy corrido desde la raíz del repo lo sube a
+producción — con Services que consultan tablas y valores de ENUM que las
+migraciones pendientes todavía no crearon allá. Ya pasó una vez (2026-09-04:
+`stock` y `ventas` se subieron sin querer).
+
+`scripts/deploy-api.sh` nunca despliega el working tree: materializa el commit
+pedido en un `git worktree` descartable y despliega desde ahí.
+
+```bash
+export SUPABASE_PROJECT_REF=<project-ref>
+
+scripts/deploy-api.sh                      # despliega origin/main
+scripts/deploy-api.sh --dry-run            # corre las guardas y no despliega
+scripts/deploy-api.sh --ref <commit|rama>  # otro punto de despliegue
+```
+
+Antes de subir nada corre dos guardas sobre el commit, y si alguna falla no
+despliega:
+
+1. **Módulos sin lanzar.** Busca los identificadores bloqueados (`stock` y
+   `ventas` por defecto) en todo `supabase/functions/api/src`. Alcanza con que
+   aparezcan en `main.ts`, en `requireModule` o en un enum de Zod. Se agregan
+   más con `--block <modulo>`; para liberar uno, sacalo del array
+   `BLOQUEADOS` del script.
+2. **El código no puede ir adelante del esquema.** Compara la migración más
+   nueva del commit contra la más nueva aplicada en el remoto
+   (`supabase migration list --linked`). Es la guarda general: cubre el caso
+   que la primera no ve. Se omite con `--skip-schema-check`.
+
+Al terminar hace un smoke test: `/health` tiene que dar **200** y `/especies`
+**401** (401, no 404 — prueba que la ruta existe y está detrás de
+`tenantContext`). Si no da eso, el deploy no tomó.
+
+> **`db push` es aparte y no lo hace este script.** Aplica *todas* las
+> migraciones pendientes, sin selector. Con módulos en desarrollo en el árbol,
+> revisá siempre `supabase migration list --linked` y `supabase db push --dry-run`
+> antes de correrlo.
 
 ## Errores comunes (troubleshooting)
 

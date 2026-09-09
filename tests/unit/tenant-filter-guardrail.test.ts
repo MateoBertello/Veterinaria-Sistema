@@ -55,19 +55,55 @@ function loadRealSchema() {
   return extractSchemaFromMigrations(files);
 }
 
-function listServiceFiles(): Array<{ absPath: string; relPath: string }> {
-  const moduleDirs = readdirSync(SERVICES_DIR, { withFileTypes: true }).filter((d) => d.isDirectory());
-  const files: Array<{ absPath: string; relPath: string }> = [];
-  for (const dir of moduleDirs) {
-    const dirPath = join(SERVICES_DIR, dir.name);
-    for (const entry of readdirSync(dirPath)) {
-      if (entry.endsWith(".service.ts")) {
-        const absPath = join(dirPath, entry);
-        files.push({ absPath, relPath: relative(REPO_ROOT, absPath).split(sep).join("/") });
+function listServiceFiles(dir = SERVICES_DIR): Array<{ absPath: string; relPath: string }> {
+  const results: Array<{ absPath: string; relPath: string }> = [];
+  function walk(currentDir: string) {
+    const entries = readdirSync(currentDir, { withFileTypes: true });
+    for (const entry of entries) {
+      const fullPath = join(currentDir, entry.name);
+      if (entry.isDirectory()) {
+        walk(fullPath);
+      } else if (entry.name.endsWith(".service.ts")) {
+        results.push({
+          absPath: fullPath,
+          relPath: relative(REPO_ROOT, fullPath).split(sep).join("/"),
+        });
       }
     }
   }
-  return files;
+  walk(dir);
+  return results;
+}
+
+function getCommercialTenantTables(): Set<string> {
+  const files = readdirSync(MIGRATIONS_DIR)
+    .filter((f) => f.endsWith(".sql") && (f.includes("_comercial_") || f.includes("@modulo: comercial")))
+    .sort()
+    .map((name) => ({ name, content: readFileSync(join(MIGRATIONS_DIR, name), "utf-8") }));
+  return extractSchemaFromMigrations(files).tenantTables;
+}
+
+function discoverCommercialModules(): Set<string> {
+  const commercialTables = getCommercialTenantTables();
+  const commercialModules = new Set<string>();
+  const moduleDirs = readdirSync(SERVICES_DIR, { withFileTypes: true }).filter((d) => d.isDirectory());
+
+  for (const dir of moduleDirs) {
+    const dirPath = join(SERVICES_DIR, dir.name);
+    const entries = readdirSync(dirPath, { recursive: true }) as string[];
+    for (const entry of entries) {
+      if (typeof entry === "string" && entry.endsWith(".ts") && !entry.endsWith(".test.ts")) {
+        const content = readFileSync(join(dirPath, entry), "utf-8");
+        for (const table of commercialTables) {
+          if (content.includes(`"${table}"`) || content.includes(`'${table}'`)) {
+            commercialModules.add(dir.name);
+            break;
+          }
+        }
+      }
+    }
+  }
+  return commercialModules;
 }
 
 // ─── Allowlist ──────────────────────────────────────────────────────────────
@@ -153,6 +189,60 @@ describe("extractSchemaFromMigrations", () => {
     const { allTables } = extractSchemaFromMigrations([{ name: "x.sql", content: sql }]);
     expect(allTables.has("fantasma")).toBe(false);
   });
+
+  // ── Vistas ────────────────────────────────────────────────────────────────
+  // Antes de la auditoría del Módulo Comercial el esquema salía SOLO de
+  // CREATE/ALTER TABLE. Las 7 vistas comerciales quedaban fuera del alcance del
+  // guardrail, y con ellas las 12 consultas de los Services que las leen.
+
+  it("detecta una vista que expone tenant_id (CREATE OR REPLACE VIEW)", () => {
+    const sql = `
+      CREATE OR REPLACE VIEW public.v_margen AS
+      SELECT v.tenant_id, v.id, v.total
+      FROM ventas v
+      WHERE v.estado = 'registrada';
+    `;
+    const { allTables, tenantTables } = extractSchemaFromMigrations([{ name: "x.sql", content: sql }]);
+    expect(allTables.has("v_margen")).toBe(true);
+    expect(tenantTables.has("v_margen")).toBe(true);
+  });
+
+  it("detecta también la forma CREATE VIEW a secas y la materializada", () => {
+    const sql = `
+      CREATE VIEW v_uno AS SELECT tenant_id FROM t;
+      CREATE MATERIALIZED VIEW v_dos AS SELECT tenant_id FROM t;
+    `;
+    const { tenantTables } = extractSchemaFromMigrations([{ name: "x.sql", content: sql }]);
+    expect(tenantTables.has("v_uno")).toBe(true);
+    expect(tenantTables.has("v_dos")).toBe(true);
+  });
+
+  it("una vista sin tenant_id queda en allTables pero NO exige filtro", () => {
+    const sql = `CREATE VIEW v_global AS SELECT id, nombre FROM unidades_medida;`;
+    const { allTables, tenantTables } = extractSchemaFromMigrations([{ name: "x.sql", content: sql }]);
+    expect(allTables.has("v_global")).toBe(true);
+    expect(tenantTables.has("v_global")).toBe(false);
+  });
+
+  it("no se le escapa el cierre de la vista por un ';' dentro de un literal", () => {
+    // Si el motor cortara el cuerpo en el ';' del literal, v_con_punto_y_coma
+    // quedaría sin su tenant_id y saldría del alcance del guardrail.
+    const sql = `
+      CREATE VIEW v_con_punto_y_coma AS
+      SELECT 'a;b'::text AS etiqueta, x.tenant_id FROM x;
+      CREATE VIEW v_siguiente AS SELECT id FROM y;
+    `;
+    const { tenantTables, allTables } = extractSchemaFromMigrations([{ name: "x.sql", content: sql }]);
+    expect(tenantTables.has("v_con_punto_y_coma")).toBe(true);
+    expect(allTables.has("v_siguiente")).toBe(true);
+    expect(tenantTables.has("v_siguiente")).toBe(false);
+  });
+
+  it("ignora un CREATE VIEW comentado con --", () => {
+    const sql = `-- CREATE VIEW v_fantasma AS SELECT tenant_id FROM t;`;
+    const { allTables } = extractSchemaFromMigrations([{ name: "x.sql", content: sql }]);
+    expect(allTables.has("v_fantasma")).toBe(false);
+  });
 });
 
 describe("esquema real del proyecto", () => {
@@ -174,6 +264,23 @@ describe("esquema real del proyecto", () => {
     ];
     for (const tabla of esperadas) {
       expect(schema.tenantTables.has(tabla), `se esperaba que "${tabla}" tuviera tenant_id`).toBe(true);
+    }
+  });
+
+  it("las 7 vistas comerciales están en el alcance del guardrail", () => {
+    // Sin esto, un `.from("v_...")` sin `.eq("tenant_id", ...)` en un Service
+    // pasa desapercibido: es exactamente lo que encontró la auditoría.
+    const vistas = [
+      "v_lotes_por_vencer", "v_items_vendidos", "v_margen_venta",
+      "v_costo_fraccionamiento", "v_stock_familia_unidad_base",
+      "v_consumo_clinico", "v_atenciones_sin_consumo",
+    ];
+    for (const vista of vistas) {
+      expect(
+        schema.tenantTables.has(vista),
+        `La vista "${vista}" no quedó en el esquema derivado del DDL: el guardrail no va a ` +
+        `exigir el filtro de tenant en las consultas que la leen.`,
+      ).toBe(true);
     }
   });
 
@@ -455,4 +562,38 @@ it("BLOQUEANTE: toda .from() sobre tabla con tenant_id, corriendo con getService
   }
 
   expect(unexpected).toHaveLength(0);
+});
+
+describe("BLOQUEANTE: el guardrail efectivamente ve los services del módulo comercial", () => {
+  it("descubre automáticamente los módulos comerciales y verifica que estén en el escaneo", () => {
+    const commercialModules = Array.from(discoverCommercialModules());
+    expect(commercialModules.length).toBeGreaterThanOrEqual(4); // Al menos productos, proveedores, stock, compras
+
+    const escaneados = listServiceFiles().map((f) => f.relPath);
+
+    for (const modulo of commercialModules) {
+      const match = escaneados.filter((p) => p.includes(`/modules/${modulo}/`));
+      expect(
+        match,
+        `El guardrail de tenant_id no está escaneando ningún .service.ts de ` +
+        `src/modules/${modulo}/. Sus consultas NO están verificadas y el aislamiento ` +
+        `por tenant de ese módulo no tiene ninguna red. Archivos que sí ve:\n` +
+        escaneados.join("\n"),
+      ).not.toHaveLength(0);
+    }
+  });
+
+  it("el esquema derivado de las migraciones incluye todas las tablas comerciales con tenant_id", () => {
+    const { tenantTables } = loadRealSchema();
+    const commercialTenantTables = getCommercialTenantTables();
+    expect(commercialTenantTables.size).toBeGreaterThan(0);
+
+    for (const tabla of commercialTenantTables) {
+      expect(
+        tenantTables.has(tabla),
+        `La tabla comercial "${tabla}" no quedó en el esquema derivado del DDL: el guardrail no va ` +
+        `a exigir el filtro de tenant en sus consultas.`,
+      ).toBe(true);
+    }
+  });
 });

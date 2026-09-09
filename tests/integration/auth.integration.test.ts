@@ -172,7 +172,7 @@ describeIntegration("tenantContext con JWT real de Supabase", () => {
     expect(res.status).toBe(200);
     expect(body.success).toBe(true);
     expect(Array.isArray(body.data)).toBe(true);
-    expect((body.data as unknown[]).length).toBe(3); // 3 módulos del plan básico
+    expect((body.data as unknown[]).length).toBe(5); // 5 módulos del tenant
   });
 
   it("GET /modulos-habilitados sin JWT → 401", async () => {

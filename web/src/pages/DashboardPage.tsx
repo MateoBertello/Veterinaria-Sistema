@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   Calendar,
+  CalendarDays,
   CalendarPlus,
   ClipboardList,
   FileText,
@@ -10,6 +11,7 @@ import {
   Shield,
   ShieldCheck,
   Syringe,
+  UserRound,
   Users,
   type LucideIcon,
 } from "lucide-react";
@@ -23,7 +25,7 @@ import {
   CardTitle,
 } from "../components/ui/card.tsx";
 import { Skeleton } from "../components/ui/skeleton.tsx";
-import { MetricaCard } from "../components/dashboard/MetricaCard.tsx";
+import { MetricaCard, type MetricaAccent } from "../components/dashboard/MetricaCard.tsx";
 import { TurnosHoyCard } from "../components/dashboard/TurnosHoyCard.tsx";
 import { OcupacionGuarderiaCard } from "../components/dashboard/OcupacionGuarderiaCard.tsx";
 import { formatFechaLarga, hoyISO } from "../components/turnos/fechas.ts";
@@ -48,12 +50,17 @@ const METRICA_ICON: Record<MetricaKey, LucideIcon> = {
   vacunasProximas30d: Syringe,
 };
 
-const METRICA_ACCENT: Record<MetricaKey, string> = {
-  clientes:           "from-orange-500 to-orange-600",
-  mascotasActivas:    "from-amber-500 to-amber-600",
-  turnosHoy:          "from-blue-500 to-blue-600",
-  estadiasHoy:        "from-emerald-500 to-emerald-600",
-  vacunasProximas30d: "from-violet-500 to-violet-600",
+// Acento de cada tarjeta. Es una clave semántica del sistema visual, no un
+// color: MetricaCard la traduce a los tokens --metric-*. El reparto respeta la
+// semántica de badges de docs/GUIA_ESTILO.md §0 (naranja = marca/clínica,
+// ámbar = advertencia/seguimiento, azul = informativo, verde = ocupación
+// confirmada, púrpura = categoría secundaria).
+const METRICA_ACCENT: Record<MetricaKey, MetricaAccent> = {
+  clientes:           "marca",
+  mascotasActivas:    "ambar",
+  turnosHoy:          "info",
+  estadiasHoy:        "exito",
+  vacunasProximas30d: "especial",
 };
 
 const ACCESO_ICON: Record<string, LucideIcon> = {
@@ -118,21 +125,41 @@ export function DashboardPage() {
 
   return (
     <div className="mx-auto max-w-6xl space-y-6">
-      {/* Bienvenida */}
-      <header className="rounded-xl bg-gradient-to-r from-orange-500 to-orange-600 p-5 text-white shadow-lg md:p-7">
-        <div className="flex flex-wrap items-center gap-2">
-          <h1 className="text-xl font-semibold md:text-2xl">
+      {/* Bienvenida. El naranja es acento, no fondo (GUIA_ESTILO §1.1): la
+          superficie es neutra (bg-card) y el naranja queda en la línea de
+          acento izquierda y en el badge de rol (el único Badge con la variante
+          por defecto, bg-primary). El resto del sistema — fecha, tipografía —
+          es neutro, igual que cualquier card del dashboard. */}
+      <header className="flex flex-col gap-3 rounded-surface border-l-4 border-l-metric-brand bg-card p-5 shadow-card md:flex-row md:items-center md:justify-between md:p-6">
+        <div>
+          <h1 className="text-xl font-semibold tracking-tight text-foreground md:text-2xl">
             {nombre ? `Bienvenido, ${nombre}` : "Bienvenido"}
           </h1>
-          {user?.roleName ? (
-            <Badge className="border border-white/30 bg-white/20 text-white hover:bg-white/20">
-              {rolMeta.displayName || user.roleName}
-            </Badge>
-          ) : null}
+          <p className="mt-1 text-sm text-muted-foreground">
+            Sistema de Gestión VeterCor
+          </p>
         </div>
-        <p className="mt-1 text-sm text-orange-50">
-          Sistema de Gestión Veterinaria Leo · {formatFechaLarga(fecha)}
-        </p>
+
+        {/* Chips: el rol y la fecha que ya mostraba el header, ahora como piezas
+            propias. Mismo Badge del kit con las clases del sistema — sin
+            componente nuevo y sin copy nuevo. Solo el rol lleva la variante por
+            defecto (naranja de marca); la fecha es "secondary" (neutra). */}
+        <ul className="flex flex-wrap gap-2">
+          {user?.roleName ? (
+            <li>
+              <Badge className="gap-1.5 px-2.5 py-1">
+                <UserRound aria-hidden />
+                {rolMeta.displayName || user.roleName}
+              </Badge>
+            </li>
+          ) : null}
+          <li>
+            <Badge variant="secondary" className="gap-1.5 px-2.5 py-1">
+              <CalendarDays aria-hidden />
+              {formatFechaLarga(fecha)}
+            </Badge>
+          </li>
+        </ul>
       </header>
 
       {/* Métricas */}
@@ -183,9 +210,9 @@ export function DashboardPage() {
 
       {/* Accesos rápidos */}
       {accesos.length > 0 ? (
-        <Card className="border-orange-200">
-          <CardHeader className="bg-gradient-to-r from-orange-50 to-transparent">
-            <CardTitle className="text-base text-orange-800 md:text-lg">Accesos rápidos</CardTitle>
+        <Card className="shadow-card">
+          <CardHeader>
+            <CardTitle className="text-base text-foreground md:text-lg">Accesos rápidos</CardTitle>
             <CardDescription>Las secciones habilitadas para tu rol</CardDescription>
           </CardHeader>
           <CardContent className="pt-4">

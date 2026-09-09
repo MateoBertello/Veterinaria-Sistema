@@ -105,6 +105,41 @@ export const ModuloService = {
       throw new DomainError(ErrorCode.TENANT_NOT_FOUND, 404, "Tenant no encontrado");
     }
 
+    // Validación de dependencias entre módulos (§2.6):
+    if (modulo === "ventas" && habilitado) {
+      const { data: stockRow } = await db
+        .from("modulos_contratados")
+        .select("habilitado")
+        .eq("tenant_id", tenantId)
+        .eq("modulo", "stock")
+        .maybeSingle();
+
+      if (!stockRow?.habilitado) {
+        throw new DomainError(
+          ErrorCode.VALIDATION_ERROR,
+          422,
+          "El módulo 'ventas' requiere 'stock' contratado",
+        );
+      }
+    }
+
+    if (modulo === "stock" && !habilitado) {
+      const { data: ventasRow } = await db
+        .from("modulos_contratados")
+        .select("habilitado")
+        .eq("tenant_id", tenantId)
+        .eq("modulo", "ventas")
+        .maybeSingle();
+
+      if (ventasRow?.habilitado) {
+        throw new DomainError(
+          ErrorCode.VALIDATION_ERROR,
+          422,
+          "No se puede deshabilitar 'stock' mientras 'ventas' esté contratado",
+        );
+      }
+    }
+
     // Estado previo (auditoría + conservación de fecha_alta — RN-SM2).
     const { data: actual } = await db
       .from("modulos_contratados")

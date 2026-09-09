@@ -33,10 +33,25 @@ export interface SchemaInfo {
 }
 
 /**
- * Deriva del DDL real (no de una lista escrita a mano) qué tablas existen y
- * cuáles tienen columna `tenant_id`. Cubre tanto `CREATE TABLE (...)` como un
- * `tenant_id` agregado después vía `ALTER TABLE ... ADD COLUMN`, así que una
- * tabla o columna nueva el día de mañana entra sola, sin tocar este archivo.
+ * Deriva del DDL real (no de una lista escrita a mano) qué relaciones existen y
+ * cuáles exponen `tenant_id`. Cubre tres formas:
+ *
+ *   1. `CREATE TABLE (...)` con la columna en el cuerpo.
+ *   2. `tenant_id` agregado después vía `ALTER TABLE ... ADD COLUMN`.
+ *   3. `CREATE [OR REPLACE] VIEW ... AS <select>` cuyo cuerpo menciona `tenant_id`.
+ *
+ * El punto 3 lo agregó la auditoría del Módulo Comercial: el esquema salía solo
+ * de CREATE/ALTER TABLE, así que las 7 vistas comerciales quedaban FUERA DEL
+ * ALCANCE del guardrail por completo — las 12 consultas de los Services sobre
+ * vistas no tenían ninguna red que exigiera su `.eq("tenant_id", ...)`. Y una
+ * vista de reporte que cruza varias tablas es exactamente donde más caro sale
+ * olvidarlo.
+ *
+ * Para una vista el criterio es MENCIONAR `tenant_id`, no proyectarlo: saber si
+ * una columna llega a la lista de selección exige entender el SQL, y este motor
+ * es sintáctico a propósito. El sesgo va, como en todo el archivo, hacia el
+ * falso positivo: una vista que filtra por tenant sin exponerlo entraría al
+ * alcance y pediría un `.eq()` de más. Preferible a dejarla afuera.
  */
 export function extractSchemaFromMigrations(files: MigrationFile[]): SchemaInfo {
   const allTables    = new Set<string>();
@@ -47,7 +62,7 @@ export function extractSchemaFromMigrations(files: MigrationFile[]): SchemaInfo 
     // `-- CREATE TABLE foo (tenant_id ...)` dejado en un comentario.
     const cleaned = content.replace(/--.*$/gm, "");
 
-    const createRe = /CREATE TABLE\s+(?:IF NOT EXISTS\s+)?"?(\w+)"?\s*\(/gi;
+    const createRe = /CREATE TABLE\s+(?:IF NOT EXISTS\s+)?(?:["\w]+\.)?"?(\w+)"?\s*\(/gi;
     let match: RegExpExecArray | null;
     while ((match = createRe.exec(cleaned))) {
       const table = match[1]!;
@@ -64,14 +79,43 @@ export function extractSchemaFromMigrations(files: MigrationFile[]): SchemaInfo 
       createRe.lastIndex = i;
     }
 
-    const alterRe = /ALTER TABLE\s+(?:ONLY\s+)?"?(\w+)"?\s+ADD COLUMN\s+(?:IF NOT EXISTS\s+)?"?tenant_id"?\s+UUID/gi;
+    const alterRe = /ALTER TABLE\s+(?:ONLY\s+)?(?:["\w]+\.)?"?(\w+)"?\s+ADD COLUMN\s+(?:IF NOT EXISTS\s+)?"?tenant_id"?\s+UUID/gi;
     while ((match = alterRe.exec(cleaned))) {
       allTables.add(match[1]!);
       tenantTables.add(match[1]!);
     }
+
+    const viewRe = /CREATE\s+(?:OR\s+REPLACE\s+)?(?:MATERIALIZED\s+)?VIEW\s+(?:IF NOT EXISTS\s+)?(?:["\w]+\.)?"?(\w+)"?\s+AS\b/gi;
+    while ((match = viewRe.exec(cleaned))) {
+      const view = match[1]!;
+      allTables.add(view);
+      const body = viewBody(cleaned, viewRe.lastIndex);
+      if (/\btenant_id\b/i.test(body)) tenantTables.add(view);
+      viewRe.lastIndex = viewRe.lastIndex + body.length;
+    }
   }
 
   return { allTables, tenantTables };
+}
+
+/**
+ * Cuerpo de un `CREATE VIEW ... AS` : desde `from` hasta el `;` que la cierra.
+ * Los `;` dentro de literales entrecomillados no cuentan (`'a;b'`), que es la
+ * única forma en que puede aparecer uno adentro del SELECT de una vista.
+ */
+function viewBody(sql: string, from: number): string {
+  let inString = false;
+  for (let i = from; i < sql.length; i++) {
+    const ch = sql[i];
+    if (ch === "'") {
+      // `''` es una comilla escapada dentro del literal, no su cierre.
+      if (inString && sql[i + 1] === "'") { i++; continue; }
+      inString = !inString;
+    } else if (ch === ";" && !inString) {
+      return sql.slice(from, i);
+    }
+  }
+  return sql.slice(from);
 }
 
 // ─── Utilidades de AST ──────────────────────────────────────────────────────

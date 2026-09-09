@@ -196,6 +196,8 @@ export interface Servicio {
   descripcion:         string | null;
   activo:              boolean;
   createdAt:           string;
+  precio?:             number | null;
+  alicuotaIva?:        number;
 }
 
 export interface ServicioInput {
@@ -204,7 +206,11 @@ export interface ServicioInput {
   duracionMinutos:     number;
   requiereProfesional: boolean;
   descripcion?:        string | null;
+  precio?:             number | null;
+  alicuotaIva?:        number;
 }
+
+export type ActualizarServicioInput = Partial<ServicioInput>;
 
 // ─── Turnos ─────────────────────────────────────────────────────────────────
 
@@ -849,7 +855,7 @@ export interface ResumenDashboard {
 
 // ─── Módulos vendibles ─────────────────────────────────────────────────────
 
-export type ModuloVendible = "historial_clinico" | "turnos" | "guarderia";
+export type ModuloVendible = "historial_clinico" | "turnos" | "guarderia" | "stock" | "ventas";
 
 export interface ModuloContratado {
   modulo:     ModuloVendible;
@@ -900,3 +906,6 @@ export interface EditarTenantInput {
 
 /** Filtro de estado del listado de tenants (espejo de `ListarTenantsQuerySchema`). */
 export type EstadoTenantFiltro = "activo" | "suspendido";
+
+// ─── Re-export de tipos del Módulo Comercial (F1·T1) ─────────────────────────
+export * from "./comercial.ts";

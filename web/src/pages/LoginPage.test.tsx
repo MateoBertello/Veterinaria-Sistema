@@ -17,6 +17,7 @@ vi.mock("../auth/AuthContext.tsx", () => ({
 }));
 
 import { LoginPage } from "./LoginPage.tsx";
+import { LOGO_MARCA_SRC } from "../components/shell/LogoMarca.tsx";
 
 function renderPage() {
   return render(
@@ -32,6 +33,15 @@ beforeEach(() => {
 });
 
 describe("LoginPage", () => {
+  it("muestra el logo de la marca", () => {
+    const { container } = renderPage();
+
+    const logo = container.querySelector(`img[src="${LOGO_MARCA_SRC}"]`);
+    expect(logo).not.toBeNull();
+    // Decorativo: el nombre del sistema ya está en el texto de al lado.
+    expect(logo).toHaveAttribute("alt", "");
+  });
+
   it("muestra errores inline al enviar vacío y no llama a login", async () => {
     renderPage();
 

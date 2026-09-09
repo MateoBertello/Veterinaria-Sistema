@@ -15,6 +15,7 @@ import {
   obtenerAdjuntosFirmadosEvento,
   obtenerEvento,
 } from "../../api/historial-clinico.ts";
+import { ConsumoInsumosWidget } from "./ConsumoInsumosWidget.tsx";
 import {
   ApiError,
   type AdjuntoFirmadoLote,
@@ -207,6 +208,10 @@ function EventoDetalle({ detalle, imagenesFirmadas, cargandoImagenes, onErrorIma
           </ul>
         </div>
       ) : null}
+      <ConsumoInsumosWidget
+        historialId={detalle.id}
+        profesionalNombre={detalle.professionalName}
+      />
     </div>
   );
 }

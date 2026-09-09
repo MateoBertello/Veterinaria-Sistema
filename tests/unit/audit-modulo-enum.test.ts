@@ -34,6 +34,11 @@ const MIGRATIONS_DIR = join(REPO_ROOT, "supabase/migrations");
 const MODULES_DIR    = join(REPO_ROOT, "supabase/functions/api/src/modules");
 const SHARED_DIR     = join(REPO_ROOT, "supabase/functions/api/src/shared");
 
+export interface DbOnlyAllowlistEntry {
+  module: string;
+  reason: string;
+}
+
 // ─── Fuente 1: el enum, tal como lo dejan las migraciones ────────────────────
 
 /**
@@ -92,6 +97,153 @@ export function usosDeModulo(relPath: string, source: string): UsoModulo[] {
   });
 
   return usos;
+}
+
+// ─── Fuente 2b: los literales que los RPCs en SQL le pasan a registros_auditoria ──
+
+/**
+ * Parsea los argumentos SQL de una lista separada por comas respetando paréntesis y comillas.
+ * Devuelve un array de objetos con el texto y el offset del argumento respecto al inicio del string.
+ */
+export function splitSqlArgs(str: string): Array<{ text: string; offset: number }> {
+  const args: Array<{ text: string; offset: number }> = [];
+  let current = "";
+  let parenDepth = 0;
+  let inString = false;
+  let stringChar = "";
+  let startOffset = 0;
+
+  for (let i = 0; i < str.length; i++) {
+    const ch = str[i];
+    if (inString) {
+      current += ch;
+      if (ch === stringChar) {
+        if (str[i + 1] === stringChar) {
+          current += str[i + 1];
+          i++;
+        } else {
+          inString = false;
+        }
+      }
+    } else {
+      if (ch === "'" || ch === '"') {
+        inString = true;
+        stringChar = ch;
+        current += ch;
+      } else if (ch === "(") {
+        parenDepth++;
+        current += ch;
+      } else if (ch === ")") {
+        parenDepth--;
+        current += ch;
+      } else if (ch === "," && parenDepth === 0) {
+        args.push({ text: current.trim(), offset: startOffset });
+        current = "";
+        startOffset = i + 1;
+      } else {
+        if (current.length === 0 && (ch === " " || ch === "\t" || ch === "\n" || ch === "\r")) {
+          startOffset = i + 1;
+        } else {
+          current += ch;
+        }
+      }
+    }
+  }
+  if (current.trim()) {
+    args.push({ text: current.trim(), offset: startOffset });
+  }
+  return args;
+}
+
+/**
+ * Busca `INSERT INTO registros_auditoria` en archivos de migración y extrae el literal
+ * en la columna `module`.
+ */
+export function usosDeModuloEnMigraciones(
+  files: Array<{ name: string; content: string }>,
+): UsoModulo[] {
+  const usos: UsoModulo[] = [];
+
+  for (const { name, content } of files) {
+    const clean = content.replace(/--[^\n]*/g, (m) => " ".repeat(m.length));
+    const regex = /INSERT\s+INTO\s+registros_auditoria\s*\(([\s\S]*?)\)\s*VALUES\s*\(/gi;
+    let match: RegExpExecArray | null;
+
+    while ((match = regex.exec(clean)) !== null) {
+      const colsStr = match[1]!;
+      const cols = colsStr.split(",").map((c) => c.trim().toLowerCase());
+      const modIdx = cols.indexOf("module");
+      if (modIdx === -1) continue;
+
+      const valuesStart = regex.lastIndex;
+      let depth = 1;
+      let inStr = false;
+      let strCh = "";
+      let valuesEnd = valuesStart;
+
+      for (let i = valuesStart; i < clean.length; i++) {
+        const ch = clean[i];
+        if (inStr) {
+          if (ch === strCh) {
+            if (clean[i + 1] === strCh) {
+              i++;
+            } else {
+              inStr = false;
+            }
+          }
+        } else {
+          if (ch === "'" || ch === '"') {
+            inStr = true;
+            strCh = ch;
+          } else if (ch === "(") {
+            depth++;
+          } else if (ch === ")") {
+            depth--;
+            if (depth === 0) {
+              valuesEnd = i;
+              break;
+            }
+          }
+        }
+      }
+
+      const valStr = clean.slice(valuesStart, valuesEnd);
+      const args = splitSqlArgs(valStr);
+      if (modIdx >= args.length) continue;
+
+      const modArg = args[modIdx]!;
+      const m = modArg.text.match(/'([^']+)'/);
+      if (m?.[1]) {
+        const absOffset = valuesStart + modArg.offset;
+        const line = content.slice(0, absOffset).split("\n").length;
+        usos.push({ file: name, line, module: m[1] });
+      }
+    }
+  }
+
+  return usos;
+}
+
+// ─── Fuente 3: el tipo TypeScript AuditModule ────────────────────────────────
+
+/**
+ * Parsea los literales de la unión `export type AuditModule = ...;` en shared/audit.ts.
+ * Ignora literales dentro de comentarios de línea (`//`).
+ */
+export function modulosDesdeTipoAuditModule(source: string): Set<string> {
+  const valores = new Set<string>();
+  const match = source.match(/export\s+type\s+AuditModule\s*=([\s\S]*?);/);
+  if (!match?.[1]) return valores;
+
+  const lineas = match[1].split("\n");
+  for (const linea of lineas) {
+    const sinComentario = linea.replace(/\/\/[^\n]*/, "");
+    for (const m of sinComentario.matchAll(/"([^"]+)"/g)) {
+      valores.add(m[1]!);
+    }
+  }
+
+  return valores;
 }
 
 // ─── Recolección ─────────────────────────────────────────────────────────────
@@ -160,6 +312,78 @@ describe("BLOQUEANTE: todo module: de recordAudit existe en el enum modulo_audit
         `Valores válidos hoy: ${[...permitidos].sort().join(", ")}`,
     ).toEqual([]);
   });
+
+  it("ningún RPC en migraciones audita con un módulo que la base va a rechazar", () => {
+    const invalidos = usosDeModuloEnMigraciones(migraciones())
+      .filter((u) => !permitidos.has(u.module));
+
+    const detalle = invalidos
+      .map((u) => `  ${u.file}:${u.line} — module: "${u.module}"`)
+      .join("\n");
+
+    expect(
+      invalidos,
+      invalidos.length === 0 ? "" :
+        `${invalidos.length} INSERT INTO registros_auditoria en RPC(s) con un módulo que no está en el enum ` +
+        `modulo_auditoria:\n${detalle}\n\n` +
+        "En un RPC, un módulo inválido revienta la transacción completa con error de PostgreSQL. " +
+        "Agregá el valor con ALTER TYPE modulo_auditoria ADD VALUE en una migración previa o corregí el literal.\n" +
+        `Valores válidos hoy: ${[...permitidos].sort().join(", ")}`,
+    ).toEqual([]);
+  });
+});
+
+describe("BLOQUEANTE: correspondencia bidireccional entre AuditModule y modulo_auditoria", () => {
+  const enEnum = enumModulosDesdeMigraciones(migraciones());
+  const enTipo = modulosDesdeTipoAuditModule(
+    readFileSync(join(SHARED_DIR, "audit.ts"), "utf-8"),
+  );
+
+  it("el tipo se parsea y trae los módulos conocidos", () => {
+    // Si esto falla, el parser dejó de entender el tipo y el chequeo de abajo
+    // estaría dando verde por leer un conjunto vacío.
+    expect(enTipo.size).toBeGreaterThan(10);
+    expect(enTipo).toContain("medical_records");
+    expect(enTipo).toContain("catalogs");
+  });
+
+  it("RN-SC6: ningún valor del tipo AuditModule falta en el enum de la base", () => {
+    const faltantes = [...enTipo].filter((m) => !enEnum.has(m));
+    expect(
+      faltantes,
+      faltantes.length === 0 ? "" :
+        `${faltantes.length} valor(es) del tipo AuditModule que la base va a rechazar: ` +
+        `${faltantes.join(", ")}\n\n` +
+        "recordAudit es best-effort: esto NO rompe la operación, el asiento simplemente " +
+        "no queda. Agregá el valor con ALTER TYPE modulo_auditoria ADD VALUE en una " +
+        "migración nueva.",
+    ).toEqual([]);
+  });
+
+  it("RN-SC6: todo valor del enum modulo_auditoria existe en el tipo AuditModule (bidireccional)", () => {
+    // Si la base tiene valores de ENUM que deliberadamente no se usan desde TS,
+    // deben listarse en ALLOWLIST_DB_ONLY con su justificación obligatoria.
+    const ALLOWLIST_DB_ONLY: DbOnlyAllowlistEntry[] = [];
+
+    for (const entry of ALLOWLIST_DB_ONLY) {
+      expect(entry.module).toBeTruthy();
+      expect(entry.reason.trim().length).toBeGreaterThan(15);
+    }
+
+    const allowlisted = new Set(ALLOWLIST_DB_ONLY.map((e) => e.module));
+
+    const faltantes = [...enEnum]
+      .filter((m) => !enTipo.has(m) && !allowlisted.has(m));
+
+    expect(
+      faltantes,
+      faltantes.length === 0 ? "" :
+        `${faltantes.length} valor(es) del enum modulo_auditoria que faltan en el tipo AuditModule: ` +
+        `${faltantes.join(", ")}\n\n` +
+        "Agregá los valores a AuditModule en supabase/functions/api/src/shared/audit.ts o " +
+        "documentalos en ALLOWLIST_DB_ONLY con su justificación.",
+    ).toEqual([]);
+  });
 });
 
 // ─── Autoverificación por mutación ───────────────────────────────────────────
@@ -206,5 +430,70 @@ describe("motor del guardrail — se pone rojo cuando debe", () => {
     const usos = usosDeModulo("catalogos.service.ts", 'module:   "catalogs",');
 
     expect(usos.filter((u) => !permitidos.has(u.module))).toHaveLength(1);
+  });
+
+  it("parsea los literales de la unión de tipos", () => {
+    const s = 'export type AuditModule =\n  | "clients" | "pets"\n  | "inventory";';
+    expect([...modulosDesdeTipoAuditModule(s)].sort()).toEqual(["clients", "inventory", "pets"]);
+  });
+
+  it("ignora un literal que está en un comentario", () => {
+    const s = 'export type AuditModule =\n  // | "fantasma"\n  | "clients";';
+    expect(modulosDesdeTipoAuditModule(s).has("fantasma")).toBe(false);
+  });
+
+  it("MUTACIÓN — un valor del tipo que no está en el enum se detecta", () => {
+    const enEnum = enumModulosDesdeMigraciones([
+      { name: "a.sql", content: "CREATE TYPE modulo_auditoria AS ENUM ('clients');" },
+    ]);
+    const enTipo = modulosDesdeTipoAuditModule('export type AuditModule = | "clients" | "inventory";');
+    expect([...enTipo].filter((m) => !enEnum.has(m))).toEqual(["inventory"]);
+  });
+
+  it("parsea el module de INSERT INTO registros_auditoria en migraciones", () => {
+    const sql = `
+      INSERT INTO registros_auditoria (
+        tenant_id, user_id, user_name, user_role, action, module, entity_id, details
+      ) VALUES (
+        p_tenant_id, p_usuario_id, 'Admin', 'admin', 'UPDATE', 'inventory', p_id::text, '{}'::jsonb
+      );
+    `;
+    const usos = usosDeModuloEnMigraciones([{ name: "test_migration.sql", content: sql }]);
+    expect(usos).toEqual([{ file: "test_migration.sql", line: 5, module: "inventory" }]);
+  });
+
+  it("MUTACIÓN — un módulo en un RPC que no está en el enum se detecta", () => {
+    const permitidos = enumModulosDesdeMigraciones([
+      { name: "a.sql", content: "CREATE TYPE modulo_auditoria AS ENUM ('clients');" },
+    ]);
+    const sql = `
+      INSERT INTO registros_auditoria (
+        tenant_id, user_id, action, module, entity_id
+      ) VALUES (
+        p_tenant_id, p_usuario_id, 'UPDATE', 'inventoryy', p_id::text
+      );
+    `;
+    const usos = usosDeModuloEnMigraciones([{ name: "rpc.sql", content: sql }]);
+    const invalidos = usos.filter((u) => !permitidos.has(u.module));
+    expect(invalidos).toHaveLength(1);
+    expect(invalidos[0]?.module).toBe("inventoryy");
+  });
+
+  it("MUTACIÓN — un valor en el enum que falta en el tipo AuditModule se detecta por chequeo inverso", () => {
+    const enEnum = enumModulosDesdeMigraciones([
+      { name: "a.sql", content: "CREATE TYPE modulo_auditoria AS ENUM ('clients', 'suppliers');" },
+    ]);
+    const enTipo = modulosDesdeTipoAuditModule('export type AuditModule = | "clients";');
+    expect([...enEnum].filter((m) => !enTipo.has(m))).toEqual(["suppliers"]);
+  });
+
+  it("MUTACIÓN — ALLOWLIST_DB_ONLY requiere reason documentado y exime el valor", () => {
+    const allowlist: DbOnlyAllowlistEntry[] = [
+      { module: "solo_db", reason: "Módulo utilizado exclusivamente por triggers de base de datos" },
+    ];
+    expect(allowlist[0]?.reason.length).toBeGreaterThan(15);
+    const allowlisted = new Set(allowlist.map((e) => e.module));
+    const faltantes = ["solo_db"].filter((m) => !allowlisted.has(m));
+    expect(faltantes).toEqual([]);
   });
 });

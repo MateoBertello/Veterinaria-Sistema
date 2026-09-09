@@ -1,0 +1,975 @@
+// ══════════════════════════════════════════════════════════════════════════════
+// TIPOS DEL MÓDULO COMERCIAL (F1·T1)
+// Espejo literal y tipado de los DTOs y modelos de la API de Hono y DB.
+// ══════════════════════════════════════════════════════════════════════════════
+
+// ─── Enums con valores exactos de la base / backend ──────────────────────────
+
+export const ALICUOTAS_IVA = [0, 10.5, 21, 27] as const;
+export type AlicuotaIva = (typeof ALICUOTAS_IVA)[number];
+
+export type CondicionVenta =
+  | "libre"
+  | "bajo_receta"
+  | "bajo_receta_archivada"
+  | "uso_profesional";
+
+export type CondicionFiscal =
+  | "consumidor_final"
+  | "monotributista"
+  | "responsable_inscripto"
+  | "exento"
+  | "no_alcanzado"
+  | "sin_datos";
+
+export type EstadoLote =
+  | "disponible"
+  | "cuarentena"
+  | "bloqueado"
+  | "agotado"
+  | "vencido";
+
+export type EstadoCompra = "borrador" | "confirmada" | "anulada";
+
+export type EstadoVenta = "registrada" | "anulada";
+
+export type EstadoSesionCaja = "abierta" | "cerrada";
+
+export type EstadoRecuento = "borrador" | "aplicado";
+
+export type CondicionPago = "contado" | "cuenta_corriente";
+
+export type TipoItemVenta = "producto" | "servicio";
+
+export type TipoAjuste =
+  | "entrada_ajuste"
+  | "salida_ajuste"
+  | "merma_rotura"
+  | "merma_vencimiento";
+
+export type TipoMovimientoCaja =
+  | "ingreso_venta"
+  | "ingreso_cobro_cuenta_corriente"
+  | "ingreso_manual"
+  | "egreso_pago_proveedor"
+  | "egreso_devolucion"
+  | "egreso_manual"
+  | "egreso_retiro";
+
+export type TipoMovimientoStock =
+  | "entrada_compra"
+  | "entrada_ajuste"
+  | "entrada_fraccionamiento"
+  | "entrada_inicial"
+  | "entrada_devolucion"
+  | "salida_venta"
+  | "salida_consumo_clinico"
+  | "salida_ajuste"
+  | "salida_fraccionamiento"
+  | "salida_vencimiento"
+  | "salida_merma";
+
+// ─── 1. Productos, Familias y Conversiones ────────────────────────────────────
+
+export interface Producto {
+  id:                          string;
+  tenantId:                    string;
+  codigo:                      string;
+  nombre:                      string;
+  descripcion:                 string | null;
+  familiaId:                   string | null;
+  unidadMedidaId:              string;
+  marca:                       string | null;
+  alicuotaIva:                 number;
+  condicionVenta:              CondicionVenta | string;
+  controlaLote:                boolean;
+  controlaVencimiento:         boolean;
+  vidaUtilPostAperturaDias:    number | null;
+  precioVenta:                 number | null;
+  costoReposicion:             number | null;
+  margenObjetivo:              number | null;
+  stockMinimo:                 number | null;
+  esVendible:                  boolean;
+  esConsumibleClinico:         boolean;
+  requiereFrio:                boolean;
+  trazable:                    boolean;
+  codigoBarras:                string | null;
+  activo:                      boolean;
+  createdAt:                   string;
+  updatedAt:                   string;
+}
+
+export interface CrearProductoInput {
+  codigo:                    string;
+  nombre:                    string;
+  descripcion?:              string | null;
+  familiaId?:                string | null;
+  unidadMedidaId:            string;
+  marca?:                    string | null;
+  alicuotaIva?:              number;
+  condicionVenta?:           CondicionVenta;
+  controlaLote?:             boolean;
+  controlaVencimiento?:      boolean;
+  vidaUtilPostAperturaDias?: number | null;
+  precioVenta?:              number | null;
+  costoReposicion?:          number | null;
+  margenObjetivo?:           number | null;
+  stockMinimo?:              number | null;
+  esVendible?:               boolean;
+  esConsumibleClinico?:      boolean;
+  requiereFrio?:             boolean;
+  trazable?:                 boolean;
+  codigoBarras?:             string | null;
+}
+
+export type ActualizarProductoInput = Partial<CrearProductoInput>;
+
+export interface CrearDerivadoInput {
+  codigo:                    string;
+  nombre:                    string;
+  unidadMedidaId:            string;
+  factorTeorico:             number;
+  mermaEsperadaPorcentaje?:  number;
+  precioVenta?:              number | null;
+  vidaUtilPostAperturaDias?: number | null;
+  stockMinimo?:              number | null;
+  descripcion?:              string | null;
+}
+
+export interface Familia {
+  id:           string;
+  tenantId:     string;
+  nombre:       string;
+  unidadBaseId: string;
+  activo:       boolean;
+  createdAt:    string;
+}
+
+export interface CrearFamiliaInput {
+  nombre:       string;
+  unidadBaseId: string;
+}
+
+export type ActualizarFamiliaInput = Partial<CrearFamiliaInput>;
+
+export interface Conversion {
+  id:                      string;
+  tenantId:                string;
+  productoOrigenId:        string;
+  productoDestinoId:       string;
+  factorTeorico:           number;
+  mermaEsperadaPorcentaje: number;
+  activo:                  boolean;
+  createdAt:               string;
+}
+
+export interface CrearConversionInput {
+  productoOrigenId:         string;
+  productoDestinoId:        string;
+  factorTeorico:            number;
+  mermaEsperadaPorcentaje?: number;
+}
+
+export type ActualizarConversionInput = Partial<CrearConversionInput>;
+
+// ─── 2. Proveedores ──────────────────────────────────────────────────────────
+
+export interface Proveedor {
+  id:              string;
+  tenantId:        string;
+  razonSocial:     string;
+  nombreFantasia:  string | null;
+  cuit:            string | null;
+  condicionFiscal: CondicionFiscal | string | null;
+  telefono:        string | null;
+  email:           string | null;
+  direccion:       string | null;
+  contactoNombre:  string | null;
+  observaciones:   string | null;
+  clienteId:       string | null;
+  activo:          boolean;
+  createdAt:       string;
+  updatedAt:       string;
+}
+
+export interface CrearProveedorInput {
+  razonSocial:      string;
+  nombreFantasia?:  string | null;
+  cuit?:            string | null;
+  condicionFiscal?: CondicionFiscal | null;
+  telefono?:        string | null;
+  email?:           string | null;
+  direccion?:       string | null;
+  contactoNombre?:  string | null;
+  observaciones?:   string | null;
+  clienteId?:       string | null;
+}
+
+export type ActualizarProveedorInput = Partial<CrearProveedorInput>;
+
+// ─── 3. Stock, Lotes y Movimientos ───────────────────────────────────────────
+
+export interface Lote {
+  id:                    string;
+  codigoLote:            string | null;
+  fechaVencimiento:      string | null;
+  fechaIngreso:          string;
+  costoUnitarioNeto:     number;
+  costoUnitarioEfectivo: number;
+  estado:                EstadoLote | string;
+  origen:                string;
+  producto:              { id: string; codigo: string; nombre: string } | null;
+  proveedor:             { id: string; razonSocial: string } | null;
+  cantidad:              number;
+}
+
+export interface LoteCandidato {
+  loteId:                string;
+  codigoLote:            string | null;
+  fechaVencimiento:      string | null;
+  fechaIngreso:          string;
+  estado:                EstadoLote | string;
+  costoUnitarioEfectivo: number;
+  cantidadDisponible:    number;
+}
+
+export interface KardexMovimiento {
+  id:               string;
+  fecha:            string;
+  tipo:             TipoMovimientoStock | string;
+  cantidad:         number;
+  cantidadConSigno: number;
+  costoUnitario:    number;
+  costoTotal:       number;
+  motivo:           string | null;
+  saldoAcumulado:   number;
+}
+
+export interface MovimientoStock {
+  id:               string;
+  operacionId:      string | null;
+  tipo:             TipoMovimientoStock | string;
+  cantidad:         number;
+  cantidadConSigno: number;
+  costoUnitario:    number;
+  costoTotal:       number;
+  motivo:           string | null;
+  createdAt:        string;
+  producto?:        { id: string; codigo: string; nombre: string } | null;
+  lote?:            { id: string; codigoLote: string } | null;
+}
+
+/**
+ * Fila cruda de `movimientos_stock` tal como la devuelve GET /consumos/evento/:historialId.
+ * Ese endpoint responde el resultado de PostgREST sin mapear (consumo.service.ts, porEvento):
+ * columnas en snake_case y embeds nombrados como la tabla (`productos`, `lotes`).
+ * Se normaliza a MovimientoStock en api/comercial/consumo.ts.
+ */
+export interface MovimientoStockConsumoRow {
+  id:                 string;
+  operacion_id:       string | null;
+  tipo:               TipoMovimientoStock | string;
+  cantidad:           number | string;
+  cantidad_con_signo: number | string;
+  costo_unitario:     number | string;
+  costo_total:        number | string;
+  motivo:             string | null;
+  created_at:         string;
+  productos?:         { id: string; codigo: string; nombre: string } | null;
+  lotes?:             { id: string; codigo_lote: string } | null;
+}
+
+/**
+ * Fila de GET /movimientos-stock: el Service mapea los escalares a camelCase pero
+ * pasa los embeds `producto` y `lote` tal como vienen de PostgREST, con las columnas
+ * en snake_case (stock.service.ts, listarMovimientos). Se normaliza en
+ * api/comercial/stock.ts para que MovimientoStock tenga una única forma.
+ */
+export interface MovimientoStockRow extends Omit<MovimientoStock, "lote"> {
+  lote?: { id: string; codigo_lote: string } | null;
+}
+
+export interface ExistenciaFila {
+  productoId: string;
+  cantidad:   number;
+  producto:   {
+    id:            string;
+    codigo:        string;
+    nombre:        string;
+    unidad_medida?: { id: string; codigo: string; nombre: string };
+  };
+}
+
+export interface TrazabilidadNodo {
+  loteId:                string;
+  productoId:            string;
+  productoNombre:        string;
+  codigoLote:            string | null;
+  fechaVencimiento:      string | null;
+  costoUnitarioEfectivo: number;
+  nivel:                 number;
+  direccion:             string;
+}
+
+export interface ValorizacionStock {
+  totalValorizado: number;
+  productos: Array<{
+    producto:      { id: string; codigo: string; nombre: string };
+    cantidadTotal: number;
+    valorTotal:    number;
+  }>;
+}
+
+// ─── 4. Compras ──────────────────────────────────────────────────────────────
+
+export interface CompraItem {
+  id:                string;
+  productoId:        string;
+  producto?:         { id: string; codigo: string; nombre: string };
+  cantidad:          number;
+  costoUnitarioNeto: number;
+  alicuotaIva:       number;
+  codigoLote:        string | null;
+  fechaVencimiento:  string | null;
+  importeNeto:       number;
+  importeIva:        number;
+  importeTotal:      number;
+}
+
+export interface Compra {
+  id:                         string;
+  fecha:                      string;
+  comprobanteProveedorTipo:   string | null;
+  comprobanteProveedorNumero: string | null;
+  totalNeto:                  number;
+  totalIva:                   number;
+  total:                      number;
+  estado:                     EstadoCompra | string;
+  generaEgresoCaja:           boolean;
+  observaciones:              string | null;
+  proveedor?:                 { id: string; razonSocial: string; cuit: string | null };
+  items?:                     CompraItem[];
+  createdAt:                  string;
+  updatedAt:                  string;
+}
+
+export interface CrearCompraInput {
+  proveedorId:                 string;
+  fecha:                       string;
+  comprobanteProveedorTipo?:   string;
+  comprobanteProveedorNumero?: string;
+  observaciones?:              string;
+  generaEgresoCaja?:           boolean;
+}
+
+export type ActualizarCompraInput = Partial<CrearCompraInput>;
+
+export interface AgregarItemCompraInput {
+  productoId:        string;
+  cantidad:          number;
+  costoUnitarioNeto: number;
+  alicuotaIva:       number;
+  codigoLote?:       string | null;
+  fechaVencimiento?: string | null;
+}
+
+export type ActualizarItemCompraInput = Partial<AgregarItemCompraInput>;
+
+// ─── 5. Caja ─────────────────────────────────────────────────────────────────
+
+export interface Caja {
+  id:        string;
+  nombre:    string;
+  activa:    boolean;
+  createdAt: string;
+}
+
+export interface SesionCaja {
+  id:                   string;
+  cajaId:               string;
+  cajaNombre?:          string;
+  estado:               EstadoSesionCaja | string;
+  aperturaAt:           string;
+  aperturaUsuarioId:    string;
+  cierreAt:             string | null;
+  cierreUsuarioId:      string | null;
+  saldoInicial:         number;
+  saldoTeoricoEfectivo: number | null;
+  efectivoContado:      number | null;
+  diferencia:           number | null;
+  motivoDiferencia:     string | null;
+  observaciones:        string | null;
+  movimientos?:         MovimientoCaja[];
+}
+
+export interface MovimientoCaja {
+  id:           string;
+  sesionCajaId: string;
+  tipo:         TipoMovimientoCaja | string;
+  medioPagoId:  string;
+  medioPago?: {
+    id:           string;
+    codigo:       string;
+    nombre:       string;
+    afectaArqueo: boolean;
+  };
+  importe:   number;
+  motivo:    string | null;
+  usuarioId: string;
+  createdAt: string;
+}
+
+export interface TotalMedioPago {
+  medioPagoId:  string;
+  codigo:       string;
+  nombre:       string;
+  afectaArqueo: boolean;
+  ingresos:     number;
+  egresos:      number;
+  neto:         number;
+}
+
+export interface ResumenSesion {
+  sesionId:             string;
+  saldoInicial:         number;
+  saldoTeoricoEfectivo: number | null;
+  efectivoContado:      number | null;
+  diferencia:           number | null;
+  totalesPorMedioPago:  TotalMedioPago[];
+}
+
+export interface AbrirSesionInput {
+  cajaId?:      string;
+  saldoInicial: number;
+}
+
+export interface RegistrarMovimientoCajaInput {
+  tipo:        TipoMovimientoCaja;
+  medioPagoId: string;
+  importe:     number;
+  motivo?:     string | null;
+  referencia?: string | null;
+}
+
+export interface CerrarSesionInput {
+  efectivoContado: number;
+  motivo?:         string | null;
+  observaciones?:  string | null;
+}
+
+// ─── 6. Ventas ───────────────────────────────────────────────────────────────
+
+/** Forma snake_case tal como llega desde PostgREST crudo (GET /ventas y GET /ventas/:id) */
+export interface VentaItemRow {
+  id:                       string;
+  venta_id:                 string;
+  tipo_item:                TipoItemVenta;
+  producto_id:              string | null;
+  servicio_id:              string | null;
+  descripcion_snapshot?:    string | null;
+  lote_id:                  string | null;
+  motivo_fefo:              string | null;
+  mascota_id:               string | null;
+  cantidad:                 number;
+  precio_unitario:          number;
+  subtotal_neto:            number;
+  alicuota_iva:             number;
+  importe_iva:              number;
+  total_linea:              number;
+  costo_unitario_historico: number | null;
+  descuento_porcentaje?:    number | null;
+  lote?:                    { id: string; codigo_lote?: string; numero_lote?: string; fecha_vencimiento?: string | null } | null;
+  created_at?:              string;
+}
+
+export interface VentaPagoRow {
+  id:            string;
+  venta_id:      string;
+  medio_pago_id: string;
+  importe:       number;
+  referencia:    string | null;
+  created_at:    string;
+}
+
+export interface VentaRow {
+  id:               string;
+  tenant_id:        string;
+  sesion_caja_id:   string;
+  cliente_id:       string | null;
+  usuario_id:       string;
+  numero_operacion: string;
+  condicion_pago:   CondicionPago;
+  subtotal_neto:    number;
+  total_iva:        number;
+  total:            number;
+  saldo_pendiente:  number;
+  estado:           EstadoVenta;
+  observaciones:    string | null;
+  created_at:       string;
+  anulada_at:       string | null;
+  anulada_motivo:   string | null;
+  items?:           VentaItemRow[];
+  pagos?:           VentaPagoRow[];
+  cliente?:         { id?: string; full_name?: string; dni_cuit?: string | null; condicion_fiscal?: string | null } | null;
+  usuario?:         { id?: string; full_name?: string; email?: string } | null;
+}
+
+/** Forma normalizada en camelCase que consume el frontend */
+export interface VentaItem {
+  id:                     string;
+  ventaId:                string;
+  tipoItem:               TipoItemVenta;
+  productoId:             string | null;
+  servicioId:             string | null;
+  descripcionSnapshot?:   string | null;
+  loteId:                 string | null;
+  motivoFefo:             string | null;
+  mascotaId:              string | null;
+  cantidad:               number;
+  precioUnitario:         number;
+  subtotalNeto:           number;
+  alicuotaIva:            number;
+  importeIva:             number;
+  totalLinea:             number;
+  costoUnitarioHistorico: number | null;
+  descuentoPorcentaje?:   number | null;
+  lote?:                  { id: string; codigoLote?: string; numeroLote?: string; fechaVencimiento?: string | null } | null;
+}
+
+export interface VentaPago {
+  id:          string;
+  ventaId:     string;
+  medioPagoId: string;
+  importe:     number;
+  referencia:  string | null;
+  createdAt:   string;
+}
+
+export interface Venta {
+  id:              string;
+  tenantId:        string;
+  sesionCajaId:    string;
+  clienteId:       string | null;
+  usuarioId:       string;
+  numeroOperacion: string;
+  condicionPago:   CondicionPago;
+  subtotalNeto:    number;
+  totalIva:        number;
+  total:           number;
+  saldoPendiente:  number;
+  estado:          EstadoVenta;
+  observaciones:   string | null;
+  createdAt:       string;
+  anuladaAt:       string | null;
+  anuladaMotivo:   string | null;
+  items:           VentaItem[];
+  pagos:           VentaPago[];
+  cliente?:        { id?: string; full_name?: string; dni_cuit?: string | null; condicion_fiscal?: string | null } | null;
+  usuario?:        { id?: string; full_name?: string; email?: string } | null;
+}
+
+export interface ItemVentaInput {
+  tipoItem:             TipoItemVenta;
+  productoId?:          string | null;
+  servicioId?:          string | null;
+  cantidad:             number;
+  precioUnitario?:      number;
+  descuentoPorcentaje?: number;
+  loteId?:              string | null;
+  motivoFefo?:          string | null;
+  mascotaId?:           string | null;
+}
+
+export interface PagoVentaInput {
+  medioPagoId: string;
+  importe:     number;
+  referencia?: string | null;
+}
+
+export interface RegistrarVentaInput {
+  sesionCajaId:   string;
+  clienteId?:      string | null;
+  condicionPago?:  CondicionPago;
+  items:          ItemVentaInput[];
+  pagos?:         PagoVentaInput[];
+  descuento?:     number;
+  observaciones?: string | null;
+}
+
+export interface ResultadoVenta {
+  ventaId:         string;
+  numeroOperacion: string;
+  operacionId:     string;
+  subtotalNeto:    number;
+  totalIva:        number;
+  total:           number;
+  saldoPendiente:  number;
+}
+
+export interface AnularVentaInput {
+  sesionCajaId?: string | null;
+  motivo:        string;
+}
+
+// ─── 7. Ajustes, Recuentos y Devoluciones ─────────────────────────────────────
+
+export interface AjustarExistenciaInput {
+  loteId:   string;
+  tipo:     TipoAjuste;
+  cantidad: number;
+  motivo:   string;
+}
+
+export interface ResultadoAjuste {
+  operacionId:     string;
+  movimientoId:    string;
+  existenciaFinal: number;
+}
+
+export interface RecuentoDetalle {
+  id:              string;
+  loteId:          string;
+  codigoLote:      string | null;
+  fechaVencimiento: string | null;
+  producto:        { id: string; codigo: string; nombre: string } | null;
+  cantidadSistema: number | null;
+  cantidadContada: number;
+  diferencia:      number | null;
+  motivo:          string | null;
+}
+
+export interface Recuento {
+  id:            string;
+  fecha:         string;
+  estado:        EstadoRecuento | string;
+  observaciones: string | null;
+  createdAt:     string;
+  aplicadoAt:    string | null;
+  usuario?:      { id: string; nombre: string } | null;
+  aplicadoPor?:  { id: string; nombre: string } | null;
+  detalles?:     RecuentoDetalle[];
+}
+
+export interface ItemRecuentoInput {
+  loteId:           string;
+  cantidadContada:  number;
+  cantidadSistema?: number | null;
+  motivo?:          string | null;
+}
+
+export interface ResultadoAplicarRecuento {
+  recuentoId:       string;
+  operacionId:      string;
+  ajustesGenerados: number;
+  lotesMovidos:     number | null;
+}
+
+export interface ItemDevolucionInput {
+  ventaItemId: string;
+  cantidad:    number;
+  revendible?: boolean;
+}
+
+export interface RegistrarDevolucionInput {
+  ventaId:           string;
+  items:             ItemDevolucionInput[];
+  motivo:            string;
+  reintegraEfectivo?: boolean;
+  sesionCajaId?:     string | null;
+}
+
+export interface ResultadoDevolucion {
+  devolucionId:         string;
+  operacionId:          string;
+  itemsDevueltos:       number;
+  reintegroTotal:       number;
+  movimientosGenerados: number;
+  importeReintegrado:   number;
+}
+
+// ─── 8. Fraccionamiento ───────────────────────────────────────────────────────
+
+export interface FraccionarLoteInput {
+  loteOrigenId:             string;
+  productoDestinoId:        string;
+  cantidadOrigen:           number;
+  cantidadObtenida:         number;
+  fechaVencimientoDestino?: string | null;
+  codigoLoteDestino:        string;
+  motivo?:                  string | null;
+}
+
+export interface ResultadoFraccionamiento {
+  operacionId:       string;
+  loteDestinoId:     string;
+  cantidadTeorica:   number;
+  cantidadObtenida:  number;
+  desvioPorcentaje:  number;
+  costoUnitarioHijo: number;
+  mermaRegistrada:   number;
+}
+
+export interface ItemHistorialFraccionamiento {
+  tenantId:              string;
+  operacionId:           string;
+  productoOrigenId:      string;
+  productoDestinoId:     string;
+  productoOrigenNombre:  string;
+  productoDestinoNombre: string;
+  cantidadOrigen:        number;
+  factorTeorico:         number;
+  cantidadTeorica:       number;
+  cantidadObtenida:      number;
+  merma:                 number;
+  costoConsumido:        number;
+  costoUnitarioHijo:     number;
+  sobrecosto:            number | null;
+  fraccionadoAt:         string;
+}
+
+// ─── 9. Consumo Clínico ───────────────────────────────────────────────────────
+
+export interface ConsumoItemInput {
+  productoId:  string;
+  cantidad:    number;
+  loteId?:     string | null;
+  motivoFefo?: string | null;
+}
+
+export interface RegistrarConsumoInput {
+  historialId:               string;
+  planVacunacionId?:         string | null;
+  recetaId?:                 string | null;
+  profesionalPrescriptorId?: string | null;
+  items:                     ConsumoItemInput[];
+}
+
+export interface DisponibilidadLoteItem {
+  cantidad: number;
+  lotes: {
+    id:               string;
+    codigo_lote:      string | null;
+    fecha_vencimiento: string | null;
+    estado:           EstadoLote | string;
+  };
+}
+
+// ─── 10. Reportes ─────────────────────────────────────────────────────────────
+
+export interface ItemReporteValorizacion {
+  loteId:                string;
+  codigoLote:            string | null;
+  fechaVencimiento:      string | null;
+  productoId:            string;
+  productoCodigo:        string;
+  productoNombre:        string;
+  familiaId:             string | null;
+  familiaNombre:         string | null;
+  unidadMedida:          string;
+  cantidadAFecha:        number;
+  costoUnitarioEfectivo: number;
+  valorTotal:            number;
+}
+
+export interface ReporteValorizacion {
+  fechaCorte:        string;
+  totalLineas:       number;
+  totalUnidades:     number;
+  valorizacionTotal: number;
+  items:             ItemReporteValorizacion[];
+}
+
+export interface ItemReporteRotacion {
+  productoId:          string;
+  codigo:              string;
+  nombre:              string;
+  familiaId:           string | null;
+  familiaNombre:       string | null;
+  stockActual:         number;
+  costoReposicion:     number;
+  valorInmovilizado:   number;
+  ultimoMovimientoAt:  string | null;
+  diasSinMovimiento:   number;
+  sinMovimiento:       boolean;
+  totalSalidasPeriodo: number;
+}
+
+export interface ReporteRotacion {
+  diasLimite:               number;
+  totalProductos:           number;
+  totalSinMovimiento:       number;
+  capitalInmovilizadoTotal: number;
+  items:                    ItemReporteRotacion[];
+}
+
+export interface ItemReporteFraccionamiento {
+  tenant_id?:              string;
+  operacion_id:            string;
+  producto_origen_id:      string;
+  producto_destino_id:     string;
+  producto_origen_nombre:  string;
+  producto_destino_nombre: string;
+  cantidad_origen:         number;
+  factor_teorico:          number | null;
+  cantidad_teorica:        number | null;
+  cantidad_obtenida:       number;
+  merma:                   number;
+  costo_consumido:         number;
+  costo_unitario_hijo:     number;
+  sobrecosto:              number | null;
+  fraccionado_at:          string;
+}
+
+export type ReporteFraccionamiento = ItemReporteFraccionamiento[];
+
+export interface ItemReporteConsumoProfesional {
+  profesionalId:      string;
+  profesionalNombre:  string;
+  cantidadConsumos:   number;
+  unidadesConsumidas: number;
+  costoTotalInsumos:  number;
+}
+
+export type ReporteConsumoProfesional = ItemReporteConsumoProfesional[];
+
+export interface ItemReporteConsumoEspecie {
+  especieId:          string;
+  especieNombre:      string;
+  cantidadConsumos:   number;
+  unidadesConsumidas: number;
+  costoTotalInsumos:  number;
+}
+
+export type ReporteConsumoEspecie = ItemReporteConsumoEspecie[];
+
+export interface ItemReporteRentabilidad {
+  itemId:          string;
+  itemNombre:      string;
+  tipoItem:        string;
+  cantidadVendida: number;
+  netoTotal:       number;
+  costoTotal:      number;
+  margenBruto:     number;
+  margenPct:       number;
+}
+
+export interface ReporteRentabilidad {
+  totalItemsVendidos: number;
+  totalNeto:          number;
+  totalCosto:         number;
+  totalMargenBruto:   number;
+  margenPromedioPct:  number;
+  items:              ItemReporteRentabilidad[];
+}
+
+export interface ItemReporteVentasUsuario {
+  usuarioId:           string;
+  usuarioNombre:       string;
+  usuarioUsername:     string;
+  cantidadOperaciones: number;
+  subtotalNeto:        number;
+  totalIva:            number;
+  totalDescuentos:     number;
+  totalVentas:         number;
+  ticketPromedio:      number;
+}
+
+export type ReporteVentasUsuario = ItemReporteVentasUsuario[];
+
+export interface ItemReporteVentasSesion {
+  sesionId:             string;
+  cajaId:               string;
+  cajaNombre:           string;
+  estado:               string;
+  aperturaAt:           string;
+  cierreAt:             string | null;
+  usuarioApertura:      string | null;
+  usuarioCierre:        string | null;
+  saldoInicial:         number;
+  saldoTeoricoEfectivo: number | null;
+  efectivoContado:      number | null;
+  diferencia:           number | null;
+  cantidadVentas:       number;
+  totalVentas:          number;
+}
+
+export type ReporteVentasSesion = ItemReporteVentasSesion[];
+
+export interface ItemReporteVentasMedioPago {
+  medioPagoId:           string;
+  medioPagoCodigo:       string;
+  medioPagoNombre:       string;
+  cantidadTransacciones: number;
+  totalRecaudado:        number;
+  porcentajeDelTotal:    number;
+}
+
+export interface ReporteVentasMedioPago {
+  granTotal:          number;
+  totalTransacciones: number;
+  items:              ItemReporteVentasMedioPago[];
+}
+
+export interface ItemReporteMargen {
+  tenant_id?:    string;
+  venta_id:      string;
+  vendido_at:    string;
+  tipo_item:     string;
+  item_id:       string;
+  item_nombre:   string;
+  cantidad:      number;
+  importe_total: number;
+  neto_total:    number;
+  costo_total:   number;
+  margen:        number;
+}
+
+export type ReporteMargen = ItemReporteMargen[];
+
+export interface ItemReporteItemsVendidos {
+  tenant_id?:              string;
+  venta_id:                string;
+  numero_operacion:        number;
+  vendido_at:              string;
+  venta_estado:            string;
+  usuario_id:              string;
+  tipo_item:               string;
+  item_id:                 string;
+  item_nombre:             string;
+  familia_id:              string | null;
+  cantidad:                number;
+  precio_unitario:         number;
+  neto_unitario:           number;
+  iva_unitario:            number;
+  importe_total:           number;
+  costo_unitario_efectivo: number | null;
+}
+
+export type ReporteItemsVendidos = ItemReporteItemsVendidos[];
+
+// ─── 11. Catálogos PostgREST ─────────────────────────────────────────────────
+
+export interface UnidadMedida {
+  id:               string;
+  codigo:           string;
+  nombre:           string;
+  abreviatura:      string;
+  admite_decimales: boolean;
+  escala_decimal:   number;
+}
+
+export interface MedioPago {
+  id:                  string;
+  codigo:              string;
+  nombre:              string;
+  afecta_arqueo:       boolean;
+  requiere_referencia: boolean;
+}
+
+export interface ServicioVendible {
+  id:           string;
+  nombre:       string;
+  precio:       number | null;
+  alicuota_iva: number | null;
+  tipo:         string;
+}
