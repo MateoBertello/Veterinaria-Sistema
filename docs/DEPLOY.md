@@ -179,9 +179,26 @@ se niega contra URLs remotas salvo `SEED_ALLOW_REMOTE=1`). El alta real es:
    (lo valida `requireSuperAdmin` y la función SQL `is_super_admin()`).
 2. **Primer tenant**: logueado como Super Admin, alta por
    `POST /api/v1/admin/tenants` (RPC `crear_tenant`: crea roles, permisos,
-   configuración y módulos según plan) y su usuario admin inicial por los
-   endpoints de `/api/v1/admin/*`.
-3. Lo demás (usuarios, servicios, horarios, clientes) se carga desde la app
+   configuración y módulos según plan).
+3. **Usuario admin inicial del tenant**: `POST /api/v1/admin/tenants/:id/admin`,
+   con `{ email, fullName, rol, password }` (`username` opcional: si no viene se
+   deriva del email). Crea la cuenta en Auth con `app_metadata.tenant_id`, la
+   fila espejo en `usuarios` —y en `doctores` si el rol es `veterinario`— y deja
+   asiento de auditoría `CREATE` en el módulo `users` del tenant. Es idempotente
+   por (tenant, email): repetirlo devuelve `200` con el usuario que ya estaba, en
+   vez de `201`.
+
+   > **No uses el mail de invitación que dispara el alta del tenant.**
+   > `TenantService.crear` llama a `inviteUserByEmail`, que manda el `tenant_id`
+   > a `user_metadata` en vez de `app_metadata` y no crea fila en `usuarios`: el
+   > invitado se autentica pero la API le responde 401. Es un hueco conocido.
+   > Este endpoint es el camino que funciona, y adopta la cuenta de Auth que esa
+   > invitación haya dejado si el email coincide.
+
+   Alternativa de bootstrap, cuando la Edge Function todavía no está desplegada:
+   `scripts/crear-usuario-tenant.mjs`, que hace lo mismo con la service-role key
+   pero **no deja auditoría**.
+4. Lo demás (usuarios, servicios, horarios, clientes) se carga desde la app
    con el admin del tenant.
 
 Para **staging/demo** sí puede usarse el seeder completo (tenant "Veterinaria

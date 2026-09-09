@@ -388,11 +388,11 @@ ningún precio, ningún proveedor y ninguna caja. Todo eso es el paso 6.
 
 ## 3. El usuario administrador de la clínica
 
-> ### Advertencia: el camino por invitación no funciona hoy
+> ### Ignorá el mail de invitación
 >
-> El alta manda automáticamente un mail de invitación al email de contacto, y la
-> respuesta trae `adminInvitado: true`. **Ese mail no alcanza para entrar.**
-> Está verificado contra el sistema corriendo, y falla por tres motivos
+> El alta del paso 2 manda automáticamente un mail de invitación al email de
+> contacto, y la respuesta trae `adminInvitado: true`. **Ese mail no alcanza para
+> entrar.** Está verificado contra el sistema corriendo, y falla por tres motivos
 > independientes:
 >
 > 1. El `tenant_id` termina en la metadata de usuario y no en la de aplicación,
@@ -402,16 +402,67 @@ ningún precio, ningún proveedor y ninguna caja. Todo eso es el paso 6.
 > 3. El rol que se guarda en la invitación no lo lee nadie, y la aplicación no
 >    tiene ninguna pantalla que procese la vuelta del link.
 >
-> Es un hueco conocido y está descrito con su propuesta de arreglo al final de
-> este documento. **Ignorá el mail de invitación y usá el paso 3.1.**
+> El paso 3.1 es el camino que funciona, y además **adopta** la cuenta que esa
+> invitación haya dejado si el email coincide: no hace falta borrarla antes.
 
-### 3.1 Crear el administrador con el script
+### 3.1 Crear el administrador por la API
 
-`scripts/crear-usuario-tenant.mjs` hace exactamente lo mismo que hace la
-aplicación cuando un administrador da de alta a un compañero: crea el usuario de
-Supabase Auth con el `tenant_id` en el lugar correcto y con el email ya
-confirmado, crea la fila en `usuarios` con el rol pedido, y si el rol es
-veterinario crea además la fila en `doctores`. Es idempotente.
+Es el camino principal. Con el token de plataforma del paso 1.4 y el
+identificador de la clínica del paso 2.2:
+
+```bash
+curl -s -X POST \
+  "https://rvcbtcjsvhqchunribwl.supabase.co/functions/v1/api/v1/admin/tenants/$TENANT_ID/admin" \
+  -H "Authorization: Bearer $SA_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{
+        "email": "admin@sanmartin.com",
+        "fullName": "María González",
+        "rol": "admin",
+        "password": "<contraseña inicial, mínimo 8 caracteres>",
+        "username": "admin_sanmartin"
+      }'
+```
+
+| Campo | Obligatorio | Detalle |
+| :--- | :--- | :--- |
+| `email` | sí | Identifica la cuenta. Queda confirmada, sin mail de por medio. |
+| `fullName` | sí | Nombre de la persona, hasta 150 caracteres |
+| `rol` | no | `admin`, `veterinario` o `recepcionista`. Por defecto `admin`. |
+| `password` | sí | Mínimo 8 caracteres. **No vuelve en la respuesta**, así que elegila vos y entregala por el canal que ya usás con el cliente. |
+| `username` | no | Con esto se loguea. Si no lo mandás, se deriva del email y se desambigua dentro de la clínica. |
+
+La contraseña se pide en vez de generarse a propósito: una contraseña generada
+tendría que volver en la respuesta, y ahí queda en el scrollback de la terminal y
+en el historial del cliente HTTP, un rastro que nadie borra.
+
+Qué hace, en una sola operación: crea la cuenta en Supabase Auth con el
+`tenant_id` en el lugar que la API realmente lee, crea la fila en `usuarios` con
+el rol pedido, crea la fila en `doctores` si el rol es veterinario, y deja el
+asiento de auditoría en el módulo `users` de la clínica.
+
+**Sale bien:** un `201` con el usuario, incluido el `username` que quedó.
+
+**Sale mal:**
+
+- `200` en vez de `201` — el usuario ya existía en esa clínica. Es la respuesta
+  idempotente y devuelve la fila que ya estaba, sin pisarle la contraseña ni el
+  nombre de usuario. Repetir la llamada es seguro.
+- `404 TENANT_NOT_FOUND` — el identificador de la clínica está mal. Revisalo con
+  `GET /api/v1/admin/tenants`.
+- `422 VALIDATION_ERROR` con "La clínica no tiene el rol" — la clínica no pasó
+  por `crear_tenant`. Es el síntoma de un alta hecha por SQL directo. Volvé al
+  paso 2.
+- `409 DUPLICATE_USER` con "ya pertenece a otra cuenta" — ese email ya es de otra
+  clínica o de un Super Admin. Usá otro email.
+- `403` — tu token no acredita `platform_role`. Volvé al paso 1.4.
+
+### 3.1b Alternativa de bootstrap: el script
+
+`scripts/crear-usuario-tenant.mjs` hace lo mismo escribiendo con la service-role
+key, sin pasar por la API. Sirve en dos situaciones: cuando la Edge Function
+todavía no está desplegada, y cuando la API no responde y hace falta entrar
+igual.
 
 ```bash
 cd ~/Veterinaria-Sistema
@@ -429,19 +480,10 @@ node scripts/crear-usuario-tenant.mjs
 **Sale bien:** el script imprime que creó el usuario de Auth, la fila en
 `usuarios`, y cierra con el nombre de usuario para loguearse.
 
-**Sale mal:**
-
-- `No encontré el rol 'admin' del tenant` — la clínica no pasó por
-  `crear_tenant`. Es el síntoma de un alta hecha por SQL directo. Revisá el
-  paso 2.
-- `El username o el email ya está tomado en este tenant` — elegí otro nombre de
-  usuario.
-- Falta alguna variable — el script te dice cuál.
-
-> **Limitación conocida:** el script escribe con la service role key, así que
-> **no deja asiento en la auditoría**. El alta del administrador inicial no va a
-> figurar en el registro de auditoría de la clínica. Los usuarios que ese
-> administrador cree después, desde la aplicación, sí quedan auditados.
+> **Por qué no es el camino principal:** el script **no deja asiento en la
+> auditoría**. El alta del administrador no figuraría en el registro de la
+> clínica. Con el endpoint del paso 3.1 sí figura. Usá el script solo cuando el
+> endpoint no esté disponible.
 
 ### 3.2 La primera entrada
 
@@ -466,10 +508,14 @@ Pasale al cliente:
 
 ### 3.3 Si el cliente pierde la contraseña
 
-Tiene dos caminos. La recuperación por email desde la pantalla de login funciona
-si el envío de mails del proyecto está configurado. Si no, re-corré
-`crear-usuario-tenant.mjs` con el mismo email y una contraseña nueva: al ser
-idempotente, la resetea sin duplicar nada.
+La recuperación por email desde la pantalla de login funciona si el envío de
+mails del proyecto está configurado.
+
+Si no, el reseteo lo hace el script: `crear-usuario-tenant.mjs` con el mismo
+email y una contraseña nueva la resetea sin duplicar nada. **El endpoint del paso
+3.1 no sirve para esto**: al ser idempotente devuelve el usuario que ya está y no
+le toca la contraseña, que es justamente lo que se quiere de un alta pero no lo
+que se necesita de un reseteo.
 
 ---
 
@@ -668,27 +714,32 @@ revisalo con alguien y hacé un backup antes.
 
 Cosas que este runbook rodea porque hoy no funcionan.
 
-### La invitación del administrador no sirve para entrar
+### La invitación por email quedó redundante
 
-Descrito en el paso 3. Se rodea con `scripts/crear-usuario-tenant.mjs`, que
-funciona pero no deja auditoría.
+El hueco original —no había forma de crear el administrador de una clínica por la
+API— **está cerrado**: es el endpoint del paso 3.1, que además deja el asiento de
+auditoría que el script no dejaba.
 
-**Propuesta de arreglo.** Un endpoint nuevo, `POST /api/v1/admin/tenants/:id/admin`,
-protegido por Super Admin, con Controller y Service como manda la arquitectura del
-proyecto. El Service haría lo que hoy hace el script — usuario de Auth con el
-`tenant_id` en la metadata de aplicación, fila en `usuarios` con el rol admin — y
-además dejaría el asiento de auditoría que el script no deja. Con eso, el alta
-completa de una clínica se haría con dos llamadas y ningún script.
+Lo que queda abierto es el flujo de invitación por mail, que sigue roto y ahora
+además sobra. Su razón de ser era que el administrador eligiera su propia
+contraseña sin que el operador la conociera, y eso hoy lo cubre la recuperación
+de contraseña que ya existe: se da el alta con una contraseña inicial y el
+cliente la cambia en su primera entrada.
 
-El arreglo alternativo, hacer que la invitación por mail funcione de verdad,
-es bastante más caro: hay que mover el `tenant_id` a la metadata de aplicación,
-crear la fila en `usuarios` al aceptar, construir una pantalla de aceptación en
-el front y configurar el redirect. Y deja el alta dependiendo de que el cliente
-lea un mail.
+Mientras siga ahí, cada alta de clínica deja una cuenta huérfana en Supabase
+Auth: creada por la invitación, sin fila en `usuarios`, invisible para las
+herramientas que recorren tablas de negocio. Los tests de integración tienen que
+borrarla a mano por su email para que no se acumule corrida tras corrida.
 
-Mientras tanto, `docs/DEPLOY.md` § 5 dice que el usuario administrador inicial se
-crea "por los endpoints de `/api/v1/admin/*`". **Eso no es cierto**: no existe tal
-endpoint. Si arreglás lo de arriba, esa frase pasa a ser verdad; si no, corregila.
+Las opciones, de menor a mayor costo:
+
+1. **Sacar la invitación del alta.** `TenantService.crear` deja de llamar a
+   `inviteUserByEmail`; la columna `admin_invitado` pasa a reflejar si la clínica
+   ya tiene administrador. Deja de generar cuentas huérfanas.
+2. **Dejarla como está** y convivir con las huérfanas, documentado.
+3. **Arreglarla de verdad**: mover el `tenant_id` a la metadata de aplicación,
+   crear la fila en `usuarios` al aceptar, construir la pantalla de aceptación y
+   configurar el redirect. Es el más caro y duplica lo que el endpoint ya hace.
 
 ### El módulo comercial no está en producción
 

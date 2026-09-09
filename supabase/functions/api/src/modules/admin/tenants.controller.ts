@@ -4,6 +4,7 @@ import {
   CrearTenantSchema,
   EditarTenantSchema,
   CambiarEstadoSchema,
+  CrearAdminTenantSchema,
   ListarTenantsQuerySchema,
 } from "./tenants.schemas.ts";
 import { DomainError, ErrorCode } from "../../shared/errors.ts";
@@ -104,6 +105,38 @@ tenantsRouter.patch("/:id/estado", async (c) => {
 tenantsRouter.post("/:id/invitar-admin", async (c) => {
   const tenant = await TenantService.invitarAdmin(c.req.param("id"));
   return c.json(ok(tenant), 200);
+});
+
+// ── POST /admin/tenants/:id/admin (usuario inicial de la clínica) ───────────────
+// El tenant destino sale del `:id` de la ruta y de ningún otro lado: un
+// `tenantId` en el body no lo redirige (el schema lo descarta).
+tenantsRouter.post("/:id/admin", async (c) => {
+  const body   = await c.req.json().catch(() => ({}));
+  const parsed = CrearAdminTenantSchema.safeParse(body);
+
+  if (!parsed.success) {
+    throw new DomainError(
+      ErrorCode.VALIDATION_ERROR,
+      422,
+      "Datos de administrador inválidos",
+      parsed.error.issues ?? [],
+    );
+  }
+
+  // El asiento de auditoría se etiqueta con el email del token YA VERIFICADO
+  // (requireSuperAdmin), nunca con algo que mande el cliente.
+  const { usuario, created } = await TenantService.crearAdmin(
+    c.req.param("id"),
+    parsed.data,
+    {
+      superAdminId:   c.get("superAdminId"),
+      superAdminName: c.get("superAdminEmail") ?? undefined,
+    },
+  );
+
+  // 201 si se creó, 200 si ya existía: el alta es idempotente y quien la corre
+  // dos veces tiene que poder distinguir un caso del otro.
+  return c.json(ok(usuario), created ? 201 : 200);
 });
 
 // ── GET /admin/tenants/:id/modulos (estado de módulos del tenant) ────────────────

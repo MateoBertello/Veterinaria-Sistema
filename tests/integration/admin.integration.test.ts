@@ -96,6 +96,7 @@ afterAll(async () => {
   // en `usuarios` — `limpiarTenant` recorre tablas de negocio y no la ve. Sin esto
   // sobrevive a cada corrida. Es la misma clase de huérfana de Auth que motivó H3.
   await borrarUsuarioAuthPorEmail("alta@test.com");
+  await borrarUsuarioAuthPorEmail("alta-admin@test.com");
 });
 
 // ─── Aislamiento ────────────────────────────────────────────────────────────
@@ -199,5 +200,216 @@ describeIntegration("RN-SA4: aislamiento de datos de negocio", () => {
       expect(t).not.toHaveProperty("mascotas");
       expect(t).toHaveProperty("cuitRut");
     }
+  });
+});
+
+// ─── RN-SA6 ───────────────────────────────────────────────────────────────────
+
+/**
+ * Alta del usuario administrador inicial de una clínica
+ * (`POST /admin/tenants/:id/admin`).
+ *
+ * El test que sostiene todo esto es el del camino feliz, y NO por el 201: por el
+ * par login + llamada a la API del tenant. Ese par es exactamente lo que la
+ * invitación por email NO logra hoy — deja el `tenant_id` en `user_metadata`, el
+ * invitado se autentica y después toda la API le responde 401. Si alguien mueve
+ * el claim al lugar equivocado, el 201 sigue saliendo y el login sigue saliendo:
+ * lo único que se pone rojo es el assert de `/modulos-habilitados`.
+ */
+describeIntegration("RN-SA6: alta del usuario administrador de la clínica", () => {
+  const EMAIL_ADMIN = "admin.inicial@alta-test.com";
+  const PASS_ADMIN  = "AdminInicial123!";
+  const USER_ADMIN  = "admin_inicial";
+
+  let tenantAdminId = "";
+  let adminUserId   = "";
+
+  beforeAll(async () => {
+    if (skipIfNoCredentials() || !jwtSuperAdmin) return;
+
+    const res = await callApp("/admin/tenants", {
+      method: "POST", jwt: jwtSuperAdmin,
+      body: {
+        nombre:        "Clínica Admin Inicial",
+        cuitRut:       `30-${Date.now().toString().slice(-8)}-4`,
+        emailContacto: "alta-admin@test.com",
+        plan:          "premium",
+      },
+    });
+    const body = await res.json() as { data?: { id: string } };
+    tenantAdminId = body.data?.id ?? "";
+    if (tenantAdminId) createdTenantIds.push(tenantAdminId);
+  }, 30_000);
+
+  it("RN-SA6: el admin creado se loguea Y usa la API del tenant sin 401", async () => {
+    if (skipIfNoCredentials() || !jwtSuperAdmin || !tenantAdminId) return;
+
+    const res = await callApp(`/admin/tenants/${tenantAdminId}/admin`, {
+      method: "POST", jwt: jwtSuperAdmin,
+      body: {
+        email:    EMAIL_ADMIN,
+        fullName: "Admin Inicial",
+        rol:      "admin",
+        password: PASS_ADMIN,
+        username: USER_ADMIN,
+      },
+    });
+    const body = await res.json() as {
+      success: boolean;
+      data: Record<string, unknown>;
+    };
+
+    expect(res.status).toBe(201);
+    expect(body.success).toBe(true);
+    expect(body.data["username"]).toBe(USER_ADMIN);
+    expect(body.data["tenantId"]).toBe(tenantAdminId);
+    // RN-S1: la contraseña no vuelve por la respuesta. La eligió quien dio el alta.
+    expect(body.data).not.toHaveProperty("password");
+
+    adminUserId = body.data["id"] as string;
+
+    // (a) Entra por el login de clínica, que resuelve el identificador contra
+    //     `usuarios`. Sin la fila espejo esto ya daría 401.
+    const login = await callApp("/auth/login", {
+      method: "POST", body: { username: USER_ADMIN, password: PASS_ADMIN },
+    });
+    expect(login.status).toBe(200);
+
+    const loginBody = await login.json() as { data: { token: string } };
+    const jwtAdmin  = loginBody.data.token;
+    expect(jwtAdmin).toBeTruthy();
+
+    // (b) Y su token sirve contra la API de SU clínica. ESTE es el assert que la
+    //     invitación por email no pasa: con el tenant en `user_metadata`,
+    //     `tenantContext` no lo encuentra y responde 401.
+    const datos = await callApp("/modulos-habilitados", { jwt: jwtAdmin });
+    expect(datos.status).not.toBe(401);
+    expect(datos.status).toBe(200);
+  }, 30_000);
+
+  it("RN-SA6: sin platform_role → 403 FORBIDDEN, no crea nada", async () => {
+    if (skipIfNoCredentials() || !jwtTenantNormal || !tenantAdminId) return;
+
+    const res = await callApp(`/admin/tenants/${tenantAdminId}/admin`, {
+      method: "POST", jwt: jwtTenantNormal,
+      body: {
+        email: "colado@alta-test.com", fullName: "Colado",
+        rol: "admin", password: "Colado12345!",
+      },
+    });
+    const body = await res.json() as { error: { code: string } };
+    expect(res.status).toBe(403);
+    expect(body.error.code).toBe("FORBIDDEN");
+
+    const { count } = await serviceDb
+      .from("usuarios").select("id", { count: "exact", head: true })
+      .eq("email_ci", "colado@alta-test.com");
+    expect(count).toBe(0);
+  });
+
+  it("RN-SA6: llamarlo dos veces no duplica (200 en vez de 201)", async () => {
+    if (skipIfNoCredentials() || !jwtSuperAdmin || !tenantAdminId) return;
+
+    const res = await callApp(`/admin/tenants/${tenantAdminId}/admin`, {
+      method: "POST", jwt: jwtSuperAdmin,
+      body: {
+        email:    EMAIL_ADMIN,
+        fullName: "Admin Inicial Repetido",
+        rol:      "admin",
+        password: "OtraPassword123!",
+        username: "otro_username",
+      },
+    });
+    const body = await res.json() as { data: Record<string, unknown> };
+
+    expect(res.status).toBe(200);
+    expect(body.data["id"]).toBe(adminUserId);
+    // Devuelve la fila que YA estaba: no pisa el username con el del reintento.
+    expect(body.data["username"]).toBe(USER_ADMIN);
+
+    const { count } = await serviceDb
+      .from("usuarios").select("id", { count: "exact", head: true })
+      .eq("tenant_id", tenantAdminId).eq("email_ci", EMAIL_ADMIN);
+    expect(count).toBe(1);
+  }, 30_000);
+
+  it("RN-SA6: deja asiento de auditoría en el módulo 'users', y uno solo", async () => {
+    if (skipIfNoCredentials() || !tenantAdminId || !adminUserId) return;
+
+    const { data } = await serviceDb
+      .from("registros_auditoria")
+      .select("tenant_id, module, action, entity_id, user_role")
+      .eq("tenant_id", tenantAdminId)
+      .eq("module", "users")
+      .eq("action", "CREATE")
+      .eq("entity_id", adminUserId);
+
+    const asientos = (data ?? []) as Array<Record<string, unknown>>;
+    // Uno solo: el reintento idempotente no creó nada, así que no audita nada.
+    expect(asientos).toHaveLength(1);
+    expect(asientos[0]?.["user_role"]).toBe("super_admin");
+    // El asiento vive en el registro DE LA CLÍNICA, no en el de plataforma.
+    expect(asientos[0]?.["tenant_id"]).toBe(tenantAdminId);
+  });
+
+  it("RN-SA6: un tenantId en el body no redirige el alta a otra clínica", async () => {
+    if (skipIfNoCredentials() || !jwtSuperAdmin || !tenantAdminId || !tenantNormalId) return;
+
+    const email = "cross.tenant@alta-test.com";
+    const res = await callApp(`/admin/tenants/${tenantAdminId}/admin`, {
+      method: "POST", jwt: jwtSuperAdmin,
+      body: {
+        email, fullName: "Cross Tenant", rol: "recepcionista",
+        password: "CrossTenant123!",
+        // Intento de redirigir la escritura a la otra clínica.
+        tenantId: tenantNormalId,
+        tenant_id: tenantNormalId,
+      },
+    });
+    expect(res.status).toBe(201);
+
+    const body = await res.json() as { data: Record<string, unknown> };
+    expect(body.data["tenantId"]).toBe(tenantAdminId);
+
+    // Y en la base: la fila quedó en la clínica de la URL, no en la del body.
+    const { data: fila } = await serviceDb
+      .from("usuarios").select("tenant_id").eq("email_ci", email).maybeSingle();
+    expect((fila as { tenant_id: string } | null)?.tenant_id).toBe(tenantAdminId);
+
+    const { count } = await serviceDb
+      .from("usuarios").select("id", { count: "exact", head: true })
+      .eq("tenant_id", tenantNormalId).eq("email_ci", email);
+    expect(count).toBe(0);
+  }, 30_000);
+
+  it("RN-SA6: un usuario de una clínica no puede crear el admin de otra → 403", async () => {
+    if (skipIfNoCredentials() || !jwtTenantNormal || !tenantAdminId) return;
+
+    // jwtTenantNormal es admin de `tenantNormalId` y apunta a la OTRA clínica.
+    const res = await callApp(`/admin/tenants/${tenantAdminId}/admin`, {
+      method: "POST", jwt: jwtTenantNormal,
+      body: {
+        email: "ajeno@alta-test.com", fullName: "Ajeno",
+        rol: "admin", password: "Ajeno1234567!",
+      },
+    });
+    const body = await res.json() as { error: { code: string } };
+    expect(res.status).toBe(403);
+    expect(body.error.code).toBe("FORBIDDEN");
+  });
+
+  it("RN-SA6: tenant inexistente → 404 TENANT_NOT_FOUND", async () => {
+    if (skipIfNoCredentials() || !jwtSuperAdmin) return;
+
+    const res = await callApp("/admin/tenants/00000000-0000-0000-0000-0000000000ff/admin", {
+      method: "POST", jwt: jwtSuperAdmin,
+      body: {
+        email: "fantasma@alta-test.com", fullName: "Fantasma",
+        rol: "admin", password: "Fantasma1234!",
+      },
+    });
+    const body = await res.json() as { error: { code: string } };
+    expect(res.status).toBe(404);
+    expect(body.error.code).toBe("TENANT_NOT_FOUND");
   });
 });
