@@ -122,11 +122,39 @@ else
     | sed -n 's/^\([0-9]\{14\}\)_.*\.sql$/\1/p' | sort | tail -1)"
   [[ -n "$LOCAL_ULTIMA" ]] || morir "No encontré migraciones en el commit $SHA."
 
-  # La 2ª columna de `migration list` es la versión aplicada en el remoto; las
-  # pendientes la traen vacía. Se queda con la mayor.
-  REMOTA_ULTIMA="$(supabase migration list --linked 2>/dev/null \
-    | awk -F'|' '{ gsub(/[`[:space:]]/, "", $2); if ($2 ~ /^[0-9]{14}$/) print $2 }' \
-    | sort | tail -1)" || true
+  # De qué versión aplicada en el remoto se queda: la mayor.
+  #
+  # `migration list` cambió de formato. Las versiones viejas del CLI imprimían
+  # una tabla con pipes y la 2ª columna era la versión remota; las nuevas (≥2.x)
+  # emiten JSON {"migrations":[{"local":..,"remote":..}]}. Se aceptan las dos:
+  # con el parser viejo solo, contra un CLI nuevo la lista sale vacía y la guarda
+  # aborta TODO deploy con "no pude leer el estado del remoto" — falla cerrada,
+  # que es la dirección correcta, pero por la razón equivocada.
+  SALIDA_LIST="$(supabase migration list --linked 2>/dev/null)" || true
+
+  REMOTA_ULTIMA="$(printf '%s' "$SALIDA_LIST" | python3 -c '
+import json, re, sys
+raw = sys.stdin.read()
+vers = []
+linea = next((l for l in raw.splitlines() if l.strip().startswith("{\"migrations\"")), None)
+if linea:
+    vers = [m["remote"] for m in json.loads(linea)["migrations"] if m.get("remote")]
+else:
+    # Formato tabla legado: "| local | remote | time |". El pipe inicial mete
+    # una celda vacía al frente, así que se descartan los extremos vacíos y la
+    # versión remota queda SIEMPRE en la posición 1.
+    for l in raw.splitlines():
+        col = [c for c in l.split("|")]
+        if col and not col[0].strip():
+            col = col[1:]
+        if col and not col[-1].strip():
+            col = col[:-1]
+        if len(col) >= 2:
+            v = re.sub(r"[`\s]", "", col[1])
+            if re.fullmatch(r"[0-9]{14}", v):
+                vers.append(v)
+print(max(vers) if vers else "")
+' 2>/dev/null)" || true
 
   if [[ -z "$REMOTA_ULTIMA" ]]; then
     morir "No pude leer el estado del remoto ('supabase migration list --linked').
