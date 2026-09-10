@@ -393,4 +393,29 @@ describe("CajaPage (F3·T1)", () => {
     expect(callArg).not.toHaveProperty("tenantId");
     expect(callArg).not.toHaveProperty("tenant_id");
   });
+
+  it("Optimización: la sesión se muestra de inmediato sin bloquearse por la carga del historial", async () => {
+    // Historial que nunca resuelve de inmediato (simula latencia o fondo)
+    let resolverHistorial: (val: any) => void = () => {};
+    const promesaHistorialLenta = new Promise((resolve) => {
+      resolverHistorial = resolve;
+    });
+    vi.spyOn(cajaApi, "listarSesiones").mockImplementation(() => promesaHistorialLenta as any);
+    vi.spyOn(cajaApi, "sesionActual").mockResolvedValue(MOCK_SESION_ABIERTA);
+    vi.spyOn(cajaApi, "obtenerSesion").mockResolvedValue(MOCK_SESION_ABIERTA);
+    vi.spyOn(cajaApi, "resumenSesion").mockResolvedValue(MOCK_RESUMEN);
+
+    render(
+      <MemoryRouter>
+        <CajaPage />
+      </MemoryRouter>,
+    );
+
+    // La sesión abierta se muestra aunque el historial siga en vuelo
+    expect(await screen.findByRole("button", { name: /cerrar caja/i })).toBeInTheDocument();
+    expect(screen.getByText(/resumen en vivo/i)).toBeInTheDocument();
+
+    // Ahora resolvemos el historial
+    resolverHistorial(MOCK_HISTORIAL);
+  });
 });

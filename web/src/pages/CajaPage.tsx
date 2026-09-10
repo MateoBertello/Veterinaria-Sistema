@@ -69,6 +69,8 @@ export function CajaPage() {
   const [resumen, setResumen] = useState<ResumenSesion | null>(null);
   const [historial, setHistorial] = useState<SesionCaja[]>([]);
   const [historialMeta, setHistorialMeta] = useState<ApiMeta | null>(null);
+  const [loadingHistorial, setLoadingHistorial] = useState(true);
+  const [detalleLoading, setDetalleLoading] = useState(false);
 
   // Formulario de apertura
   const [cajaSeleccionada, setCajaSeleccionada] = useState<string>("");
@@ -89,12 +91,27 @@ export function CajaPage() {
   // Carga inicial de datos
   const cargarDatos = useCallback(async () => {
     setLoading(true);
+    setLoadingHistorial(true);
+
+    // 1. Cargar historial de sesiones en segundo plano (debajo del pliegue)
+    const historialPromise = listarSesiones({ page: 1, limit: 10 })
+      .then((histRes) => {
+        setHistorial(histRes.items);
+        setHistorialMeta(histRes.meta);
+      })
+      .catch((err) => {
+        console.error("Error al cargar historial de sesiones:", err);
+      })
+      .finally(() => {
+        setLoadingHistorial(false);
+      });
+
+    // 2. Cargar cajas, medios de pago y sesión actual en paralelo
     try {
-      const [cajasRes, mediosRes, sesionAct, histRes] = await Promise.all([
+      const [cajasRes, mediosRes, sesionAct] = await Promise.all([
         listarCajas(),
         listarMediosPago(),
         sesionActual(),
-        listarSesiones({ page: 1, limit: 10 }),
       ]);
 
       setCajas(cajasRes);
@@ -107,25 +124,36 @@ export function CajaPage() {
         setMovMedioPagoId(mediosRes[0].id);
       }
 
-      setHistorial(histRes.items);
-      setHistorialMeta(histRes.meta);
-
       if (sesionAct && sesionAct.estado === "abierta") {
-        const [detalle, resu] = await Promise.all([
-          obtenerSesion(sesionAct.id),
-          resumenSesion(sesionAct.id),
-        ]);
-        setSesion(detalle);
-        setResumen(resu);
+        // Renderizar inmediatamente la cabecera y saldos iniciales de la sesión abierta (~380 ms)
+        setSesion(sesionAct);
+        setLoading(false);
+
+        // Enriquecer en paralelo con detalle de movimientos y resumen por medio de pago
+        setDetalleLoading(true);
+        try {
+          const [detalle, resu] = await Promise.all([
+            obtenerSesion(sesionAct.id),
+            resumenSesion(sesionAct.id),
+          ]);
+          setSesion(detalle);
+          setResumen(resu);
+        } catch (err) {
+          console.error("Error al cargar detalle o resumen de sesión:", err);
+        } finally {
+          setDetalleLoading(false);
+        }
       } else {
         setSesion(null);
         setResumen(null);
+        setLoading(false);
       }
     } catch (err) {
       console.error("Error al cargar datos de caja:", err);
-    } finally {
       setLoading(false);
     }
+
+    await historialPromise;
   }, []);
 
   useEffect(() => {
@@ -565,7 +593,17 @@ export function CajaPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {historial.length > 0 ? (
+                  {loadingHistorial && historial.length === 0 ? (
+                    Array.from({ length: 3 }).map((_, i) => (
+                      <TableRow key={i}>
+                        {Array.from({ length: 8 }).map((__, j) => (
+                          <TableCell key={j}>
+                            <Skeleton className="h-5 w-full" />
+                          </TableCell>
+                        ))}
+                      </TableRow>
+                    ))
+                  ) : historial.length > 0 ? (
                     historial.map((s) => (
                       <TableRow key={s.id}>
                         <TableCell className="font-medium">{s.cajaNombre || "Caja"}</TableCell>
