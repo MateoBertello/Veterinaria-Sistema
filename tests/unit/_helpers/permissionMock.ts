@@ -46,9 +46,20 @@ export function makeJwtAlgNone(payload: object): string {
   return `${encode({ alg: "none", typ: "JWT" })}.${encode(payload)}.`;
 }
 
+/**
+ * Tipo de guard que produjo cada resultado encolado.
+ *
+ * Existe porque `requireActiveTenant` y `requirePermission` dejaron de hacer una
+ * consulta cada uno: ahora comparten UNA sola (ver middleware/accessSnapshot.ts).
+ * Los tests siguen declarando qué responde cada guard —que es lo legible— y este
+ * helper los combina en la única respuesta que la cadena va a consumir.
+ */
+type TipoResultado = "tenant" | "modulo" | "permiso";
+
 interface QueryResult {
-  data: unknown;
-  error: unknown;
+  data:   unknown;
+  error:  unknown;
+  __tipo?: TipoResultado;
 }
 
 interface ChainDb {
@@ -68,12 +79,139 @@ function buildChain(): ChainDb {
 }
 
 /**
- * Encola, en orden, las respuestas de `single()` que consumirá la cadena de
- * middleware montada delante del router (requireActiveTenant, requireModule,
- * requirePermission consultan la DB en ese orden y cada uno llama `single()`
- * una vez). Usar junto con `tenantActiveResult`/`moduleEnabledResult`/`permissionResult`.
+ * Fila que devuelve la consulta consolidada de `accessSnapshot`: el tenant con
+ * su usuario embebido. Combina lo que antes eran dos respuestas separadas.
+ */
+function consolidar(tenant?: QueryResult, permiso?: QueryResult): QueryResult {
+  // Tenant inexistente: la consulta no devuelve fila y el guard corta con
+  // TENANT_NOT_FOUND antes de mirar al usuario.
+  if (tenant && tenant.data === null) {
+    return { data: null, error: tenant.error };
+  }
+
+  // Sin resultado de tenant encolado, la cadena bajo prueba no monta el guard
+  // de tenant: se asume un tenant existente y activo para no interferir.
+  const activo = tenant ? (tenant.data as { activo: boolean }).activo : true;
+
+  let usuarios: unknown[];
+  if (!permiso) {
+    // Cadena sin requirePermission: el usuario existe y está activo, pero sus
+    // permisos no se declararon porque nadie los va a mirar.
+    usuarios = [{ active: true, roles: { rol_permiso: [] } }];
+  } else if (permiso.data === null) {
+    // `permissionResult(null)` = usuario inexistente o inactivo: el embed no
+    // trae fila de usuario.
+    usuarios = [];
+  } else {
+    usuarios = [{
+      active: true,
+      roles:  (permiso.data as { roles: unknown }).roles,
+    }];
+  }
+
+  return { data: { activo, usuarios }, error: null };
+}
+
+
+/**
+ * Funde varios `permissionResult` en uno.
+ *
+ * Una cadena puede apilar dos guards de permiso (uno compartido por el router y
+ * otro propio de la ruta) y los tests declaraban un resultado por guard, porque
+ * cada uno consultaba por su cuenta. Con la consulta consolidada hay UN usuario
+ * con UN juego de permisos, así que lo que corresponde es la unión: el usuario
+ * tiene todo lo declarado, y cada guard verifica contra ese mismo juego.
+ */
+function unirPermisos(permisos: QueryResult[]): QueryResult | undefined {
+  if (permisos.length === 0) return undefined;
+
+  // Un `permissionResult(null)` (usuario inexistente o inactivo) manda: no hay
+  // fila de usuario que unir.
+  if (permisos.some((r) => r.data === null)) return permisos[0];
+
+  const nombres = new Set<string>();
+  for (const r of permisos) {
+    const fila = r.data as { roles: { rol_permiso: Array<{ permisos: { name: string } }> } };
+    for (const rp of fila.roles.rol_permiso) nombres.add(rp.permisos.name);
+  }
+
+  return {
+    data: {
+      rol_id: "rol-1",
+      roles: { rol_permiso: [...nombres].map((name) => ({ permisos: { name } })) },
+    },
+    error:  null,
+    __tipo: "permiso",
+  };
+}
+
+/**
+ * Encola, en orden, las respuestas que consumirá la cadena de middleware montada
+ * delante del router.
+ *
+ * Los tests siguen pasando un resultado por guard —`tenantActiveResult`,
+ * `moduleEnabledResult`, `permissionResult`— pero la cadena real hace menos
+ * viajes que guards: el tenant y los permisos salen de UNA consulta consolidada
+ * que corre primero, y `requireModule` conserva la suya después.
  */
 export function mockDbSequence(
+  mockGetDb: ReturnType<typeof vi.fn>,
+  results: QueryResult[],
+): ChainDb {
+  const db = buildChain();
+
+  const tenant   = results.find((r) => r.__tipo === "tenant");
+  const permisos = results.filter((r) => r.__tipo === "permiso");
+  const resto    = results.filter((r) => r.__tipo !== "tenant" && r.__tipo !== "permiso");
+
+  const secuencia = (tenant || permisos.length > 0)
+    ? [consolidar(tenant, unirPermisos(permisos)), ...resto]
+    : resto;
+
+  for (const r of secuencia) db.single.mockResolvedValueOnce(r);
+  mockGetDb.mockReturnValue(db as never);
+  return db;
+}
+
+/** Resultado para el guard requireActiveTenant (tenant activo). */
+export function tenantActiveResult(activo = true): QueryResult {
+  return { data: { activo }, error: null, __tipo: "tenant" };
+}
+
+/** Resultado para requireModule. */
+export function moduleEnabledResult(enabled: boolean): QueryResult {
+  return enabled
+    ? { data: { habilitado: true }, error: null, __tipo: "modulo" }
+    : { data: null, error: { message: "not found" }, __tipo: "modulo" };
+}
+
+/**
+ * Resultado para requirePermission: `permissions: null` simula usuario
+ * inexistente/inactivo; un array simula los permisos que trae el rol del
+ * usuario vía `roles.rol_permiso[].permisos.name`.
+ */
+export function permissionResult(permissions: string[] | null): QueryResult {
+  if (permissions === null) {
+    return { data: null, error: { message: "not found" }, __tipo: "permiso" };
+  }
+  return {
+    data: {
+      rol_id: "rol-1",
+      roles: { rol_permiso: permissions.map((name) => ({ permisos: { name } })) },
+    },
+    error:  null,
+    __tipo: "permiso",
+  };
+}
+
+/**
+ * Encola respuestas TAL CUAL, sin consolidar.
+ *
+ * Para lo que consulta la base por fuera de la cadena de middleware y por lo
+ * tanto conserva su propia forma de fila: hoy, `getUserPermissions`, que lo
+ * llaman los Services (no ven el contexto de Hono y no pueden usar el snapshot).
+ */
+export function mockDbSequenceRaw(
   mockGetDb: ReturnType<typeof vi.fn>,
   results: QueryResult[],
 ): ChainDb {
@@ -81,34 +219,4 @@ export function mockDbSequence(
   for (const r of results) db.single.mockResolvedValueOnce(r);
   mockGetDb.mockReturnValue(db as never);
   return db;
-}
-
-/** Resultado de `single()` para el guard requireActiveTenant (tenant activo). */
-export function tenantActiveResult(activo = true): QueryResult {
-  return activo
-    ? { data: { activo: true }, error: null }
-    : { data: { activo: false }, error: null };
-}
-
-/** Resultado de `single()` para requireModule. */
-export function moduleEnabledResult(enabled: boolean): QueryResult {
-  return enabled
-    ? { data: { habilitado: true }, error: null }
-    : { data: null, error: { message: "not found" } };
-}
-
-/**
- * Resultado de `single()` para requirePermission: `permissions: null` simula
- * usuario inexistente/inactivo; un array simula los permisos que trae el rol
- * del usuario vía `roles.rol_permiso[].permisos.name`.
- */
-export function permissionResult(permissions: string[] | null): QueryResult {
-  if (permissions === null) return { data: null, error: { message: "not found" } };
-  return {
-    data: {
-      rol_id: "rol-1",
-      roles: { rol_permiso: permissions.map((name) => ({ permisos: { name } })) },
-    },
-    error: null,
-  };
 }

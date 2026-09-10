@@ -1,7 +1,7 @@
 import type { Context, Next } from "hono";
 import { DomainError, ErrorCode } from "../shared/errors.ts";
 import { getDb } from "../shared/db.ts";
-import { getTenantContext } from "./tenantContext.ts";
+import { getAccessSnapshot } from "./accessSnapshot.ts";
 
 declare module "hono" {
   interface ContextVariableMap {
@@ -20,14 +20,17 @@ const PERMISOS_SELECT = `
 `;
 
 /**
- * Permisos efectivos del usuario autenticado, en UNA sola consulta
+ * Permisos efectivos de un usuario, en UNA sola consulta
  * (usuarios → roles → rol_permiso → permisos vía resource embedding).
+ *
+ * Sirve a los Services, que no ven el contexto de Hono y por eso no pueden usar
+ * el snapshot por request. Dentro de un middleware o un controller, preferir
+ * `getAccessSnapshot(c)`: ahí los permisos ya vienen resueltos y consultarlos de
+ * nuevo agrega un round-trip.
  *
  * Devuelve un Set vacío si el usuario no existe o está inactivo: quien decide
  * qué hacer con "sin permisos" es el llamador (el middleware corta con 403; un
  * endpoint de solo lectura que muestra un subconjunto puede degradar sin error).
- * Pensado para casos que necesitan evaluar VARIOS permisos: consultarlos de a
- * uno sería una consulta por permiso (N+1).
  */
 export async function getUserPermissions(
   userId: string,
@@ -51,21 +54,19 @@ export async function getUserPermissions(
  * Middleware factory: verifica que el usuario autenticado tenga el permiso
  * requerido via la cadena usuarios → roles → rol_permiso → permisos.
  * Rechaza con 403 si el permiso no está asignado al rol del usuario.
+ *
+ * No consulta la base por su cuenta: reusa el snapshot que ya resolvió
+ * `requireActiveTenant` en este mismo request (ver accessSnapshot.ts). Si el
+ * guard de tenant no corrió, el snapshot se resuelve acá, igual en una consulta.
  */
 export function requirePermission(permiso: string) {
   return async function (c: Context, next: Next): Promise<Response | void> {
-    const { userId } = getTenantContext(c);
-    const authHeader = c.req.header("Authorization") ?? "";
-    const db = getDb(authHeader);
+    const acceso = await getAccessSnapshot(c);
 
-    const { data, error } = await db
-      .from("usuarios")
-      .select(PERMISOS_SELECT)
-      .eq("id", userId)
-      .eq("active", true)
-      .single();
-
-    if (error || !data) {
+    // Usuario inexistente en el tenant o desactivado: sin acceso, aunque su
+    // token siga vigente. Equivale al `.eq("active", true)` que hacía la
+    // consulta propia de este middleware.
+    if (!acceso.usuarioActivo) {
       throw new DomainError(
         ErrorCode.FORBIDDEN,
         403,
@@ -75,10 +76,9 @@ export function requirePermission(permiso: string) {
 
     // Se deja el set en el contexto: los handlers que además necesitan saber si
     // el usuario administra (p. ej. RN-HOR7) lo reusan sin repetir la consulta.
-    const efectivos = listPermissions(data);
-    c.set("permisos", efectivos);
+    c.set("permisos", acceso.permisos);
 
-    if (!efectivos.has(permiso)) {
+    if (!acceso.permisos.has(permiso)) {
       throw new DomainError(
         ErrorCode.FORBIDDEN,
         403,
@@ -101,10 +101,9 @@ export function requirePermission(permiso: string) {
  */
 export function requireAnyPermission(permisos: string[]) {
   return async function (c: Context, next: Next): Promise<Response | void> {
-    const { userId } = getTenantContext(c);
-    const authHeader = c.req.header("Authorization") ?? "";
+    const acceso = await getAccessSnapshot(c);
 
-    const efectivos = await getUserPermissions(userId, authHeader);
+    const efectivos = acceso.usuarioActivo ? acceso.permisos : new Set<string>();
     c.set("permisos", efectivos);
 
     if (!permisos.some((p) => efectivos.has(p))) {

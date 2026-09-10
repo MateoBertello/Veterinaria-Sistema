@@ -1,7 +1,6 @@
 import type { Context, Next } from "hono";
 import { DomainError, ErrorCode } from "../shared/errors.ts";
-import { getDb } from "../shared/db.ts";
-import { getTenantContext } from "./tenantContext.ts";
+import { getAccessSnapshot } from "./accessSnapshot.ts";
 
 /**
  * Middleware: bloquea a TODO un tenant suspendido (activo=false) en el punto
@@ -15,19 +14,14 @@ import { getTenantContext } from "./tenantContext.ts";
  *
  * Nota: el login y /auth/me NO pasan por este guard, de modo que los usuarios
  * de un tenant suspendido pueden autenticarse y ver el aviso.
+ *
+ * La consulta la resuelve `getAccessSnapshot`, compartida con requirePermission:
+ * los dos guards viajan a la base UNA sola vez por request.
  */
 export async function requireActiveTenant(c: Context, next: Next): Promise<Response | void> {
-  const { tenantId } = getTenantContext(c);
-  const authHeader = c.req.header("Authorization") ?? "";
-  const db = getDb(authHeader);
+  const acceso = await getAccessSnapshot(c);
 
-  const { data: tenant, error } = await db
-    .from("tenants")
-    .select("activo")
-    .eq("id", tenantId)
-    .single();
-
-  if (error || !tenant) {
+  if (!acceso.tenantExiste) {
     throw new DomainError(
       ErrorCode.TENANT_NOT_FOUND,
       404,
@@ -35,7 +29,7 @@ export async function requireActiveTenant(c: Context, next: Next): Promise<Respo
     );
   }
 
-  if (!tenant.activo) {
+  if (!acceso.tenantActivo) {
     throw new DomainError(
       ErrorCode.TENANT_SUSPENDED,
       403,

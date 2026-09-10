@@ -14,7 +14,12 @@ vi.mock("../../supabase/functions/api/src/shared/db.ts", () => ({
 }));
 
 import { getDb } from "../../supabase/functions/api/src/shared/db.ts";
-import { makeJwt, mockDbSequence, permissionResult } from "./_helpers/permissionMock.ts";
+import {
+  makeJwt,
+  mockDbSequence,
+  mockDbSequenceRaw,
+  permissionResult,
+} from "./_helpers/permissionMock.ts";
 
 const mockGetDb = vi.mocked(getDb);
 
@@ -81,7 +86,7 @@ describe("getUserPermissions", () => {
   beforeEach(() => vi.clearAllMocks());
 
   it("RN-S2: devuelve el set de permisos del rol del usuario", async () => {
-    mockDbSequence(mockGetDb, [permissionResult(["manage_clients", "manage_pets"])]);
+    mockDbSequenceRaw(mockGetDb, [permissionResult(["manage_clients", "manage_pets"])]);
 
     const permisos = await getUserPermissions("user-1", "Bearer x");
 
@@ -92,7 +97,7 @@ describe("getUserPermissions", () => {
   });
 
   it("resuelve todos los permisos en UNA sola consulta (sin N+1 por permiso)", async () => {
-    const db = mockDbSequence(mockGetDb, [permissionResult(["manage_clients", "manage_pets"])]);
+    const db = mockDbSequenceRaw(mockGetDb, [permissionResult(["manage_clients", "manage_pets"])]);
 
     await getUserPermissions("user-1", "Bearer x");
 
@@ -102,7 +107,7 @@ describe("getUserPermissions", () => {
   });
 
   it("usuario inexistente o inactivo → set vacío (no lanza)", async () => {
-    mockDbSequence(mockGetDb, [permissionResult(null)]);
+    mockDbSequenceRaw(mockGetDb, [permissionResult(null)]);
 
     const permisos = await getUserPermissions("user-1", "Bearer x");
 
@@ -110,13 +115,13 @@ describe("getUserPermissions", () => {
   });
 
   it("rol sin permisos asignados → set vacío", async () => {
-    mockDbSequence(mockGetDb, [permissionResult([])]);
+    mockDbSequenceRaw(mockGetDb, [permissionResult([])]);
 
     expect((await getUserPermissions("user-1", "Bearer x")).size).toBe(0);
   });
 
   it("solo considera usuarios activos (filtra active=true)", async () => {
-    const db = mockDbSequence(mockGetDb, [permissionResult(["manage_clients"])]);
+    const db = mockDbSequenceRaw(mockGetDb, [permissionResult(["manage_clients"])]);
 
     await getUserPermissions("user-1", "Bearer x");
 
