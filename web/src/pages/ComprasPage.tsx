@@ -42,6 +42,7 @@ import {
   DialogTitle,
 } from "../components/ui/dialog.tsx";
 import { formatFechaISO, hoyISO } from "../lib/fechas.ts";
+import { compraNuevaEsquema, validarFormulario } from "../lib/validaciones/index.ts";
 import { crearCompra, listarCompras } from "../api/comercial/compras.ts";
 import { listarProveedores } from "../api/comercial/proveedores.ts";
 import { formatMoneda } from "./LotesPage.tsx";
@@ -111,6 +112,7 @@ export function ComprasPage() {
   const [nuevaObservacion, setNuevaObservacion] = useState<string>("");
   const [creandoCompra, setCreandoCompra] = useState(false);
   const [errorModal, setErrorModal] = useState<string | null>(null);
+  const [erroresModal, setErroresModal] = useState<Record<string, string>>({});
 
   // Cargar proveedores
   useEffect(() => {
@@ -147,10 +149,29 @@ export function ComprasPage() {
 
   const handleCrearCompra = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!nuevoProveedorId) {
-      setErrorModal("Seleccione un proveedor para la compra");
+    const validacion = validarFormulario(
+      {
+        proveedorId: nuevoProveedorId,
+        fecha: nuevaFecha,
+        comprobanteProveedorTipo: nuevoTipoComp || null,
+        comprobanteProveedorNumero: nuevoNroComp || null,
+        observaciones: nuevaObservacion || null,
+      },
+      compraNuevaEsquema,
+    );
+
+    if (!validacion.valido) {
+      setErroresModal(validacion.errores as Record<string, string>);
+      if (validacion.errores.proveedorId) {
+        setErrorModal(validacion.errores.proveedorId);
+      }
+      const primerError = Object.keys(validacion.errores)[0];
+      const el = document.getElementById(`compra-${primerError}`);
+      el?.focus();
       return;
     }
+
+    setErroresModal({});
     setCreandoCompra(true);
     setErrorModal(null);
     try {
@@ -430,9 +451,23 @@ export function ComprasPage() {
               )}
 
               <div className="space-y-1.5">
-                <Label htmlFor="compra-proveedor">Proveedor *</Label>
-                <Select value={nuevoProveedorId} onValueChange={setNuevoProveedorId}>
-                  <SelectTrigger id="compra-proveedor">
+                <Label htmlFor="compra-proveedorId">Proveedor *</Label>
+                <Select
+                  value={nuevoProveedorId}
+                  onValueChange={(val) => {
+                    setNuevoProveedorId(val);
+                    setErroresModal((prev) => {
+                      const next = { ...prev };
+                      delete next.proveedorId;
+                      return next;
+                    });
+                  }}
+                >
+                  <SelectTrigger
+                    id="compra-proveedorId"
+                    aria-invalid={Boolean(erroresModal.proveedorId)}
+                    aria-describedby={erroresModal.proveedorId ? "compra-proveedorId-error" : undefined}
+                  >
                     <SelectValue placeholder="Seleccione proveedor" />
                   </SelectTrigger>
                   <SelectContent>
@@ -443,6 +478,11 @@ export function ComprasPage() {
                     ))}
                   </SelectContent>
                 </Select>
+                {erroresModal.proveedorId && (
+                  <p id="compra-proveedorId-error" role="alert" className="text-sm text-destructive">
+                    {erroresModal.proveedorId}
+                  </p>
+                )}
               </div>
 
               <div className="space-y-1.5">
@@ -451,29 +491,70 @@ export function ComprasPage() {
                   id="compra-fecha"
                   type="date"
                   value={nuevaFecha}
-                  onChange={(e) => setNuevaFecha(e.target.value)}
-                  required
+                  onChange={(e) => {
+                    setNuevaFecha(e.target.value);
+                    setErroresModal((prev) => {
+                      const next = { ...prev };
+                      delete next.fecha;
+                      return next;
+                    });
+                  }}
+                  aria-invalid={Boolean(erroresModal.fecha)}
+                  aria-describedby={erroresModal.fecha ? "compra-fecha-error" : undefined}
                 />
+                {erroresModal.fecha && (
+                  <p id="compra-fecha-error" role="alert" className="text-sm text-destructive">
+                    {erroresModal.fecha}
+                  </p>
+                )}
               </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1.5">
-                  <Label htmlFor="compra-tipo">Tipo Comprobante</Label>
+                  <Label htmlFor="compra-comprobanteProveedorTipo">Tipo Comprobante</Label>
                   <Input
-                    id="compra-tipo"
+                    id="compra-comprobanteProveedorTipo"
                     placeholder="Factura A, Remito..."
                     value={nuevoTipoComp}
-                    onChange={(e) => setNuevoTipoComp(e.target.value)}
+                    onChange={(e) => {
+                      setNuevoTipoComp(e.target.value);
+                      setErroresModal((prev) => {
+                        const next = { ...prev };
+                        delete next.comprobanteProveedorTipo;
+                        return next;
+                      });
+                    }}
+                    aria-invalid={Boolean(erroresModal.comprobanteProveedorTipo)}
+                    aria-describedby={erroresModal.comprobanteProveedorTipo ? "compra-tipo-error" : undefined}
                   />
+                  {erroresModal.comprobanteProveedorTipo && (
+                    <p id="compra-tipo-error" role="alert" className="text-sm text-destructive">
+                      {erroresModal.comprobanteProveedorTipo}
+                    </p>
+                  )}
                 </div>
                 <div className="space-y-1.5">
-                  <Label htmlFor="compra-nro">N° Comprobante</Label>
+                  <Label htmlFor="compra-comprobanteProveedorNumero">N° Comprobante</Label>
                   <Input
-                    id="compra-nro"
+                    id="compra-comprobanteProveedorNumero"
                     placeholder="0001-00012345"
                     value={nuevoNroComp}
-                    onChange={(e) => setNuevoNroComp(e.target.value)}
+                    onChange={(e) => {
+                      setNuevoNroComp(e.target.value);
+                      setErroresModal((prev) => {
+                        const next = { ...prev };
+                        delete next.comprobanteProveedorNumero;
+                        return next;
+                      });
+                    }}
+                    aria-invalid={Boolean(erroresModal.comprobanteProveedorNumero)}
+                    aria-describedby={erroresModal.comprobanteProveedorNumero ? "compra-nro-error" : undefined}
                   />
+                  {erroresModal.comprobanteProveedorNumero && (
+                    <p id="compra-nro-error" role="alert" className="text-sm text-destructive">
+                      {erroresModal.comprobanteProveedorNumero}
+                    </p>
+                  )}
                 </div>
               </div>
 
