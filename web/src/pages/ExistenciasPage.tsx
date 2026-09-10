@@ -79,6 +79,7 @@ export function agregarExistenciasPorProducto(
 
 export function ExistenciasPage() {
   const [cargando, setCargando] = useState(true);
+  const [cargandoValorizacion, setCargandoValorizacion] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const [filasRaw, setFilasRaw] = useState<ExistenciaFila[]>([]);
@@ -102,11 +103,22 @@ export function ExistenciasPage() {
 
   const cargarDatos = useCallback(async () => {
     setCargando(true);
+    setCargandoValorizacion(true);
     setError(null);
-    try {
-      // 1. Cargar valorización global
-      const valPromise = valorizacion().catch(() => null);
 
+    // 1. Cargar valorización global en segundo plano (no bloquea la tabla de productos)
+    valorizacion()
+      .then((valRes) => {
+        setDatosValorizacion(valRes);
+      })
+      .catch(() => {
+        setDatosValorizacion(null);
+      })
+      .finally(() => {
+        setCargandoValorizacion(false);
+      });
+
+    try {
       // 2. Traer todas las existencias con limit 100
       let todasLasFilas: ExistenciaFila[] = [];
       let paginaActual = 1;
@@ -125,10 +137,6 @@ export function ExistenciasPage() {
         paginaActual++;
       } while (paginaActual <= totalPaginas && todasLasFilas.length < 2000); // Límite seguro
 
-      const valRes = await valPromise;
-      if (valRes) {
-        setDatosValorizacion(valRes);
-      }
       setFilasRaw(todasLasFilas);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Error al cargar existencias");
@@ -193,7 +201,11 @@ export function ExistenciasPage() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-slate-900">
-              {formatMoneda(datosValorizacion?.totalValorizado ?? 0)}
+              {cargandoValorizacion ? (
+                <Skeleton className="h-8 w-32" />
+              ) : (
+                formatMoneda(datosValorizacion?.totalValorizado ?? 0)
+              )}
             </div>
             <p className="text-xs text-muted-foreground mt-1">
               Valuado al costo efectivo de cada lote

@@ -186,4 +186,24 @@ describe("ExistenciasPage (F2·T1)", () => {
     expect(spy).toHaveBeenCalledTimes(1);
     expect(spy).toHaveBeenCalledWith(expect.objectContaining({ limit: 100 }));
   });
+
+  it("Optimización: valorizacion() no bloquea el renderizado de la tabla de existencias", async () => {
+    let resolverVal: (val: any) => void = () => {};
+    const promesaValLenta = new Promise((resolve) => {
+      resolverVal = resolve;
+    });
+    vi.spyOn(stockApi, "valorizacion").mockImplementation(() => promesaValLenta as any);
+
+    render(
+      <MemoryRouter>
+        <ExistenciasPage />
+      </MemoryRouter>,
+    );
+
+    // La tabla de productos se muestra de inmediato aunque valorizacion siga pendiente
+    expect(await screen.findByText("Amoxicilina 500mg")).toBeInTheDocument();
+    expect(screen.getByText("150")).toBeInTheDocument();
+
+    resolverVal(MOCK_VALORIZACION);
+  });
 });
