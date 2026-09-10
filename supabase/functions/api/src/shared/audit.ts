@@ -44,17 +44,17 @@ interface CallerIdentity {
   role: string;
 }
 
-interface CallerCacheEntry {
-  identity:  CallerIdentity;
-  expiresAt: number;
-}
+// ─── Memoización de identidad de usuario (alcance de request) ────────────────
+// Originalmente existía acá una caché con TTL de 60 segundos.
+// Se eliminó el TTL porque en producción el isolate se destruye y recrea en cada
+// request (requestSeq siempre 1 en producción, medido el 2026-09-10 con commit e8e2740,
+// isolateAgeMs 34 a 48 ms). El TTL de 60s era ilusorio entre requests.
+// Se conserva como memoización en memoria de proceso para el alcance del request
+// actual (igual que db.ts y jwt.ts): un flujo que deja varios asientos para el
+// mismo usuario no repite la consulta a usuarios.
+const callerCache = new Map<string, CallerIdentity>();
 
-// Identidad por usuario: cambia rarísimo (alta/cambio de rol) y solo afecta la
-// ETIQUETA del asiento — el user_id, que es el dato duro, nunca sale de acá.
-const callerCache = new Map<string, CallerCacheEntry>();
-const CALLER_CACHE_TTL_MS = 60_000;
-
-/** Descarta la identidad cacheada de un usuario (o de todos). */
+/** Descarta la identidad memoizada de un usuario (o de todos). */
 export function invalidateCallerCache(userId?: string): void {
   if (userId) callerCache.delete(userId);
   else callerCache.clear();
@@ -71,7 +71,7 @@ async function resolveCaller(
   userId: string,
 ): Promise<CallerIdentity | null> {
   const cached = callerCache.get(userId);
-  if (cached && cached.expiresAt > Date.now()) return cached.identity;
+  if (cached) return cached;
 
   // Una sola consulta con embed (usuarios → roles); respeta RLS como el resto.
   const { data, error } = await db
@@ -92,7 +92,7 @@ async function resolveCaller(
     name: row.username,
     role: role ?? CALLER_UNRESOLVED,
   };
-  callerCache.set(userId, { identity, expiresAt: Date.now() + CALLER_CACHE_TTL_MS });
+  callerCache.set(userId, identity);
   return identity;
 }
 

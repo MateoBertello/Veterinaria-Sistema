@@ -131,7 +131,7 @@ describe("recordAudit — autor del asiento (RN-S3)", () => {
     expect(insert).toHaveBeenCalledWith(expect.objectContaining({ user_id: null }));
   });
 
-  it("cachea la identidad: dos asientos del mismo usuario = una sola consulta", async () => {
+  it("memoiza la identidad en la misma ejecución: dos asientos del mismo usuario = una sola consulta", async () => {
     const { db, single } = makeDb({ username: "admin_leo", roles: { name: "admin" } });
 
     await recordAudit(db, { ...PAYLOAD_BASE, userName: CALLER_UNRESOLVED, userRole: CALLER_UNRESOLVED });
@@ -140,7 +140,7 @@ describe("recordAudit — autor del asiento (RN-S3)", () => {
     expect(single).toHaveBeenCalledTimes(1);
   });
 
-  it("invalidateCallerCache fuerza a releer (cambio de rol o de username)", async () => {
+  it("invalidateCallerCache fuerza a releer (limpieza de memoización)", async () => {
     const { db, single } = makeDb({ username: "admin_leo", roles: { name: "admin" } });
 
     await recordAudit(db, { ...PAYLOAD_BASE, userName: CALLER_UNRESOLVED, userRole: CALLER_UNRESOLVED });
