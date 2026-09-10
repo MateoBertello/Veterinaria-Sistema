@@ -62,6 +62,9 @@ async function postgrest<T>(path: string): Promise<T[]> {
   }
 
   if (!res.ok) {
+    if (res.status === 401 || res.status === 403) {
+      invalidarCacheCatalogosComercial();
+    }
     throw new ApiError("INTERNAL_ERROR", res.status, `Error al cargar catálogo (${res.status})`);
   }
 

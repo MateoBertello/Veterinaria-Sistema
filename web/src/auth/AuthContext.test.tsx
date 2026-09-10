@@ -16,9 +16,25 @@ vi.mock("../lib/session.ts", () => ({
   clearToken: vi.fn(),
 }));
 
+vi.mock("../api/catalogos.ts", () => ({
+  invalidarCacheCatalogos: vi.fn(),
+}));
+
+vi.mock("../api/catalogos-comercial.ts", () => ({
+  invalidarCacheCatalogosComercial: vi.fn(),
+}));
+
+vi.mock("../api/comercial/productos.ts", () => ({
+  invalidarCacheFamilias: vi.fn(),
+}));
+
 import { AuthProvider, useAuth } from "./AuthContext.tsx";
 import { login, fetchMe, logoutRequest } from "../api/auth.ts";
 import { getToken, setSession, clearToken } from "../lib/session.ts";
+import { invalidarCacheCatalogos } from "../api/catalogos.ts";
+import { invalidarCacheCatalogosComercial } from "../api/catalogos-comercial.ts";
+import { invalidarCacheFamilias } from "../api/comercial/productos.ts";
+import * as clientModule from "../api/client.ts";
 
 const mockLogin = vi.mocked(login);
 const mockFetchMe = vi.mocked(fetchMe);
@@ -26,6 +42,9 @@ const mockLogoutRequest = vi.mocked(logoutRequest);
 const mockGetToken = vi.mocked(getToken);
 const mockSetSession = vi.mocked(setSession);
 const mockClearToken = vi.mocked(clearToken);
+const mockInvalidarCacheCatalogos = vi.mocked(invalidarCacheCatalogos);
+const mockInvalidarCacheCatalogosComercial = vi.mocked(invalidarCacheCatalogosComercial);
+const mockInvalidarCacheFamilias = vi.mocked(invalidarCacheFamilias);
 
 const USER: AuthUser = {
   id: "u1",
@@ -89,6 +108,9 @@ describe("AuthProvider", () => {
       expect(screen.getByTestId("status")).toHaveTextContent("anonymous"),
     );
     expect(mockClearToken).toHaveBeenCalled();
+    expect(mockInvalidarCacheCatalogos).toHaveBeenCalled();
+    expect(mockInvalidarCacheCatalogosComercial).toHaveBeenCalled();
+    expect(mockInvalidarCacheFamilias).toHaveBeenCalled();
   });
 
   it("al quedar anónimo limpia SOLO la sesión de tenant, nunca la de plataforma", async () => {
@@ -125,7 +147,7 @@ describe("AuthProvider", () => {
     expect(screen.getByTestId("user")).toHaveTextContent("Admin Demo");
   });
 
-  it("logout limpia el token aunque la llamada remota falle", async () => {
+  it("logout limpia el token aunque la llamada remota falle e invalida catálogos", async () => {
     mockGetToken.mockReturnValue("jwt");
     mockFetchMe.mockResolvedValue(USER);
     mockLogoutRequest.mockRejectedValue(new Error("network"));
@@ -140,5 +162,38 @@ describe("AuthProvider", () => {
       expect(screen.getByTestId("status")).toHaveTextContent("anonymous"),
     );
     expect(mockClearToken).toHaveBeenCalled();
+    expect(mockInvalidarCacheCatalogos).toHaveBeenCalled();
+    expect(mockInvalidarCacheCatalogosComercial).toHaveBeenCalled();
+    expect(mockInvalidarCacheFamilias).toHaveBeenCalled();
+  });
+
+  it("registra un forbidden handler en el cliente que ante 403 invalida catálogos clínicos, comerciales y familias", async () => {
+    let forbiddenCb: (() => void) | null = null;
+    const spy = vi.spyOn(clientModule, "setForbiddenHandler").mockImplementation((cb) => {
+      forbiddenCb = cb;
+    });
+
+    mockGetToken.mockReturnValue("jwt");
+    mockFetchMe.mockResolvedValue(USER);
+
+    renderProvider();
+
+    await waitFor(() =>
+      expect(screen.getByTestId("status")).toHaveTextContent("authenticated"),
+    );
+
+    expect(spy).toHaveBeenCalled();
+    expect(forbiddenCb).toBeTypeOf("function");
+
+    mockInvalidarCacheCatalogos.mockClear();
+    mockInvalidarCacheCatalogosComercial.mockClear();
+    mockInvalidarCacheFamilias.mockClear();
+
+    // Simula llegada de 403 desde el cliente HTTP
+    forbiddenCb!();
+
+    expect(mockInvalidarCacheCatalogos).toHaveBeenCalledTimes(1);
+    expect(mockInvalidarCacheCatalogosComercial).toHaveBeenCalledTimes(1);
+    expect(mockInvalidarCacheFamilias).toHaveBeenCalledTimes(1);
   });
 });

@@ -7,10 +7,12 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { setUnauthorizedHandler } from "../api/client.ts";
+import { setForbiddenHandler, setUnauthorizedHandler } from "../api/client.ts";
 import { fetchMe, login as loginRequest, logoutRequest } from "../api/auth.ts";
 import { clearToken, getToken, setSession } from "../lib/session.ts";
 import { invalidarCacheCatalogos } from "../api/catalogos.ts";
+import { invalidarCacheCatalogosComercial } from "../api/catalogos-comercial.ts";
+import { invalidarCacheFamilias } from "../api/comercial/productos.ts";
 import type { AuthUser, LoginInput } from "../types/index.ts";
 
 type AuthStatus = "loading" | "authenticated" | "anonymous";
@@ -30,6 +32,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<AuthStatus>("loading");
   const [user, setUser] = useState<AuthUser | null>(null);
 
+  // Invalida todos los catálogos en memoria: tenant saliente o permisos revocados (401/403).
+  const descartarCaches = useCallback(() => {
+    invalidarCacheCatalogos();
+    invalidarCacheCatalogosComercial();
+    invalidarCacheFamilias();
+  }, []);
+
   // Estado anónimo: limpia token y usuario. Reutilizado por logout y por el
   // handler de 401 (token vencido) que registra el cliente HTTP. Solo toca la
   // sesión de TENANT: la de plataforma vive en otras claves y tiene su propio
@@ -40,10 +49,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // El catálogo cacheado es el de ESTE tenant: si sobreviviera al cierre de
     // sesión, la próxima clínica que entre en esta misma pestaña vería especies
     // y razas de la anterior antes de que llegue su primera lectura.
-    invalidarCacheCatalogos();
+    descartarCaches();
     setUser(null);
     setStatus("anonymous");
-  }, []);
+  }, [descartarCaches]);
 
   // Bootstrap: si hay token, rehidrata el perfil con /auth/me (y de paso valida
   // que el token siga vigente; si venció → 401 → anónimo). Sin token → anónimo.
@@ -73,12 +82,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, [goAnonymous]);
 
-  // El cliente HTTP avisa cuando un request autenticado recibe 401: cerramos la
-  // sesión; la redirección a /login la resuelve ProtectedRoute reactivamente.
+  // El cliente HTTP avisa cuando un request autenticado recibe 401 (cierre de sesión)
+  // o 403 (permiso revocado / tenant suspendido: invalida catálogos cacheados).
   useEffect(() => {
     setUnauthorizedHandler(goAnonymous);
-    return () => setUnauthorizedHandler(null);
-  }, [goAnonymous]);
+    setForbiddenHandler(descartarCaches);
+    return () => {
+      setUnauthorizedHandler(null);
+      setForbiddenHandler(null);
+    };
+  }, [goAnonymous, descartarCaches]);
 
   const login = useCallback(async (input: LoginInput) => {
     const { token, refreshToken, user: perfil } = await loginRequest(input);

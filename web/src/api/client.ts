@@ -35,6 +35,25 @@ export function setPlatformUnauthorizedHandler(handler: (() => void) | null): vo
   onUnauthorized.platform = handler;
 }
 
+// Handlers de acceso prohibido (403 FORBIDDEN), UNO POR SESIÓN.
+// Se disparan cuando un request autenticado recibe 403: permisos revocados,
+// tenant suspendido o cambio de rol. Invalida cachés de catálogos para que
+// no se sigan sirviendo datos a los que el usuario ya no tiene acceso.
+const onForbidden: Record<SessionScope, (() => void) | null> = {
+  tenant:   null,
+  platform: null,
+};
+
+/** Registra el handler de 403 de la sesión de TENANT (lo hace `AuthProvider`). */
+export function setForbiddenHandler(handler: (() => void) | null): void {
+  onForbidden.tenant = handler;
+}
+
+/** Registra el handler de 403 de la sesión de PLATAFORMA (lo hace `PlatformAuthProvider`). */
+export function setPlatformForbiddenHandler(handler: (() => void) | null): void {
+  onForbidden.platform = handler;
+}
+
 /**
  * A qué sesión pertenece un request, por su path.
  *
@@ -211,6 +230,10 @@ async function request<T>(
     cerrarSesionVencida(scope);
   }
 
+  if (response.status === 403 && token) {
+    onForbidden[scope]?.();
+  }
+
   if (!body) {
     throw new ApiError(
       "INVALID_RESPONSE",
@@ -294,6 +317,9 @@ export async function apiClientBlob(
         return apiClientBlob(path, options, true);
       }
       cerrarSesionVencida(scope);
+    }
+    if (response.status === 403 && token) {
+      onForbidden[scope]?.();
     }
     if (!body || body.success) {
       throw new ApiError("INVALID_RESPONSE", response.status, mensajeFueraDeContrato(response.status));

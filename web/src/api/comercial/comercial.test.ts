@@ -11,6 +11,7 @@ import {
   crearFamilia,
   actualizarFamilia,
   cambiarEstadoFamilia,
+  invalidarCacheFamilias,
   listarConversiones,
   crearConversion,
   actualizarConversion,
@@ -102,11 +103,13 @@ function envelopeFail(code: string, message: string, statusCode = 400) {
 
 beforeEach(() => {
   fetchMock.mockReset();
+  invalidarCacheFamilias();
   vi.stubGlobal("fetch", fetchMock);
   localStorage.setItem("sb-token", "jwt-usuario-comercial");
 });
 
 afterEach(() => {
+  invalidarCacheFamilias();
   vi.unstubAllGlobals();
   localStorage.clear();
 });
@@ -215,6 +218,76 @@ describe("API Comercial - Productos, Familias y Conversiones", () => {
 
     await cambiarEstadoConversion("c-1", true);
     expect(fetchMock.mock.calls[8][0]).toBe("/api/v1/producto-conversiones/c-1/estado");
+  });
+
+  it("cache de familias: dos lecturas con mismos params hacen un solo fetch", async () => {
+    fetchMock.mockResolvedValue(
+      envelopeOk([{ id: "f-1", nombre: "Farmacia" }], { total: 1, page: 1, limit: 100, totalPages: 1 }),
+    );
+
+    const r1 = await listarFamilias({ activo: true, limit: 100 });
+    const r2 = await listarFamilias({ activo: true, limit: 100 });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(r1).toEqual(r2);
+  });
+
+  it("invalidarCacheFamilias() limpia el cache de familias y fuerza nuevo fetch", async () => {
+    fetchMock.mockResolvedValue(
+      envelopeOk([{ id: "f-1", nombre: "Farmacia" }], { total: 1, page: 1, limit: 100, totalPages: 1 }),
+    );
+
+    await listarFamilias({ limit: 100 });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    invalidarCacheFamilias();
+
+    await listarFamilias({ limit: 100 });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("crearFamilia, actualizarFamilia y cambiarEstadoFamilia invalidan el cache de familias", async () => {
+    fetchMock.mockResolvedValue(
+      envelopeOk([{ id: "f-1", nombre: "Farmacia" }], { total: 1, page: 1, limit: 100, totalPages: 1 }),
+    );
+
+    await listarFamilias({ limit: 100 });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    // Alta invalida
+    fetchMock.mockResolvedValueOnce(envelopeOk({ id: "f-2", nombre: "Alimentos" }));
+    await crearFamilia({ nombre: "Alimentos", unidadBaseId: "u-1" });
+
+    await listarFamilias({ limit: 100 });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+
+    // Edición invalida
+    fetchMock.mockResolvedValueOnce(envelopeOk({ id: "f-2", nombre: "Alimentos Balanceados" }));
+    await actualizarFamilia("f-2", { nombre: "Alimentos Balanceados" });
+
+    await listarFamilias({ limit: 100 });
+    expect(fetchMock).toHaveBeenCalledTimes(5);
+
+    // Cambio de estado invalida
+    fetchMock.mockResolvedValueOnce(envelopeOk({ id: "f-2", activo: false }));
+    await cambiarEstadoFamilia("f-2", false);
+
+    await listarFamilias({ limit: 100 });
+    expect(fetchMock).toHaveBeenCalledTimes(7);
+  });
+
+  it("un fallo en listarFamilias no queda cacheado y permite reintentar", async () => {
+    fetchMock.mockRejectedValueOnce(new TypeError("Fallo de red"));
+
+    await expect(listarFamilias({ limit: 100 })).rejects.toThrow();
+
+    fetchMock.mockResolvedValueOnce(
+      envelopeOk([{ id: "f-1", nombre: "Farmacia" }], { total: 1, page: 1, limit: 100, totalPages: 1 }),
+    );
+
+    const res = await listarFamilias({ limit: 100 });
+    expect(res.items).toHaveLength(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });
 

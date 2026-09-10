@@ -83,41 +83,73 @@ export interface ListarFamiliasParams {
   limit?:  number;
 }
 
+const cacheFamilias = new Map<string, Promise<{ items: Familia[]; meta: ApiMeta }>>();
+
+/** Descarta las familias cacheadas en memoria para forzar recarga. */
+export function invalidarCacheFamilias(): void {
+  cacheFamilias.clear();
+}
+
 export function listarFamilias(
   params: ListarFamiliasParams = {},
 ): Promise<{ items: Familia[]; meta: ApiMeta }> {
-  return apiClientList<Familia>(`/familias-producto${buildQuery(params as Record<string, unknown>)}`);
+  const path = `/familias-producto${buildQuery(params as Record<string, unknown>)}`;
+  const enCache = cacheFamilias.get(path);
+  if (enCache) return enCache;
+
+  const pedido = apiClientList<Familia>(path).catch((err) => {
+    // Un fallo no se cachea: la próxima lectura tiene que poder reintentar
+    cacheFamilias.delete(path);
+    throw err;
+  });
+
+  cacheFamilias.set(path, pedido);
+  return pedido;
 }
 
 export function obtenerFamilia(id: string): Promise<Familia> {
   return apiClient<Familia>(`/familias-producto/${id}`);
 }
 
+async function escribirFamilia<T>(op: () => Promise<T>): Promise<T> {
+  try {
+    return await op();
+  } finally {
+    invalidarCacheFamilias();
+  }
+}
+
 export function crearFamilia(input: CrearFamiliaInput): Promise<Familia> {
-  return apiClient<Familia>("/familias-producto", {
-    method: "POST",
-    body:   JSON.stringify(input),
-  });
+  return escribirFamilia(() =>
+    apiClient<Familia>("/familias-producto", {
+      method: "POST",
+      body:   JSON.stringify(input),
+    }),
+  );
 }
 
 export function actualizarFamilia(
   id: string,
   input: ActualizarFamiliaInput,
 ): Promise<Familia> {
-  return apiClient<Familia>(`/familias-producto/${id}`, {
-    method: "PUT",
-    body:   JSON.stringify(input),
-  });
+  return escribirFamilia(() =>
+    apiClient<Familia>(`/familias-producto/${id}`, {
+      method: "PUT",
+      body:   JSON.stringify(input),
+    }),
+  );
 }
 
 export function cambiarEstadoFamilia(
   id: string,
   activo: boolean,
 ): Promise<Familia> {
-  return apiClient<Familia>(`/familias-producto/${id}/estado`, {
-    method: "PATCH",
-    body:   JSON.stringify({ activo }),
-  });
+  return escribirFamilia(() =>
+    apiClient<Familia>(`/familias-producto/${id}/estado`, {
+      method: "PATCH",
+      body:   JSON.stringify({ activo }),
+    }),
+  );
 }
 
 // ─── Conversiones ─────────────────────────────────────────────────────────────

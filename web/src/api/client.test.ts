@@ -11,6 +11,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   apiClient,
   apiClientBlob,
+  setForbiddenHandler,
+  setPlatformForbiddenHandler,
   setPlatformUnauthorizedHandler,
   setUnauthorizedHandler,
 } from "./client.ts";
@@ -57,6 +59,8 @@ afterEach(() => {
   vi.unstubAllGlobals();
   setUnauthorizedHandler(null);
   setPlatformUnauthorizedHandler(null);
+  setForbiddenHandler(null);
+  setPlatformForbiddenHandler(null);
   localStorage.clear();
 });
 
@@ -124,6 +128,37 @@ describe("apiClient — respuestas fuera del contrato", () => {
     await expect(apiClient("/auth/login")).rejects.toBeInstanceOf(ApiError);
 
     expect(onUnauthorized).not.toHaveBeenCalled();
+  });
+
+  it("un 403 con token avisa al forbidden handler registrado del tenant", async () => {
+    const onForbidden = vi.fn();
+    setForbiddenHandler(onForbidden);
+    fetchMock.mockResolvedValue(envelopeError("FORBIDDEN", 403, "Sin permiso"));
+
+    await expect(apiClient("/productos")).rejects.toBeInstanceOf(ApiError);
+
+    expect(onForbidden).toHaveBeenCalledTimes(1);
+  });
+
+  it("sin token, un 403 NO dispara el forbidden handler", async () => {
+    localStorage.clear();
+    const onForbidden = vi.fn();
+    setForbiddenHandler(onForbidden);
+    fetchMock.mockResolvedValue(envelopeError("FORBIDDEN", 403, "Sin permiso"));
+
+    await expect(apiClient("/productos")).rejects.toBeInstanceOf(ApiError);
+
+    expect(onForbidden).not.toHaveBeenCalled();
+  });
+
+  it("un 403 en apiClientBlob también avisa al forbidden handler", async () => {
+    const onForbidden = vi.fn();
+    setForbiddenHandler(onForbidden);
+    fetchMock.mockResolvedValue(envelopeError("FORBIDDEN", 403, "Sin permiso"));
+
+    await expect(apiClientBlob("/auditoria/export")).rejects.toBeInstanceOf(ApiError);
+
+    expect(onForbidden).toHaveBeenCalledTimes(1);
   });
 });
 
