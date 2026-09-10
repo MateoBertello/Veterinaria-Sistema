@@ -42,12 +42,10 @@ export interface PlatformLoginFormValues {
   password: string;
 }
 
-// Discrepancia identificada en inventario: Frontend valida formato email con regex, Backend solo min 1
 export const platformLoginEsquema: EsquemaValidacion<PlatformLoginFormValues> = {
   email: [
     requerido("El email es requerido"),
-    // Discrepancia: Frontend actual valida email() estricto mientras backend solo pide min 1 por seguridad
-    email("Formato de email inválido"),
+    // No se valida formato email por seguridad: cualquier identificador viaja al backend y cuenta para rate limit
   ],
   password: [
     requerido("La contraseña es requerida"),

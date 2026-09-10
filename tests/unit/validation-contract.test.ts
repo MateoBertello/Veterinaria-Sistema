@@ -150,6 +150,7 @@ export function verificarContratoCampo(
   campo: string,
   zodField: any,
   frontendRules?: any[],
+  opciones: { permitirMaxMenor?: boolean } = {},
 ) {
   const zRestr = extraerRestriccionesZod(zodField);
   const fRestr = extraerRestriccionesFrontend(frontendRules);
@@ -166,10 +167,18 @@ export function verificarContratoCampo(
     );
   }
 
-  if (zRestr.maxLongitud !== undefined && fRestr.maxLongitud !== zRestr.maxLongitud) {
-    throw new Error(
-      `[${nombreModulo}] Campo "${campo}" maxLongitud discordante: Backend=${zRestr.maxLongitud}, Frontend=${fRestr.maxLongitud ?? "sin límite"}`,
-    );
+  if (zRestr.maxLongitud !== undefined) {
+    if (opciones.permitirMaxMenor) {
+      if (fRestr.maxLongitud === undefined || fRestr.maxLongitud > zRestr.maxLongitud) {
+        throw new Error(
+          `[${nombreModulo}] Campo "${campo}" maxLongitud excede el límite del backend: Backend=${zRestr.maxLongitud}, Frontend=${fRestr.maxLongitud ?? "sin límite"}`,
+        );
+      }
+    } else if (fRestr.maxLongitud !== zRestr.maxLongitud) {
+      throw new Error(
+        `[${nombreModulo}] Campo "${campo}" maxLongitud discordante: Backend=${zRestr.maxLongitud}, Frontend=${fRestr.maxLongitud ?? "sin límite"}`,
+      );
+    }
   }
 
   if (zRestr.esEmail && !fRestr.esEmail) {
@@ -216,9 +225,9 @@ describe("Test de Contrato: Backend (Zod) vs Frontend (Validaciones)", () => {
     }).toThrowError(/\[Especies\] Campo "name" maxLongitud discordante: Backend=50, Frontend=60/);
   });
 
-  // ─── MAPA DE DISCREPANCIAS (Este bloque fallará hasta que se resuelvan) ───
+  // ─── RESOLUCIÓN DE DISCREPANCIAS DEL PASO 0 ─────────────────────────────
 
-  describe("Discrepancias detectadas en Paso 0", () => {
+  describe("Discrepancias del Paso 0 Resueltas", () => {
     it("Discrepancia 1: Catálogos Especie - 'name' minLongitud 2", () => {
       verificarContratoCampo("Especies", "name", CrearEspecieSchema.shape.name, especieEsquema.name);
     });
@@ -235,8 +244,17 @@ describe("Test de Contrato: Backend (Zod) vs Frontend (Validaciones)", () => {
       verificarContratoCampo("AdminLogin", "email", PlatformLoginSchema.shape.email, platformLoginEsquema.email);
     });
 
-    it("Discrepancia 5: Tenants - 'cuitRut' frontend max(20) vs backend max(50)", () => {
-      verificarContratoCampo("Tenants", "cuitRut", CrearTenantSchema.shape.cuitRut, tenantEsquema.cuitRut);
+    it("Discrepancia 5: Tenants - 'cuitRut' frontend max(20) es subconjunto estricto de backend max(50)", () => {
+      // Regla de negocio: CUIT/RUT nunca superan 20 caracteres (CUIT 11 dígitos, RUT hasta 12).
+      // Backend tiene max(50) por cota técnica laxa. El contrato asume que frontend es subconjunto válido (<= 50).
+      verificarContratoCampo("Tenants", "cuitRut", CrearTenantSchema.shape.cuitRut, tenantEsquema.cuitRut, {
+        permitirMaxMenor: true,
+      });
+      const fRestr = extraerRestriccionesFrontend(tenantEsquema.cuitRut);
+      const zRestr = extraerRestriccionesZod(CrearTenantSchema.shape.cuitRut);
+      expect(fRestr.maxLongitud).toBe(20);
+      expect(zRestr.maxLongitud).toBe(50);
+      expect(fRestr.maxLongitud).toBeLessThanOrEqual(zRestr.maxLongitud!);
     });
 
     it("Discrepancia 7: Compras - 'proveedorId' debe exigir UUID", () => {
@@ -257,7 +275,6 @@ describe("Test de Contrato: Backend (Zod) vs Frontend (Validaciones)", () => {
       verificarContratoCampo("Proveedores", "email", CrearProveedorSchema.shape.email, proveedorEsquema.email);
     });
   });
-});
 
   describe("Contratos Alineados: Productos y Familias", () => {
     it("Producto: codigo, nombre, unidadMedidaId coinciden", () => {
@@ -270,3 +287,54 @@ describe("Test de Contrato: Backend (Zod) vs Frontend (Validaciones)", () => {
       verificarContratoCampo("Familias", "nombre", CrearFamiliaSchema.shape.nombre, familiaEsquema.nombre);
     });
   });
+
+  describe("Contratos Alineados: Turnos", () => {
+    it("Turnos: servicioId, clientId, petId, date, reason, notes coinciden", () => {
+      verificarContratoCampo("Turnos", "servicioId", CrearTurnoSchema.shape.servicioId, turnoEsquema.servicioId);
+      verificarContratoCampo("Turnos", "clientId", CrearTurnoSchema.shape.clientId, turnoEsquema.clientId);
+      verificarContratoCampo("Turnos", "petId", CrearTurnoSchema.shape.petId, turnoEsquema.petId);
+      verificarContratoCampo("Turnos", "date", CrearTurnoSchema.shape.date, turnoEsquema.date);
+      verificarContratoCampo("Turnos", "reason", CrearTurnoSchema.shape.reason, turnoEsquema.reason);
+      verificarContratoCampo("Turnos", "notes", CrearTurnoSchema.shape.notes, turnoEsquema.notes);
+    });
+
+    it("Cancelar Turno: cancellationReason coincide min(1) max(500)", () => {
+      verificarContratoCampo("CancelarTurno", "cancellationReason", CancelarTurnoSchema.shape.cancellationReason, cancelarTurnoEsquema.cancellationReason);
+    });
+  });
+
+  describe("Contratos Alineados: Clientes", () => {
+    it("Cliente: fullName, dniCuit, phone, address, email, observations coinciden", () => {
+      verificarContratoCampo("Clientes", "fullName", CrearClienteSchema.shape.fullName, clienteEsquema.fullName);
+      verificarContratoCampo("Clientes", "dniCuit", CrearClienteSchema.shape.dniCuit, clienteEsquema.dniCuit);
+      verificarContratoCampo("Clientes", "phone", CrearClienteSchema.shape.phone, clienteEsquema.phone);
+      verificarContratoCampo("Clientes", "address", CrearClienteSchema.shape.address, clienteEsquema.address);
+      verificarContratoCampo("Clientes", "email", CrearClienteSchema.shape.email, clienteEsquema.email);
+      verificarContratoCampo("Clientes", "observations", CrearClienteSchema.shape.observations, clienteEsquema.observations);
+    });
+  });
+
+  describe("Contratos Alineados: Mascotas", () => {
+    it("Mascota: name, clientId, especieId, color, alimentoDieta, observations coinciden", () => {
+      verificarContratoCampo("Mascotas", "name", CrearMascotaSchema.shape.name, mascotaEsquema.name);
+      verificarContratoCampo("Mascotas", "clientId", CrearMascotaSchema.shape.clientId, mascotaEsquema.clientId);
+      verificarContratoCampo("Mascotas", "especieId", CrearMascotaSchema.shape.especieId, mascotaEsquema.especieId);
+      verificarContratoCampo("Mascotas", "color", CrearMascotaSchema.shape.color, mascotaEsquema.color);
+      verificarContratoCampo("Mascotas", "alimentoDieta", CrearMascotaSchema.shape.alimentoDieta, mascotaEsquema.alimentoDieta);
+      verificarContratoCampo("Mascotas", "observations", CrearMascotaSchema.shape.observations, mascotaEsquema.observations);
+    });
+  });
+
+  describe("Contratos Alineados: Servicios", () => {
+    it("Servicio: nombre coincide min(3) max(80)", () => {
+      verificarContratoCampo("Servicios", "nombre", CrearServicioSchema.shape.nombre, servicioEsquema.nombre);
+    });
+  });
+
+  describe("Contratos Alineados: Tenants", () => {
+    it("Tenant: nombre, emailContacto coinciden", () => {
+      verificarContratoCampo("Tenants", "nombre", CrearTenantSchema.shape.nombre, tenantEsquema.nombre);
+      verificarContratoCampo("Tenants", "emailContacto", CrearTenantSchema.shape.emailContacto, tenantEsquema.emailContacto);
+    });
+  });
+});

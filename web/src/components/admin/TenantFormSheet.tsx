@@ -170,7 +170,7 @@ export function TenantFormSheet({ open, onOpenChange, tenant, onSaved, crear, ed
                   ? {}
                   : {
                       required: "El CUIT/RUT es requerido",
-                      maxLength: { value: 50, message: "Máximo 50 caracteres" },
+                      maxLength: { value: 20, message: "Máximo 20 caracteres" },
                     }
               }
               render={({ field: { ref: _ref, ...field } }) => (

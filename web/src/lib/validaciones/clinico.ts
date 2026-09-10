@@ -1,6 +1,7 @@
 import {
   alicuotaIva,
   decimalesMaximos,
+  email,
   enValores,
   entero,
   fechaIso,
@@ -10,6 +11,7 @@ import {
   minLongitud,
   minValor,
   noNegativo,
+  regex,
   requerido,
   uuid,
 } from "./reglas.ts";
@@ -26,7 +28,7 @@ export interface EspecieFormValues {
 export const especieEsquema: EsquemaValidacion<EspecieFormValues> = {
   name: [
     requerido("El nombre es requerido"),
-    // Discrepancia: frontend actual no exige minLongitud(2)
+    minLongitud(2, "El nombre requiere al menos 2 caracteres"),
     maxLongitud(60, "Máximo 60 caracteres"),
   ],
   description: [maxLongitud(200, "Máximo 200 caracteres")],
@@ -38,12 +40,11 @@ export interface RazaFormValues {
   description?: string | null;
 }
 
-// Discrepancia identificada en inventario: actualmente en frontend solo valida required (min 1)
 export const razaEsquema: EsquemaValidacion<RazaFormValues> = {
   especieId: [requerido("La especie es requerida"), uuid()],
   name: [
     requerido("El nombre es requerido"),
-    // Discrepancia: frontend actual no exige minLongitud(2)
+    minLongitud(2, "El nombre requiere al menos 2 caracteres"),
     maxLongitud(60, "Máximo 60 caracteres"),
   ],
   description: [maxLongitud(200, "Máximo 200 caracteres")],
@@ -55,11 +56,10 @@ export interface TipoVacunaFormValues {
   mesesRefuerzoSugerido?: number | string | null;
 }
 
-// Discrepancia identificada en inventario: actualmente en frontend solo valida required (min 1)
 export const tipoVacunaEsquema: EsquemaValidacion<TipoVacunaFormValues> = {
   nombre: [
     requerido("El nombre es requerido"),
-    // Discrepancia: frontend actual no exige minLongitud(2)
+    minLongitud(2, "El nombre requiere al menos 2 caracteres"),
     maxLongitud(80, "Máximo 80 caracteres"),
   ],
   especieIds: [requerido("Elegí al menos una especie")],
@@ -115,20 +115,39 @@ export interface ClienteFormValues {
   fullName: string;
   dniCuit: string;
   phone: string;
+  address: string;
   email?: string | null;
-  address?: string | null;
+  observations?: string | null;
 }
 
 export const clienteEsquema: EsquemaValidacion<ClienteFormValues> = {
   fullName: [
     requerido("El nombre completo es requerido"),
-    minLongitud(2, "El nombre requiere al menos 2 caracteres"),
-    maxLongitud(120, "Máximo 120 caracteres"),
+    minLongitud(1, "El nombre completo es requerido"),
+    maxLongitud(150, "Máximo 150 caracteres"),
   ],
-  dniCuit: [requerido("El DNI/CUIT es requerido"), maxLongitud(20, "Máximo 20 caracteres")],
-  phone: [requerido("El teléfono es requerido"), maxLongitud(40, "Máximo 40 caracteres")],
-  email: [maxLongitud(150, "Máximo 150 caracteres")],
-  address: [maxLongitud(200, "Máximo 200 caracteres")],
+  dniCuit: [
+    requerido("El DNI/CUIT es requerido"),
+    minLongitud(1, "El DNI/CUIT es requerido"),
+    maxLongitud(20, "Máximo 20 caracteres"),
+    regex(/^[\d-]+$/, "El DNI/CUIT solo admite dígitos y guiones"),
+  ],
+  phone: [
+    requerido("El teléfono es requerido"),
+    minLongitud(1, "El teléfono es requerido"),
+    maxLongitud(30, "Máximo 30 caracteres"),
+    regex(/^[\d+\-\s]+$/, "El teléfono solo admite números, +, - y espacios"),
+  ],
+  address: [
+    requerido("La dirección es requerida"),
+    minLongitud(1, "La dirección es requerida"),
+    maxLongitud(200, "Máximo 200 caracteres"),
+  ],
+  email: [
+    email("Formato de email inválido"),
+    maxLongitud(150, "Máximo 150 caracteres"),
+  ],
+  observations: [maxLongitud(1000, "Máximo 1000 caracteres")],
 };
 
 export interface MascotaFormValues {

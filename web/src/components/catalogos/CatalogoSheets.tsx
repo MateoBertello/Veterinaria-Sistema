@@ -112,7 +112,11 @@ export function EspecieFormSheet({
             <Controller
               name="name"
               control={control}
-              rules={{ required: "El nombre es requerido", maxLength: { value: 60, message: "Máximo 60 caracteres" } }}
+              rules={{
+                required: "El nombre es requerido",
+                minLength: { value: 2, message: "El nombre requiere al menos 2 caracteres" },
+                maxLength: { value: 60, message: "Máximo 60 caracteres" },
+              }}
               render={({ field }) => (
                 <Input
                   id="especie-name"
@@ -244,7 +248,11 @@ export function RazaFormSheet({
             <Controller
               name="name"
               control={control}
-              rules={{ required: "El nombre es requerido", maxLength: { value: 60, message: "Máximo 60 caracteres" } }}
+              rules={{
+                required: "El nombre es requerido",
+                minLength: { value: 2, message: "El nombre requiere al menos 2 caracteres" },
+                maxLength: { value: 60, message: "Máximo 60 caracteres" },
+              }}
               render={({ field }) => (
                 <Input
                   id="raza-name"
@@ -436,7 +444,11 @@ export function TipoVacunaFormSheet({
             <Controller
               name="nombre"
               control={control}
-              rules={{ required: "El nombre es requerido", maxLength: { value: 80, message: "Máximo 80 caracteres" } }}
+              rules={{
+                required: "El nombre es requerido",
+                minLength: { value: 2, message: "El nombre requiere al menos 2 caracteres" },
+                maxLength: { value: 80, message: "Máximo 80 caracteres" },
+              }}
               render={({ field }) => (
                 <Input
                   id="tipo-nombre"
