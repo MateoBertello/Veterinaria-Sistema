@@ -25,6 +25,7 @@ vi.mock("../auth/AuthContext.tsx", () => ({
 }));
 
 import { DashboardPage } from "./DashboardPage.tsx";
+import { ModulosProvider } from "../auth/ModulosContext.tsx";
 import { obtenerResumenDashboard } from "../api/dashboard.ts";
 import { fetchModulosHabilitados } from "../api/modulos.ts";
 import { listarTurnos } from "../api/turnos.ts";
@@ -58,7 +59,9 @@ function resumen(over: Partial<ResumenDashboard> = {}): ResumenDashboard {
 function renderPage() {
   return render(
     <MemoryRouter>
-      <DashboardPage />
+      <ModulosProvider>
+        <DashboardPage />
+      </ModulosProvider>
     </MemoryRouter>,
   );
 }

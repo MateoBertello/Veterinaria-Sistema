@@ -30,8 +30,8 @@ import { TurnosHoyCard } from "../components/dashboard/TurnosHoyCard.tsx";
 import { OcupacionGuarderiaCard } from "../components/dashboard/OcupacionGuarderiaCard.tsx";
 import { formatFechaLarga, hoyISO } from "../components/turnos/fechas.ts";
 import { useAuth } from "../auth/AuthContext.tsx";
+import { useModulos } from "../auth/ModulosContext.tsx";
 import { obtenerResumenDashboard } from "../api/dashboard.ts";
-import { fetchModulosHabilitados } from "../api/modulos.ts";
 import {
   buildAccesosRapidos,
   metricasVisibles,
@@ -39,7 +39,7 @@ import {
 } from "../lib/dashboard.ts";
 import { getRolMeta } from "../lib/roles.ts";
 import { isSuperAdmin } from "../lib/platform.ts";
-import { ApiError, type ModuloContratado, type ResumenDashboard } from "../types/index.ts";
+import { ApiError, type ResumenDashboard } from "../types/index.ts";
 
 // Ícono y acento de cada métrica (presentación pura; los datos vienen del resumen).
 const METRICA_ICON: Record<MetricaKey, LucideIcon> = {
@@ -84,10 +84,10 @@ const ACCESO_ICON: Record<string, LucideIcon> = {
  */
 export function DashboardPage() {
   const { user } = useAuth();
+  const { modulos } = useModulos();
   const permissions = user?.permissions ?? [];
 
   const [resumen, setResumen] = useState<ResumenDashboard | null>(null);
-  const [modulos, setModulos] = useState<ModuloContratado[]>([]);
   const [loading, setLoading] = useState(true);
   const [error,   setError]   = useState<string | null>(null);
 
@@ -106,16 +106,6 @@ export function DashboardPage() {
   useEffect(() => {
     void cargar();
   }, [cargar]);
-
-  // Módulos habilitados: gatean los accesos rápidos igual que el sidebar (RN-G2).
-  // Si falla, se degradan a los accesos que no dependen de un módulo vendible.
-  useEffect(() => {
-    let activo = true;
-    fetchModulosHabilitados()
-      .then((items) => { if (activo) setModulos(items); })
-      .catch(() => { if (activo) setModulos([]); });
-    return () => { activo = false; };
-  }, []);
 
   const metricas = metricasVisibles(resumen);
   const accesos  = buildAccesosRapidos(permissions, modulos, { superAdmin: isSuperAdmin() });
