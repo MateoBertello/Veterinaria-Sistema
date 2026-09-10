@@ -6,67 +6,20 @@ import { getServiceDb } from "./shared/db.ts";
 import { errorHandler } from "./middleware/errorHandler.ts";
 import { buildCors, securityHeaders } from "./middleware/security.ts";
 import { ok } from "./shared/envelope.ts";
-import { authRouter } from "./modules/auth/auth.controller.ts";
-import { usuariosRouter } from "./modules/usuarios/usuarios.controller.ts";
-import { clientesRouter } from "./modules/clientes/clientes.controller.ts";
-import { mascotasRouter } from "./modules/mascotas/mascotas.controller.ts";
-import { tenantsRouter } from "./modules/admin/tenants.controller.ts";
-import { platformAuthRouter } from "./modules/admin/platformAuth.controller.ts";
-import { modulosRouter } from "./modules/modulos/modulos.controller.ts";
-import { serviciosRouter } from "./modules/servicios/servicios.controller.ts";
-import { configuracionRouter } from "./modules/configuracion/configuracion.controller.ts";
-import { doctoresRouter } from "./modules/doctores/doctores.controller.ts";
-import {
-  horariosDoctorRouter,
-  horariosRouter,
-} from "./modules/horarios/horarios.controller.ts";
-import { auditoriaRouter } from "./modules/auditoria/auditoria.controller.ts";
-import {
-  historialRouter,
-  historialMascotaRouter,
-  adjuntosRouter,
-} from "./modules/historial/historial.controller.ts";
-import { turnosRouter } from "./modules/turnos/turnos.controller.ts";
-import { notificacionesRouter } from "./modules/notificaciones/notificaciones.controller.ts";
-import { cronNotificacionesRouter } from "./modules/notificaciones/cron.controller.ts";
-import { guarderiaRouter } from "./modules/guarderia/guarderia.controller.ts";
-import {
-  planVacunacionRouter,
-  planVacunacionMascotaRouter,
-  avisosVacunacionRouter,
-} from "./modules/vacunacion/vacunacion.controller.ts";
-import { dashboardRouter } from "./modules/dashboard/dashboard.controller.ts";
-import {
-  especiesRouter,
-  razasRouter,
-  tiposVacunaRouter,
-} from "./modules/catalogos/catalogos.controller.ts";
-import {
-  productosRouter,
-  familiasRouter,
-  conversionesRouter,
-} from "./modules/productos/productos.controller.ts";
-import { proveedoresRouter } from "./modules/proveedores/proveedores.controller.ts";
-import {
-  lotesRouter,
-  movimientosRouter,
-  existenciasRouter,
-} from "./modules/stock/stock.controller.ts";
-import { comprasRouter } from "./modules/compras/compras.controller.ts";
-import { cajaRouter } from "./modules/caja/caja.controller.ts";
-import { ventasRouter } from "./modules/ventas/ventas.controller.ts";
-import {
-  ajustesRouter,
-  lotesAjustesRouter,
-  recuentosRouter,
-  devolucionesRouter,
-} from "./modules/ajustes/ajustes.controller.ts";
-import { fraccionamientoRouter } from "./modules/fraccionamiento/fraccionamiento.controller.ts";
-import { consumoRouter } from "./modules/consumo/consumo.controller.ts";
-import { reportesRouter } from "./modules/reportes/reportes.controller.ts";
+import { montarPerezoso } from "./shared/lazyRoute.ts";
+
+// ─── Carga perezosa de los controllers ───────────────────────────────────────
+// El isolate no sobrevive al request (lo confirma la sonda de abajo), así que el
+// grafo de imports se evalúa entero en cada request. Importar los 28 controllers
+// arriba costaba construir services y schemas de TODOS los módulos para atender
+// una sola ruta. Cada `montarPerezoso` difiere ese trabajo al request que de
+// verdad usa el módulo.
+//
+// Lo que sigue eager es lo que todo request necesita igual: el router raíz, el
+// error handler, CORS y los security headers.
 
 // SONDA TEMPORAL: instante en que terminó de evaluarse el grafo de imports.
-// GRAPH_READY - T0 = costo de arranque de los 28 controllers.
+// GRAPH_READY - T0 = costo de arranque del router.
 export const GRAPH_READY = performance.now();
 
 const app = new Hono().basePath("/api/v1");
@@ -98,6 +51,7 @@ app.get("/health", (c) => {
     ts: new Date().toISOString(),
     sonda: {
       // Arranque: se paga una vez por isolate, o en cada request si el isolate es nuevo.
+      // Con carga perezosa esto ya NO incluye los controllers: mide el router pelado.
       graphBootMs:  +(GRAPH_READY - T0).toFixed(2),
       // Antigüedad del isolate al llegar este request. ~0 => isolate recién creado.
       isolateAgeMs: +(tHandlerIn - T0).toFixed(2),
@@ -107,6 +61,9 @@ app.get("/health", (c) => {
       middlewareMs: +(tHandlerIn - tReqIn).toFixed(3),
       handlerMs:    +(performance.now() - tHandlerIn).toFixed(3),
       bootWall:     new Date(T0_WALL).toISOString(),
+      // Módulos que este request llegó a evaluar. Con carga perezosa, /health no
+      // evalúa ninguno; un endpoint de negocio evalúa el suyo y nada más.
+      modulosCargados: modulosCargados(),
     },
   };
 
@@ -115,7 +72,9 @@ app.get("/health", (c) => {
   res.headers.set("Server-Timing",
     `handler;dur=${(performance.now() - tHandlerIn).toFixed(3)}, ` +
     `mw;dur=${(tHandlerIn - tReqIn).toFixed(3)}, ` +
-    `isolate;dur=${(tHandlerIn - T0).toFixed(2)}`);
+    `boot;dur=${(GRAPH_READY - T0).toFixed(2)}, ` +
+    `isolate;dur=${(tHandlerIn - T0).toFixed(2)}, ` +
+    `modulos;desc="${modulosCargados()}"`);
   return res;
 });
 
@@ -205,121 +164,184 @@ app.get("/health/db", async (c) => {
   }));
 });
 
+// ─── SONDA TEMPORAL: qué módulos evaluó este request ────────────────────────
+// Con carga perezosa, la lista de un request de negocio debería tener UN módulo.
+const cargados = new Set<string>();
+function modulosCargados(): string {
+  return [...cargados].join(",") || "ninguno";
+}
+function marcar<T>(nombre: string, mod: T): T {
+  cargados.add(nombre);
+  return mod;
+}
+
 // ─── Módulos habilitados del tenant autenticado (sidebar dinámico) ──────────
-app.route("/modulos-habilitados", modulosRouter);
+montarPerezoso(app, "/modulos-habilitados", async () =>
+  [(marcar("modulos", await import("./modules/modulos/modulos.controller.ts"))).modulosRouter]);
 
 // ─── Dashboard (métricas agregadas del tenant — Etapa 12A) ───────────────────
 // Sin requirePermission ni requireModule: el gate es por métrica, dentro del
 // Service (ver dashboard.controller.ts).
-app.route("/dashboard", dashboardRouter);
+montarPerezoso(app, "/dashboard", async () =>
+  [(marcar("dashboard", await import("./modules/dashboard/dashboard.controller.ts"))).dashboardRouter]);
 
 // ─── Módulo Auth ──────────────────────────────────────────────────────────────
-app.route("/auth", authRouter);
+montarPerezoso(app, "/auth", async () =>
+  [(marcar("auth", await import("./modules/auth/auth.controller.ts"))).authRouter]);
 
 // ─── Módulo Usuarios ──────────────────────────────────────────────────────────
-app.route("/usuarios", usuariosRouter);
+montarPerezoso(app, "/usuarios", async () =>
+  [(marcar("usuarios", await import("./modules/usuarios/usuarios.controller.ts"))).usuariosRouter]);
 
 // ─── Módulo Clientes (Core Cliente-Mascota) ────────────────────────────────────
-app.route("/clientes", clientesRouter);
+montarPerezoso(app, "/clientes", async () =>
+  [(marcar("clientes", await import("./modules/clientes/clientes.controller.ts"))).clientesRouter]);
 
 // ─── Módulo Mascotas (Core Cliente-Mascota) ────────────────────────────────────
-app.route("/mascotas", mascotasRouter);
+// Tres routers aditivos en el mismo prefijo, en el orden histórico: el ABM de
+// mascotas, el historial anidado (/:petId/historial, /:petId/resumen-clinico) y
+// el plan de vacunación anidado (/:petId/plan-vacunacion).
+montarPerezoso(app, "/mascotas", async () => {
+  const [mascotas, historial, vacunacion] = await Promise.all([
+    import("./modules/mascotas/mascotas.controller.ts"),
+    import("./modules/historial/historial.controller.ts"),
+    import("./modules/vacunacion/vacunacion.controller.ts"),
+  ]);
+  marcar("mascotas", 0); marcar("historial", 0); marcar("vacunacion", 0);
+  return [
+    mascotas.mascotasRouter,
+    historial.historialMascotaRouter,
+    vacunacion.planVacunacionMascotaRouter,
+  ];
+});
 
 // ─── Módulo Servicios (Transversal — Etapa 4) ──────────────────────────────────
-app.route("/servicios", serviciosRouter);
+montarPerezoso(app, "/servicios", async () =>
+  [(marcar("servicios", await import("./modules/servicios/servicios.controller.ts"))).serviciosRouter]);
 
 // ─── Configuración de la Clínica (Transversal — Etapa 4) ───────────────────────
-app.route("/configuracion", configuracionRouter);
+montarPerezoso(app, "/configuracion", async () =>
+  [(marcar("configuracion", await import("./modules/configuracion/configuracion.controller.ts"))).configuracionRouter]);
 
 // ─── Catálogos clínicos del tenant (Core transversal) ──────────────────────────
 // Cada clínica administra los suyos. Rutas del tenant, NO bajo /admin: dejaron
 // de ser globales en 20260827000001_catalogos_por_tenant.sql. La LECTURA para
 // los combos sigue yendo por PostgREST directo (excepción del CLAUDE.md); acá
 // vive todo lo que ESCRIBE, que es auditable y pasa por Controller → Service.
-app.route("/especies", especiesRouter);
-app.route("/razas", razasRouter);
-app.route("/tipos-vacuna", tiposVacunaRouter);
+const catalogos = () => marcar("catalogos", import("./modules/catalogos/catalogos.controller.ts"));
+montarPerezoso(app, "/especies",     async () => [(await catalogos()).especiesRouter]);
+montarPerezoso(app, "/razas",        async () => [(await catalogos()).razasRouter]);
+montarPerezoso(app, "/tipos-vacuna", async () => [(await catalogos()).tiposVacunaRouter]);
 
 // ─── Catálogo comercial (módulo vendible stock — Etapa C1) ─────────────────────
-app.route("/productos", productosRouter);
-app.route("/familias-producto", familiasRouter);
-app.route("/producto-conversiones", conversionesRouter);
-app.route("/proveedores", proveedoresRouter);
+const productos = () => marcar("productos", import("./modules/productos/productos.controller.ts"));
+montarPerezoso(app, "/productos",             async () => [(await productos()).productosRouter]);
+montarPerezoso(app, "/familias-producto",     async () => [(await productos()).familiasRouter]);
+montarPerezoso(app, "/producto-conversiones", async () => [(await productos()).conversionesRouter]);
+montarPerezoso(app, "/proveedores", async () =>
+  [(marcar("proveedores", await import("./modules/proveedores/proveedores.controller.ts"))).proveedoresRouter]);
 
 // ─── Stock y Compras (módulo vendible stock — Etapa C2) ────────────────────────
-app.route("/lotes", lotesRouter);
-app.route("/movimientos-stock", movimientosRouter);
-app.route("/existencias", existenciasRouter);
-app.route("/compras", comprasRouter);
+const stock = () => marcar("stock", import("./modules/stock/stock.controller.ts"));
+// /lotes monta dos routers aditivos: el de stock y el de ajustes
+// (/:id/bloquear y /:id/desbloquear).
+montarPerezoso(app, "/lotes", async () => {
+  const [s, a] = await Promise.all([
+    stock(),
+    marcar("ajustes", import("./modules/ajustes/ajustes.controller.ts")),
+  ]);
+  return [s.lotesRouter, a.lotesAjustesRouter];
+});
+montarPerezoso(app, "/movimientos-stock", async () => [(await stock()).movimientosRouter]);
+montarPerezoso(app, "/existencias",       async () => [(await stock()).existenciasRouter]);
+montarPerezoso(app, "/compras", async () =>
+  [(marcar("compras", await import("./modules/compras/compras.controller.ts"))).comprasRouter]);
 
 // ─── Caja (módulo vendible ventas — Etapa C3) ─────────────────────────────────
-app.route("/caja", cajaRouter);
+montarPerezoso(app, "/caja", async () =>
+  [(marcar("caja", await import("./modules/caja/caja.controller.ts"))).cajaRouter]);
 
 // ─── Ventas (módulo vendible ventas — Etapa C4) ───────────────────────────────
-app.route("/ventas", ventasRouter);
+montarPerezoso(app, "/ventas", async () =>
+  [(marcar("ventas", await import("./modules/ventas/ventas.controller.ts"))).ventasRouter]);
 
 // ─── Ajustes, Recuentos y Devoluciones (módulos stock / ventas — Etapa C5) ─────
-app.route("/ajustes", ajustesRouter);
-app.route("/lotes", lotesAjustesRouter); // aditivo: /:id/bloquear y /:id/desbloquear
-app.route("/recuentos", recuentosRouter);
-app.route("/devoluciones", devolucionesRouter);
+const ajustes = () => marcar("ajustes", import("./modules/ajustes/ajustes.controller.ts"));
+montarPerezoso(app, "/ajustes",      async () => [(await ajustes()).ajustesRouter]);
+montarPerezoso(app, "/recuentos",    async () => [(await ajustes()).recuentosRouter]);
+montarPerezoso(app, "/devoluciones", async () => [(await ajustes()).devolucionesRouter]);
 
 // ─── Fraccionamiento (módulo stock — Etapa C6) ─────────────────────────────────
-app.route("/fraccionamiento", fraccionamientoRouter);
+montarPerezoso(app, "/fraccionamiento", async () =>
+  [(marcar("fraccionamiento", await import("./modules/fraccionamiento/fraccionamiento.controller.ts"))).fraccionamientoRouter]);
 
 // ─── Consumo clínico (módulo vendible stock — Etapa C7) ───────────────────────
-app.route("/consumos", consumoRouter);
+montarPerezoso(app, "/consumos", async () =>
+  [(marcar("consumo", await import("./modules/consumo/consumo.controller.ts"))).consumoRouter]);
 
 // ─── Reportes comerciales (módulos stock / ventas — Etapa C8) ────────────────
-app.route("/reportes", reportesRouter);
+montarPerezoso(app, "/reportes", async () =>
+  [(marcar("reportes", await import("./modules/reportes/reportes.controller.ts"))).reportesRouter]);
 
 // ─── Doctores + Horarios de Atención (Transversal — Etapa 4) ───────────────────
 // Doctores: ABM (listar/editar) bajo manage_users.
 // Horarios: franjas anidadas (/doctores/:id/horarios, /doctores/horarios/resumen)
-// y operaciones planas (/horarios/:id) bajo manage_schedules. Hono permite
-// registros aditivos en el mismo prefijo /doctores.
-app.route("/doctores", horariosDoctorRouter);
-app.route("/doctores", doctoresRouter);
-app.route("/horarios", horariosRouter);
+// y operaciones planas (/horarios/:id) bajo manage_schedules. El router de
+// horarios va PRIMERO, como en el montaje aditivo original.
+const horarios = () => marcar("horarios", import("./modules/horarios/horarios.controller.ts"));
+montarPerezoso(app, "/doctores", async () => {
+  const [h, d] = await Promise.all([
+    horarios(),
+    marcar("doctores", import("./modules/doctores/doctores.controller.ts")),
+  ]);
+  return [h.horariosDoctorRouter, d.doctoresRouter];
+});
+montarPerezoso(app, "/horarios", async () => [(await horarios()).horariosRouter]);
 
 // ─── Auditoría (Transversal — Etapa 4) ────────────────────────────────────────
-app.route("/auditoria", auditoriaRouter);
+montarPerezoso(app, "/auditoria", async () =>
+  [(marcar("auditoria", await import("./modules/auditoria/auditoria.controller.ts"))).auditoriaRouter]);
 
 // ─── Historial Clínico (módulo vendible — Etapa 5) ───────────────────────────
-app.route("/historial", historialRouter);
-app.route("/mascotas", historialMascotaRouter); // aditivo: /:petId/historial y /:petId/resumen-clinico
-app.route("/adjuntos", adjuntosRouter);          // descarga de adjuntos por signed URL
+const historial = () => marcar("historial", import("./modules/historial/historial.controller.ts"));
+montarPerezoso(app, "/historial", async () => [(await historial()).historialRouter]);
+montarPerezoso(app, "/adjuntos",  async () => [(await historial()).adjuntosRouter]);
 
 // ─── Turnos (módulo vendible — Etapa 6) ──────────────────────────────────────
 // Notificaciones se registra primero: su prefijo /turnos/notificaciones es más
-// específico que el /turnos/:id de la agenda (Hono permite registros aditivos).
-app.route("/turnos/notificaciones", notificacionesRouter);
-app.route("/turnos", turnosRouter);
+// específico que el /turnos/:id de la agenda. Si no matchea ahí, montarPerezoso
+// devuelve el control y sigue buscando en /turnos.
+montarPerezoso(app, "/turnos/notificaciones", async () =>
+  [(marcar("notificaciones", await import("./modules/notificaciones/notificaciones.controller.ts"))).notificacionesRouter]);
+montarPerezoso(app, "/turnos", async () =>
+  [(marcar("turnos", await import("./modules/turnos/turnos.controller.ts"))).turnosRouter]);
 
 // ─── Guardería (módulo vendible — Etapa 7) ───────────────────────────────────
-app.route("/estadias", guarderiaRouter);
+montarPerezoso(app, "/estadias", async () =>
+  [(marcar("guarderia", await import("./modules/guarderia/guarderia.controller.ts"))).guarderiaRouter]);
 
 // ─── Plan de Vacunación (módulo historial_clinico — Etapa 8) ─────────────────
-// planVacunacionMascotaRouter: aditivo en /mascotas → /:petId/plan-vacunacion
-// planVacunacionRouter:        rutas planas → /plan-vacunacion/:id
-app.route("/mascotas", planVacunacionMascotaRouter);
-app.route("/plan-vacunacion", planVacunacionRouter);
+const vacunacion = () => marcar("vacunacion", import("./modules/vacunacion/vacunacion.controller.ts"));
+montarPerezoso(app, "/plan-vacunacion", async () => [(await vacunacion()).planVacunacionRouter]);
 // avisosVacunacionRouter: disparo manual de avisos → /notificaciones/vacunas/procesar (RN-PV6/PV7)
-app.route("/notificaciones/vacunas", avisosVacunacionRouter);
+montarPerezoso(app, "/notificaciones/vacunas", async () => [(await vacunacion()).avisosVacunacionRouter]);
 
 // ─── Cron de notificaciones (sistema, fuera de tenant — Etapa 9 / RN-NT5) ────────
 // Disparado por pg_cron→pg_net (no por un usuario); protegido por X-Cron-Secret.
 // Barre todos los tenants activos con el módulo licenciado (turnos + vacunas).
-app.route("/internal/notificaciones", cronNotificacionesRouter);
+montarPerezoso(app, "/internal/notificaciones", async () =>
+  [(marcar("cron", await import("./modules/notificaciones/cron.controller.ts"))).cronNotificacionesRouter]);
 
 // ─── Consola Super Admin (fuera de tenant) ──────────────────────────────────────
 // Autenticación de plataforma: login/refresh/logout del Super Admin. Va ANTES de
 // /admin/tenants por legibilidad (son prefijos distintos, el orden no decide el
 // match). Es el único camino que produce un token de plataforma: el Super Admin
 // no tiene fila en `usuarios`, así que /auth/login nunca pudo dárselo.
-app.route("/admin/auth", platformAuthRouter);
+montarPerezoso(app, "/admin/auth", async () =>
+  [(marcar("platformAuth", await import("./modules/admin/platformAuth.controller.ts"))).platformAuthRouter]);
 
 // Montado en /api/v1/admin/tenants; el router NO repite el segmento /tenants.
-app.route("/admin/tenants", tenantsRouter);
+montarPerezoso(app, "/admin/tenants", async () =>
+  [(marcar("tenants", await import("./modules/admin/tenants.controller.ts"))).tenantsRouter]);
 
 export default app;
