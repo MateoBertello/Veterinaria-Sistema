@@ -897,4 +897,40 @@ describe("MostradorPage (F4·T1 & F4·T2)", () => {
     expect(modalContent).not.toMatch(/ticket/i);
     expect(modalContent).not.toMatch(/recibo/i);
   });
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // Optimizaciones de Red / Latencia
+  // ───────────────────────────────────────────────────────────────────────────
+
+  it("Optimización: catálogos y productos salen en paralelo con la verificación de caja (sin cascada)", async () => {
+    const spyFamilias = vi.spyOn(productosApi, "listarFamilias");
+    const spyProductos = vi.spyOn(productosApi, "listarProductos");
+    const spyUnidades = vi.spyOn(catalogosComercialApi, "listarUnidadesMedida");
+
+    renderMostrador();
+
+    // Salen de inmediato en el mount sin esperar a que sesionActual responda
+    expect(spyFamilias).toHaveBeenCalled();
+    expect(spyProductos).toHaveBeenCalled();
+    expect(spyUnidades).toHaveBeenCalled();
+  });
+
+  it("Optimización: servicios vendibles se difiere y no se pide al cargar hasta abrir su pestaña", async () => {
+    const user = userEvent.setup();
+    const spyServicios = vi.spyOn(catalogosComercialApi, "listarServiciosVendibles");
+
+    renderMostrador();
+
+    await screen.findByText("Antiparasitario Canino");
+    // Al montar en la pestaña productos, servicios vendibles no se llamó
+    expect(spyServicios).not.toHaveBeenCalled();
+
+    // Al cambiar a la pestaña Servicios, recién ahí se pide
+    const tabServicios = screen.getByRole("tab", { name: "Servicios" });
+    await user.click(tabServicios);
+
+    await waitFor(() => {
+      expect(spyServicios).toHaveBeenCalledTimes(1);
+    });
+  });
 });

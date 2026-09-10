@@ -225,27 +225,31 @@ export function MostradorPage() {
     return () => clearTimeout(timer);
   }, [search]);
 
-  // 3. Cargar familias, unidades de medida y medios de pago (una sola vez si hay caja)
+  // 3. Cargar familias, unidades de medida y medios de pago en paralelo con la verificación de caja
   useEffect(() => {
-    if (!sesion) return;
+    let activo = true;
     Promise.all([
       listarFamilias({ activo: true, limit: 100 }),
       listarUnidadesMedida(),
       listarMediosPago(),
     ])
       .then(([famRes, uniRes, medRes]) => {
-        setFamilias(famRes.items);
-        setUnidades(uniRes);
-        setMediosPago(medRes);
+        if (activo) {
+          setFamilias(famRes.items);
+          setUnidades(uniRes);
+          setMediosPago(medRes);
+        }
       })
       .catch(() => {
         // Fallback silencioso
       });
-  }, [sesion]);
+    return () => {
+      activo = false;
+    };
+  }, []);
 
-  // 4. Cargar productos según búsqueda y familia
+  // 4. Cargar productos según búsqueda y familia (en paralelo desde el mount)
   useEffect(() => {
-    if (!sesion) return;
     let cancel = false;
     setLoadingProductos(true);
 
@@ -271,11 +275,11 @@ export function MostradorPage() {
     return () => {
       cancel = true;
     };
-  }, [sesion, debouncedSearch, selectedFamiliaId]);
+  }, [debouncedSearch, selectedFamiliaId]);
 
-  // 5. Cargar servicios vendibles
+  // 5. Cargar servicios vendibles solo cuando se abre la pestaña de servicios (diferido)
   useEffect(() => {
-    if (!sesion) return;
+    if (activeTab !== "servicios") return;
     let cancel = false;
     setLoadingServicios(true);
 
@@ -293,7 +297,7 @@ export function MostradorPage() {
     return () => {
       cancel = true;
     };
-  }, [sesion]);
+  }, [activeTab]);
 
   // 6. Cargar mascotas del cliente si se selecciona
   useEffect(() => {
