@@ -43,7 +43,7 @@ function mockDb(opts: { habilitado: boolean }) {
 
   // requireModule ya no consulta tenants (la suspensión la cubre requireActiveTenant):
   // única llamada → query de modulos_contratados.
-  db.single.mockResolvedValueOnce({
+  db.single.mockResolvedValue({
     data: opts.habilitado ? { habilitado: true } : null,
     error: opts.habilitado ? null : { message: "not found" },
   });
@@ -82,53 +82,22 @@ describe("requireModule middleware", () => {
     expect(body.error.code).toBe("MODULE_NOT_LICENSED");
   });
 
-  it("usa la caché en la segunda llamada (sin re-consultar DB)", async () => {
+  it("consulta la base en cada llamada (sin caché en memoria, isolate efímero)", async () => {
+    mockDb({ habilitado: true });
     mockDb({ habilitado: true });
     const app = buildApp("historial_clinico");
 
     // Primera llamada → hit DB
     await sendReq(app);
-    const callsAfterFirst = mockGetDb.mock.calls.length;
+    expect(mockGetDb).toHaveBeenCalledTimes(1);
 
-    // Segunda llamada → hit caché (no llama a getDb de nuevo)
+    // Segunda llamada → hit DB de nuevo (no hay caché en memoria)
     await sendReq(app);
-    const callsAfterSecond = mockGetDb.mock.calls.length;
-
-    expect(callsAfterSecond).toBe(callsAfterFirst); // sin nuevas llamadas
+    expect(mockGetDb).toHaveBeenCalledTimes(2);
   });
 
-  it("re-consulta DB después de invalidar la caché", async () => {
-    // Setup: módulo habilitado, cachear
-    mockDb({ habilitado: true });
-    const app = buildApp("historial_clinico");
-    await sendReq(app);
-
-    // Invalidar e intentar de nuevo con módulo deshabilitado
-    invalidateModuleCache(TENANT_ID, "historial_clinico");
-    vi.clearAllMocks();
-    mockDb({ habilitado: false });
-
-    const res = await sendReq(app);
-    expect(res.status).toBe(403);
-    expect(mockGetDb).toHaveBeenCalled(); // sí llamó a DB de nuevo
-  });
-
-  it("re-consulta DB después de que el TTL expira", async () => {
-    mockDb({ habilitado: true });
-    const app = buildApp("historial_clinico");
-    await sendReq(app);
-
-    // Simular expiración del TTL adelantando Date.now 61 segundos
-    const realNow = Date.now;
-    vi.spyOn(Date, "now").mockReturnValue(realNow() + 61_000);
-
-    vi.clearAllMocks();
-    mockDb({ habilitado: false });
-
-    const res = await sendReq(app);
-    expect(mockGetDb).toHaveBeenCalled(); // re-consultó DB
-    expect(res.status).toBe(403);
-
-    vi.restoreAllMocks();
+  it("invalidateModuleCache es un no-op seguro", () => {
+    expect(() => invalidateModuleCache(TENANT_ID)).not.toThrow();
+    expect(() => invalidateModuleCache(TENANT_ID, "historial_clinico")).not.toThrow();
   });
 });

@@ -252,3 +252,40 @@ La tabla de historial de [`FraccionamientoPage`](file:///home/mateo/Veterinaria-
 
 **Por qué no se corrige ahora:**
 La corrección es una migración que amplíe la vista, más el mapeo en el Service: backend, superficie cerrada para este trabajo. Queda anotado que el dato existe en `movimientos_stock` y que la vista es el único punto donde se pierde.
+
+---
+
+## Decisión de arquitectura — No partir la Edge Function por `pdf-lib` y `xlsx`
+
+**Propuesta evaluada:**
+Partir la Edge Function monolítica de la API en dos funciones separadas (por ejemplo, `api` para la operativa diaria y una función dedicada para reportes pesados), extrayendo las librerías `pdf-lib` y `xlsx` bajo la presunción de que su peso penalizaba el arranque en frío (*cold start*) del router principal.
+
+**Decisión tomada:**
+**El corte NO se hace.** Se descarta de forma definitiva la partición de la Edge Function. Se conserva la arquitectura de función única con carga perezosa de controllers (`montarPerezoso`) e importación dinámica de librerías pesadas (`await import("pdf-lib")` / `await import("xlsx")` dentro de `buildPdf` y `buildXlsx`).
+
+**Evidencia empírica de producción (medición del 2026-09-10, commit `e8e2740`):**
+Cinco muestras consecutivas tomadas directamente en el entorno de producción con la sonda de latencia arrojaron:
+* `graphBootMs`: 23.93 · 29.31 · 25.90 · 30.95 · 21.95 (mediana: **~26 ms**)
+* `isolateAgeMs`: 34 a 48 ms
+* `requestSeq`: 1 en las cinco muestras
+* `middlewareMs`: 0.786 ms
+* `handlerMs`: 0.079 ms
+* `modulosCargados`: "ninguno" (en `/health`; en rutas de negocio evalúa únicamente su propio controller)
+
+**Fundamento técnico:**
+1. **El isolate se recrea en cada request:** `requestSeq` siempre 1 e `isolateAgeMs` de 34–48 ms confirman que el runtime no preserva isolates entre llamadas en el patrón de tráfico actual.
+2. **El arranque del código propio insume apenas ~26 ms:**
+   Todo el código de la aplicación (arranque de Hono, router raíz, middlewares de seguridad transversales y evaluación del controller demandado) suma únicamente **~27 ms**.
+   Los restantes **~350 ms** hasta el total percibido por el cliente ocurren íntegramente en el gateway de la infraestructura y en el aprovisionamiento del worker por parte de Deno Deploy / Supabase, *antes* de que se ejecute la primera línea de código TypeScript de la aplicación.
+3. **Relación costo-beneficio desfavorable:**
+   Con un arranque propio de 26 ms, partir la función implicaría:
+   - Duplicar el pipeline de CI/CD y despliegue de Edge Functions.
+   - Gestionar y sincronizar un segundo juego de secrets de entorno (`SUPABASE_SERVICE_ROLE_KEY`, `RESEND_API_KEY`, etc.).
+   - Añadir una nueva entrada y configuración de CORS.
+   - Manejar dos orígenes o URLs base en el cliente web o en el proxy reverso.
+   Todo ese costo operativo se pagaría a cambio de arañar milisegundos imperceptibles en el arranque, sin alterar en absoluto los ~350 ms previos de la infraestructura.
+4. **Desacople ya resuelto en tiempo de ejecución:**
+   Tanto `pdf-lib` como `xlsx` ya se importan perezosamente dentro de sus métodos de generación (`historial.service.ts`), y la carga de controllers es diferida (`montarPerezoso`). Un request comercial estándar nunca evalúa ni compila estas librerías.
+
+Queda asentado formalmente para descartar futuras iniciativas de partición sin nueva evidencia de infraestructura.
+

@@ -18,7 +18,15 @@ import { montarPerezoso } from "./shared/lazyRoute.ts";
 // Lo que sigue eager es lo que todo request necesita igual: el router raíz, el
 // error handler, CORS y los security headers.
 
-// SONDA TEMPORAL: instante en que terminó de evaluarse el grafo de imports.
+// ─── Sonda de latencia (condicionada a ENABLE_LATENCY_PROBE) ────────────────
+// Por defecto inactiva (false) en producción para costo cero y no exponer
+// métricas internas de infraestructura a clientes públicos sin autenticación.
+// Se activa seteando la variable de entorno ENABLE_LATENCY_PROBE="true" en Supabase.
+export const SONDA_ACTIVA =
+  (typeof process !== "undefined" && process.env?.["ENABLE_LATENCY_PROBE"] === "true") ||
+  (globalThis as Record<string, unknown>)?.["ENABLE_LATENCY_PROBE"] === "true";
+
+// SONDA: instante en que terminó de evaluarse el grafo de imports.
 // GRAPH_READY - T0 = costo de arranque del router.
 export const GRAPH_READY = performance.now();
 
@@ -30,9 +38,11 @@ app.onError(errorHandler);
 // CORS con allowlist explícita + security headers en TODA respuesta. Se registran
 // antes de los routers: el preflight OPTIONS lo resuelve buildCors() sin llegar al
 // tenantContext de cada módulo.
-// SONDA TEMPORAL: primer borde del recorrido dentro del isolate.
+// SONDA: primer borde del recorrido dentro del isolate (solo si la sonda está activa).
 app.use("*", async (c, next) => {
-  c.set("tReqIn", performance.now());
+  if (SONDA_ACTIVA) {
+    c.set("tReqIn", performance.now());
+  }
   await next();
 });
 
@@ -41,7 +51,12 @@ app.use("*", securityHeaders);
 
 // ─── Endpoint público de salud ─────────────────────────────────────────────
 app.get("/health", (c) => {
-  // SONDA TEMPORAL DE LATENCIA — quitar cuando termine la medición.
+  // Cuando la sonda está inactiva (por defecto): respuesta estándar sin métricas internas
+  if (!SONDA_ACTIVA) {
+    return c.json(ok({ status: "ok" }));
+  }
+
+  // Sonda activa (ENABLE_LATENCY_PROBE=true)
   const tHandlerIn = performance.now();
   const seq        = contarRequest();
   const tReqIn     = (c.get("tReqIn") as number | undefined) ?? tHandlerIn;
@@ -78,12 +93,15 @@ app.get("/health", (c) => {
   return res;
 });
 
-// ─── SONDA TEMPORAL: capas 2 y 3 ──────────────────────────────────────────
-// Quitar junto con el resto de la sonda cuando termine la medición.
+// ─── SONDA: capas 2 y 3 (solo disponibles si ENABLE_LATENCY_PROBE=true) ──────
 // Capa 2: JWT sin base. Aísla el costo de verificar la firma (y de resolver el
 // JWKS, que se cachea en memoria del isolate: si el isolate es nuevo por
 // request, ese caché nunca pega y hay un fetch de red escondido acá).
 app.get("/health/jwt", async (c) => {
+  if (!SONDA_ACTIVA) {
+    return c.notFound();
+  }
+
   const tIn    = performance.now();
   const seq    = contarRequest();
   const tReqIn = c.get("tReqIn") ?? tIn;
@@ -122,6 +140,10 @@ app.get("/health/jwt", async (c) => {
 // Sin tenantContext: el tenant se pasa por query solo para la sonda y NUNCA se
 // usa para devolver datos — se devuelven tiempos, no filas.
 app.get("/health/db", async (c) => {
+  if (!SONDA_ACTIVA) {
+    return c.notFound();
+  }
+
   const tIn    = performance.now();
   const seq    = contarRequest();
   const tReqIn = c.get("tReqIn") ?? tIn;
@@ -164,14 +186,15 @@ app.get("/health/db", async (c) => {
   }));
 });
 
-// ─── SONDA TEMPORAL: qué módulos evaluó este request ────────────────────────
-// Con carga perezosa, la lista de un request de negocio debería tener UN módulo.
+// ─── SONDA: qué módulos evaluó este request (solo si está activa) ────────────
 const cargados = new Set<string>();
 function modulosCargados(): string {
   return [...cargados].join(",") || "ninguno";
 }
 function marcar<T>(nombre: string, mod: T): T {
-  cargados.add(nombre);
+  if (SONDA_ACTIVA) {
+    cargados.add(nombre);
+  }
   return mod;
 }
 
